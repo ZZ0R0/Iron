@@ -52,6 +52,7 @@ pub enum TokenKind {
     Match,
     Trait,
     Impl,
+    Inout,
     If,
     Elif,
     Else,
@@ -127,6 +128,8 @@ pub enum Type {
     Generic(String),
     /// Application de type générique : `Name[args]` → `Name<args>` (V3).
     App(String, Vec<Type>),
+    /// `inout x: T` → `&mut T` (I3 — partage mutable explicite, V5).
+    Ref(Box<Type>),
 }
 
 // ---------------------------------------------------------------- AST (10200, §4.2)
@@ -288,6 +291,7 @@ pub type OwnershipMap = HashMap<NodeId, Disposition>;
 pub enum ParamMode {
     ByValue,
     ByRef,
+    InOut,
 }
 
 /// `fn_name → modes de ses paramètres`.

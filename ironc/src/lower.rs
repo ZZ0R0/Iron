@@ -14,7 +14,7 @@ use std::str::FromStr;
 pub fn lower(
     ast: &Ast,
     types: &TypeMap,
-    _own: &OwnershipMap,
+    own: &OwnershipMap,
     param_modes: &ParamModes,
     bindings: &Bindings,
 ) -> (TokenStream, SourceMap, Vec<Span>) {
@@ -26,7 +26,16 @@ pub fn lower(
             _ => None,
         })
         .collect();
-    let mut cx = Cx { sm: SourceMap::default(), types, param_modes, bindings, enums, audit: Vec::new() };
+    let mut cx = Cx {
+        sm: SourceMap::default(),
+        types,
+        param_modes,
+        bindings,
+        enums,
+        own,
+        inout_params: HashSet::new(),
+        audit: Vec::new(),
+    };
     let items: Vec<TokenStream> = ast.items.iter().map(|it| cx.item(it)).collect();
     let body = quote! { #(#items)* };
     let file = quote! {
@@ -49,6 +58,8 @@ struct Cx<'a> {
     param_modes: &'a ParamModes,
     bindings: &'a Bindings,
     enums: HashSet<String>,
+    own: &'a OwnershipMap,
+    inout_params: HashSet<String>,
     audit: Vec<Span>,
 }
 
@@ -78,11 +89,14 @@ impl Cx<'_> {
                         let ty = lower_type(t);
                         match mode_of(self.param_modes, name, i) {
                             ParamMode::ByRef => quote! { #pid: &#ty },
-                            ParamMode::ByValue => quote! { #pid: #ty },
+                            // InOut : `ty` est déjà `&mut T` (lower_type(Ref)).
+                            ParamMode::ByValue | ParamMode::InOut => quote! { #pid: #ty },
                         }
                     })
                     .collect();
                 let param_names: HashSet<String> = params.iter().map(|(n, _)| n.clone()).collect();
+                self.inout_params =
+                    params.iter().filter_map(|(n, t)| matches!(t, Type::Ref(_)).then(|| n.clone())).collect();
                 let mut locals: Vec<(String, Type)> = Vec::new();
                 collect_locals(body, &param_names, self.types, &mut locals);
                 let decls: Vec<TokenStream> = locals
@@ -188,6 +202,8 @@ impl Cx<'_> {
             None => quote! { fn #mid( #sig_params ) #ret_ts; },
             Some(body) => {
                 let param_names: HashSet<String> = m.params.iter().map(|(n, _)| n.clone()).collect();
+                self.inout_params =
+                    m.params.iter().filter_map(|(n, t)| matches!(t, Type::Ref(_)).then(|| n.clone())).collect();
                 let mut locals: Vec<(String, Type)> = Vec::new();
                 collect_locals(body, &param_names, self.types, &mut locals);
                 let decls: Vec<TokenStream> = locals
@@ -215,7 +231,11 @@ impl Cx<'_> {
             StmtKind::Let { name, value } => {
                 let v = self.value(value);
                 let id = format_ident!("{}", name);
-                quote! { #id = #v; }
+                if self.inout_params.contains(name) {
+                    quote! { (*#id) = #v; }
+                } else {
+                    quote! { #id = #v; }
+                }
             }
             StmtKind::Assign { target, value } => {
                 let v = self.value(value);
@@ -337,6 +357,9 @@ impl Cx<'_> {
                     return quote! { self };
                 }
                 let id = format_ident!("{}", n);
+                if matches!(self.type_of(e), Type::Ref(_)) {
+                    return quote! { (*#id) };
+                }
                 quote! { #id }
             }
             ExprKind::Field { base, name } => {
@@ -381,7 +404,16 @@ impl Cx<'_> {
                     return quote! { self };
                 }
                 let id = format_ident!("{}", n);
-                if is_copy(&self.type_of(e)) {
+                // `inout` (Ref) : déréférencer (I3).
+                if let Type::Ref(inner) = self.type_of(e) {
+                    return if is_copy(&inner) {
+                        quote! { (*#id) }
+                    } else {
+                        quote! { (*#id).clone() }
+                    };
+                }
+                // I1 : `Copy` ou `Move` (dernière utilisation, V5) → pas de clone.
+                if is_copy(&self.type_of(e)) || self.own.get(&e.id) == Some(&Disposition::Move) {
                     quote! { #id }
                 } else {
                     self.audit.push(e.span);
@@ -568,15 +600,21 @@ impl Cx<'_> {
             .iter()
             .enumerate()
             .map(|(i, x)| {
-                let byref = modes
+                let mode = modes
                     .as_ref()
                     .and_then(|m| m.get(i))
-                    .map_or(false, |m| *m == ParamMode::ByRef);
-                if byref {
-                    let p = self.place(x);
-                    quote! { &#p }
-                } else {
-                    self.value(x)
+                    .copied()
+                    .unwrap_or(ParamMode::ByValue);
+                match mode {
+                    ParamMode::ByRef => {
+                        let p = self.place(x);
+                        quote! { &#p }
+                    }
+                    ParamMode::InOut => {
+                        let p = self.place(x);
+                        quote! { &mut #p }
+                    }
+                    ParamMode::ByValue => self.value(x),
                 }
             })
             .collect();
@@ -716,6 +754,10 @@ fn lower_type(t: &Type) -> TokenStream {
             let id = format_ident!("{}", name);
             let a: Vec<TokenStream> = args.iter().map(lower_type).collect();
             quote! { #id< #(#a),* > }
+        }
+        Type::Ref(t) => {
+            let inner = lower_type(t);
+            quote! { &mut #inner }
         }
     }
 }

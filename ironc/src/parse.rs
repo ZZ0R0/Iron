@@ -123,9 +123,13 @@ impl Parser {
         self.expect(&TokenKind::LParen, "`(`")?;
         let mut params = Vec::new();
         while !self.is(&TokenKind::RParen) {
+            let is_inout = self.eat(&TokenKind::Inout);
             let pname = self.ident()?;
             self.expect(&TokenKind::Colon, "`:` (type de paramètre requis en V0)")?;
-            let pty = self.parse_type()?;
+            let mut pty = self.parse_type()?;
+            if is_inout {
+                pty = Type::Ref(Box::new(pty));
+            }
             params.push((pname, pty));
             if !self.eat(&TokenKind::Comma) {
                 break;
@@ -283,9 +287,14 @@ impl Parser {
         }
         let mut params = Vec::new();
         while !self.is(&TokenKind::RParen) {
+            let is_inout = self.eat(&TokenKind::Inout);
             let pn = self.ident()?;
             self.expect(&TokenKind::Colon, "`:`")?;
-            params.push((pn, self.parse_type()?));
+            let mut pt = self.parse_type()?;
+            if is_inout {
+                pt = Type::Ref(Box::new(pt));
+            }
+            params.push((pn, pt));
             if !self.eat(&TokenKind::Comma) {
                 break;
             }

@@ -122,16 +122,25 @@ pub(crate) fn expr(cx: &mut Inf, e: &Expr, scope: &Scope) -> Type {
                     _ => cx.sigs.get(name).map(|(_, r)| r.clone()).unwrap_or(Type::Unit),
                 },
                 _ => {
-                    // construction de variante d'enum : `Enum.Variant(...)`
-                    if let ExprKind::Field { base, .. } = &callee.kind {
+                    if let ExprKind::Field { base, name } = &callee.kind {
+                        let bt = expr(cx, base, scope);
+                        // construction de variante d'enum : `Enum.Variant(...)`
                         if let ExprKind::Var(ename) = &base.kind {
                             if cx.enums.contains_key(ename) {
                                 return cx.set(e.id, Type::Enum(ename.clone()));
                             }
                         }
+                        // appel de méthode : type de retour de l'`impl` (V5/DX3)
+                        if let Type::Struct(tn) = &bt {
+                            if let Some(ret) = cx.methods.get(&(tn.clone(), name.clone())) {
+                                return cx.set(e.id, ret.clone());
+                            }
+                        }
+                        Type::Unit
+                    } else {
+                        expr(cx, callee, scope);
+                        Type::Unit
                     }
-                    expr(cx, callee, scope);
-                    Type::Unit
                 }
             }
         }

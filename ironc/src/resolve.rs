@@ -10,6 +10,7 @@ use std::collections::HashSet;
 
 pub fn resolve(ast: &Ast, _types: &TypeMap) -> (OwnershipMap, ParamModes) {
     let mut modes = ParamModes::new();
+    let mut own = OwnershipMap::new();
     for it in &ast.items {
         if let ItemKind::Fn { name, params, body, .. } = &it.kind {
             let mut escaped: HashSet<String> = HashSet::new();
@@ -19,7 +20,9 @@ pub fn resolve(ast: &Ast, _types: &TypeMap) -> (OwnershipMap, ParamModes) {
             let pm = params
                 .iter()
                 .map(|(n, t)| {
-                    if is_copy(t) || escaped.contains(n) {
+                    if matches!(t, Type::Ref(_)) {
+                        ParamMode::InOut
+                    } else if is_copy(t) || escaped.contains(n) {
                         ParamMode::ByValue
                     } else {
                         ParamMode::ByRef
@@ -27,10 +30,117 @@ pub fn resolve(ast: &Ast, _types: &TypeMap) -> (OwnershipMap, ParamModes) {
                 })
                 .collect();
             modes.insert(name.clone(), pm);
+            compute_moves(body, &mut own);
+        }
+        if let ItemKind::Impl { methods, .. } = &it.kind {
+            for m in methods {
+                if let Some(body) = &m.body {
+                    compute_moves(body, &mut own);
+                }
+            }
         }
     }
-    // OwnershipMap (Move/Borrow locaux) : raffinement ultérieur — vide ⇒ clone-default (I1).
-    (OwnershipMap::new(), modes)
+    (own, modes)
+}
+
+/// I1 — `move` à la dernière utilisation. Heuristique **single-use** saine : une variable lue **une seule
+/// fois** en position valeur, **hors boucle**, est `Move` (sa lecture est forcément la dernière) ; sinon
+/// clone-fallback. Conservateur (rate des moves multi-lectures), jamais incorrect.
+fn compute_moves(body: &[Stmt], own: &mut OwnershipMap) {
+    let mut reads: Vec<(String, NodeId, bool)> = Vec::new();
+    for s in body {
+        creads_stmt(s, false, &mut reads);
+    }
+    let mut count: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for (n, _, _) in &reads {
+        *count.entry(n.as_str()).or_insert(0) += 1;
+    }
+    for (n, id, in_loop) in &reads {
+        if !in_loop && count[n.as_str()] == 1 {
+            own.insert(*id, Disposition::Move);
+        }
+    }
+}
+
+fn creads_stmt(s: &Stmt, in_loop: bool, out: &mut Vec<(String, NodeId, bool)>) {
+    match &s.kind {
+        StmtKind::Let { value, .. } => creads(value, Pos::Value, in_loop, out),
+        StmtKind::Assign { target, value } => {
+            creads(target, Pos::Borrow, in_loop, out);
+            creads(value, Pos::Value, in_loop, out);
+        }
+        StmtKind::If { cond, then, elifs, els } => {
+            creads(cond, Pos::Borrow, in_loop, out);
+            then.iter().for_each(|s| creads_stmt(s, in_loop, out));
+            for (c, b) in elifs {
+                creads(c, Pos::Borrow, in_loop, out);
+                b.iter().for_each(|s| creads_stmt(s, in_loop, out));
+            }
+            els.iter().for_each(|s| creads_stmt(s, in_loop, out));
+        }
+        StmtKind::While { cond, body } => {
+            creads(cond, Pos::Borrow, in_loop, out);
+            body.iter().for_each(|s| creads_stmt(s, true, out));
+        }
+        StmtKind::For { iter, body, .. } => {
+            creads(iter, Pos::Borrow, in_loop, out);
+            body.iter().for_each(|s| creads_stmt(s, true, out));
+        }
+        StmtKind::Return { value } => {
+            if let Some(e) = value {
+                creads(e, Pos::Value, in_loop, out);
+            }
+        }
+        StmtKind::ExprStmt(e) => creads(e, Pos::Value, in_loop, out),
+        StmtKind::Match { scrutinee, arms } => {
+            creads(scrutinee, Pos::Value, in_loop, out);
+            for arm in arms {
+                arm.body.iter().for_each(|s| creads_stmt(s, in_loop, out));
+            }
+        }
+        StmtKind::Break | StmtKind::Continue | StmtKind::Pass | StmtKind::RustBlock(_) => {}
+    }
+}
+
+fn creads(e: &Expr, pos: Pos, in_loop: bool, out: &mut Vec<(String, NodeId, bool)>) {
+    match &e.kind {
+        ExprKind::Var(n) => {
+            if pos == Pos::Value && n != "self" && n != "none" {
+                out.push((n.clone(), e.id, in_loop));
+            }
+        }
+        ExprKind::Field { base, .. } => creads(base, Pos::Borrow, in_loop, out),
+        ExprKind::Index { base, idx } => {
+            creads(base, Pos::Borrow, in_loop, out);
+            creads(idx, Pos::Value, in_loop, out);
+        }
+        ExprKind::Unary { expr, .. } => creads(expr, Pos::Value, in_loop, out),
+        ExprKind::Binary { op, lhs, rhs } => {
+            let p = if matches!(op, BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge) {
+                Pos::Borrow
+            } else {
+                Pos::Value
+            };
+            creads(lhs, p, in_loop, out);
+            creads(rhs, p, in_loop, out);
+        }
+        ExprKind::Call { callee, args } => {
+            for a in args {
+                creads(a, Pos::Value, in_loop, out);
+            }
+            if let ExprKind::Field { base, .. } = &callee.kind {
+                creads(base, Pos::Borrow, in_loop, out);
+            }
+        }
+        ExprKind::StructLit { fields, .. } => fields.iter().for_each(|(_, v)| creads(v, Pos::Value, in_loop, out)),
+        ExprKind::ListLit { items } => items.iter().for_each(|x| creads(x, Pos::Value, in_loop, out)),
+        ExprKind::DictLit { pairs } => pairs.iter().for_each(|(k, v)| {
+            creads(k, Pos::Value, in_loop, out);
+            creads(v, Pos::Value, in_loop, out);
+        }),
+        ExprKind::Try { inner } => creads(inner, Pos::Value, in_loop, out),
+        ExprKind::Lit(_) => {}
+    }
 }
 
 fn is_copy(t: &Type) -> bool {

@@ -16,11 +16,14 @@ pub(crate) type Sigs = HashMap<String, (Vec<Type>, Type)>;
 pub(crate) type Structs = HashMap<String, Vec<(String, Type)>>;
 /// Enums : nom → variantes (nom de variante → types des champs tuple).
 pub(crate) type Enums = HashMap<String, Vec<(String, Vec<Type>)>>;
+/// Méthodes d'`impl` : (type, méthode) → type de retour (V5, inférence d'appel de méthode).
+pub(crate) type Methods = HashMap<(String, String), Type>;
 
 pub fn infer(ast: &Ast, bindings: &Bindings) -> TypeMap {
     let mut sigs = Sigs::new();
     let mut structs = Structs::new();
     let mut enums = Enums::new();
+    let mut methods_tbl = Methods::new();
     for it in &ast.items {
         match &it.kind {
             ItemKind::Fn { name, params, ret, .. } => {
@@ -32,7 +35,12 @@ pub fn infer(ast: &Ast, bindings: &Bindings) -> TypeMap {
             ItemKind::Enum { name, variants, .. } => {
                 enums.insert(name.clone(), variants.clone());
             }
-            ItemKind::Trait { .. } | ItemKind::Impl { .. } => {}
+            ItemKind::Trait { .. } => {}
+            ItemKind::Impl { type_name, methods, .. } => {
+                for m in methods {
+                    methods_tbl.insert((type_name.clone(), m.name.clone()), m.ret.clone());
+                }
+            }
         }
     }
 
@@ -44,7 +52,7 @@ pub fn infer(ast: &Ast, bindings: &Bindings) -> TypeMap {
     for it in &ast.items {
         if let ItemKind::Fn { params, body, .. } = &it.kind {
             let mut scope: HashMap<String, Type> = params.iter().cloned().collect();
-            let mut cx = Inf { sigs: &sigs, structs: &structs, enums: &enums, tm: &mut tm };
+            let mut cx = Inf { sigs: &sigs, structs: &structs, enums: &enums, methods: &methods_tbl, tm: &mut tm };
             // 20200 : flux Option/Result d'abord (calcule le type de retour effectif),
             // puis annotation locale du corps.
             flow::annotate_returns(&mut cx, body);
@@ -63,7 +71,7 @@ pub fn infer(ast: &Ast, bindings: &Bindings) -> TypeMap {
                     if m.self_param {
                         scope.insert("self".to_string(), Type::Struct(type_name.clone()));
                     }
-                    let mut cx = Inf { sigs: &sigs, structs: &structs, enums: &enums, tm: &mut tm };
+                    let mut cx = Inf { sigs: &sigs, structs: &structs, enums: &enums, methods: &methods_tbl, tm: &mut tm };
                     for s in body {
                         local::stmt(&mut cx, s, &mut scope);
                     }
@@ -79,6 +87,7 @@ pub(crate) struct Inf<'a> {
     pub sigs: &'a Sigs,
     pub structs: &'a Structs,
     pub enums: &'a Enums,
+    pub methods: &'a Methods,
     pub tm: &'a mut TypeMap,
 }
 

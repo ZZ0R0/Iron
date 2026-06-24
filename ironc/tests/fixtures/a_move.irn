@@ -1,0 +1,4 @@
+fn main():
+    s = "hello"
+    t = s
+    print(t)

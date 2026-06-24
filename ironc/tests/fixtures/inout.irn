@@ -1,0 +1,13 @@
+fn incr(inout x: i64):
+    x = x + 1
+
+fn add_to(inout acc: i64, v: i64):
+    acc = acc + v
+
+fn main():
+    n = 5
+    incr(n)
+    incr(n)
+    print(n)
+    add_to(n, 10)
+    print(n)
