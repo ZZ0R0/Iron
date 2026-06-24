@@ -1,0 +1,23 @@
+# [V6/2.1] Inférence Option par le flux (I11).
+# `-> i64` SANS annotation Option : la fn chute (boucle/if sans else) + a un `return <valeur>`
+# → type effectif `Option<i64>`, `return x` devient `Some(x)`, la chute devient `None`.
+
+fn first_big(xs: list[i64]) -> i64:
+    for x in xs:
+        if x > 3:
+            return x
+
+fn classify(n: i64) -> i64:
+    if n > 0:
+        return n
+
+# Témoin de non-régression : retour total (tous chemins) → reste `i64`, pas d'Option.
+fn double(n: i64) -> i64:
+    return n * 2
+
+fn main():
+    print(first_big([1, 2, 5, 8]))
+    print(first_big([1, 2, 3]))
+    print(classify(5))
+    print(classify(0))
+    print(double(21))

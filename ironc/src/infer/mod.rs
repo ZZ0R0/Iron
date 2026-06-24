@@ -4,7 +4,7 @@
 //! Best-effort : annote tout `Expr` joignable ; ce que `lower` exige (type des bases d'index,
 //! `Option`/`Result`) est couvert. Vérification d'annotations : incrément ultérieur.
 
-mod flow;
+pub(crate) mod flow;
 mod local;
 
 use crate::ir::*;
@@ -24,10 +24,15 @@ pub fn infer(ast: &Ast, bindings: &Bindings) -> TypeMap {
     let mut structs = Structs::new();
     let mut enums = Enums::new();
     let mut methods_tbl = Methods::new();
+    // (id du nœud fn, type de retour **effectif**) — I11 par flux : `sigs`/`tm` portent l'effectif,
+    // `lower` compare déclaré (AST) vs effectif (`tm`) pour savoir s'il doit emballer (`Some`/`Ok`).
+    let mut fn_effs: Vec<(NodeId, Type)> = Vec::new();
     for it in &ast.items {
         match &it.kind {
-            ItemKind::Fn { name, params, ret, .. } => {
-                sigs.insert(name.clone(), (params.iter().map(|(_, t)| t.clone()).collect(), ret.clone()));
+            ItemKind::Fn { name, params, ret, body, .. } => {
+                let eff = flow::effective_ret(ret, body);
+                sigs.insert(name.clone(), (params.iter().map(|(_, t)| t.clone()).collect(), eff.clone()));
+                fn_effs.push((it.id, eff));
             }
             ItemKind::Struct { name, fields, .. } => {
                 structs.insert(name.clone(), fields.clone());
@@ -49,13 +54,14 @@ pub fn infer(ast: &Ast, bindings: &Bindings) -> TypeMap {
     }
 
     let mut tm = TypeMap::new();
+    // Le type de retour effectif (flux) vit dans `tm[fn.id]` : `lower` le lit pour décider de l'emballage.
+    for (id, eff) in &fn_effs {
+        tm.insert(*id, eff.clone());
+    }
     for it in &ast.items {
         if let ItemKind::Fn { params, body, .. } = &it.kind {
             let mut scope: HashMap<String, Type> = params.iter().cloned().collect();
             let mut cx = Inf { sigs: &sigs, structs: &structs, enums: &enums, methods: &methods_tbl, tm: &mut tm };
-            // 20200 : flux Option/Result d'abord (calcule le type de retour effectif),
-            // puis annotation locale du corps.
-            flow::annotate_returns(&mut cx, body);
             for s in body {
                 local::stmt(&mut cx, s, &mut scope);
             }

@@ -34,6 +34,7 @@ pub fn lower(
         enums,
         own,
         inout_params: HashSet::new(),
+        flow_wrap: None,
         audit: Vec::new(),
     };
     let items: Vec<TokenStream> = ast.items.iter().map(|it| cx.item(it)).collect();
@@ -52,6 +53,14 @@ pub fn lower(
     (file, cx.sm, cx.audit)
 }
 
+/// Emballage de retour induit par le flux (I11) : la fn a un type effectif `Option`/`Result` alors
+/// que l'utilisateur n'a annoté que `T` → `return v` devient `Some(v)`/`Ok(v)`, la chute devient `None`.
+#[derive(Clone, Copy, PartialEq)]
+enum FlowWrap {
+    Some_,
+    Ok_,
+}
+
 struct Cx<'a> {
     sm: SourceMap,
     types: &'a TypeMap,
@@ -60,6 +69,8 @@ struct Cx<'a> {
     enums: HashSet<String>,
     own: &'a OwnershipMap,
     inout_params: HashSet<String>,
+    /// Emballage du retour pour la fn en cours de lowering (None hors fn flux-Option/Result).
+    flow_wrap: Option<FlowWrap>,
     audit: Vec<Span>,
 }
 
@@ -77,6 +88,7 @@ impl Cx<'_> {
     }
 
     fn item(&mut self, it: &Item) -> TokenStream {
+        self.flow_wrap = None; // (les méthodes d'impl ne font pas d'inférence flux dans cet incrément)
         match &it.kind {
             ItemKind::Fn { name, generics, params, ret, body } => {
                 let fid = format_ident!("{}", name);
@@ -97,6 +109,15 @@ impl Cx<'_> {
                 let param_names: HashSet<String> = params.iter().map(|(n, _)| n.clone()).collect();
                 self.inout_params =
                     params.iter().filter_map(|(n, t)| matches!(t, Type::Ref(_)).then(|| n.clone())).collect();
+                // I11 par flux : type effectif (`tm[fn.id]`) vs déclaré (AST). S'ils divergent vers
+                // Option/Result, on emballe les retours et (Option) on ajoute la chute `None`.
+                let declared = ret;
+                let effective = self.types.get(&it.id).cloned().unwrap_or_else(|| declared.clone());
+                self.flow_wrap = match (&effective, declared) {
+                    (Type::Option(_), d) if !matches!(d, Type::Option(_) | Type::Result(_)) => Some(FlowWrap::Some_),
+                    (Type::Result(_), d) if !matches!(d, Type::Option(_) | Type::Result(_)) => Some(FlowWrap::Ok_),
+                    _ => None,
+                };
                 let mut locals: Vec<(String, Type)> = Vec::new();
                 collect_locals(body, &param_names, self.types, &mut locals);
                 let decls: Vec<TokenStream> = locals
@@ -112,14 +133,22 @@ impl Cx<'_> {
                     })
                     .collect();
                 let stmts: Vec<TokenStream> = body.iter().map(|s| self.stmt(s)).collect();
-                let ret_ts = match ret {
+                let ret_ts = match &effective {
                     Type::Unit => quote! {},
                     t => {
                         let ty = lower_type(t);
                         quote! { -> #ty }
                     }
                 };
-                quote! { fn #fid #gens ( #(#ps),* ) #ret_ts { #(#decls)* #(#stmts)* } }
+                // Chute → `None` pour une fn flux-Option qui ne retourne pas sur tous les chemins.
+                let tail = if self.flow_wrap == Some(FlowWrap::Some_)
+                    && !crate::infer::flow::definitely_returns(body)
+                {
+                    quote! { None }
+                } else {
+                    quote! {}
+                };
+                quote! { fn #fid #gens ( #(#ps),* ) #ret_ts { #(#decls)* #(#stmts)* #tail } }
             }
             ItemKind::Struct { name, generics, fields } => {
                 let sid = format_ident!("{}", name);
@@ -280,19 +309,30 @@ impl Cx<'_> {
             StmtKind::Break => quote! { break; },
             StmtKind::Continue => quote! { continue; },
             StmtKind::Return { value } => match value {
+                Some(e) if matches!(&e.kind, ExprKind::Var(n) if n == "none") => {
+                    // `none` (constructeur Option) → toujours `None`, jamais emballé.
+                    quote! { return None; }
+                }
                 Some(e) => {
                     // return d'une variable = dernière utilisation sur ce chemin → move (pas de clone).
                     let ev = match &e.kind {
-                        ExprKind::Var(n) if n == "none" => quote! { None },
                         ExprKind::Var(n) => {
                             let id = format_ident!("{}", n);
                             quote! { #id }
                         }
                         _ => self.value(e),
                     };
-                    quote! { return #ev; }
+                    // I11 par flux : emballe le retour si la fn est flux-Option/Result.
+                    match self.flow_wrap {
+                        Some(FlowWrap::Some_) => quote! { return Some(#ev); },
+                        Some(FlowWrap::Ok_) => quote! { return Ok(#ev); },
+                        None => quote! { return #ev; },
+                    }
                 }
-                None => quote! { return; },
+                None => match self.flow_wrap {
+                    Some(FlowWrap::Some_) => quote! { return None; },
+                    _ => quote! { return; },
+                },
             },
             StmtKind::ExprStmt(e) => {
                 let e = self.value(e);
