@@ -32,7 +32,9 @@ impl Compiled {
 /// Pipeline figé (I9), sans invoquer cargo. Testable isolément.
 pub fn compile(src: &str, file: FileId, base_dir: &Path) -> CResult<Compiled> {
     let tokens = lex::lex(src, file)?;
-    let ast = parse::parse(tokens)?;
+    let mut ast = parse::parse(tokens)?;
+    // 20500 : résoudre les types de paramètres non annotés (pré-passe, réécrit l'AST) avant tout le reste.
+    infer::params::resolve_param_types(&mut ast);
     let bindings = load_bindings(&ast.imports, base_dir)?;
     let types = infer::infer(&ast, &bindings);
     let (own, param_modes) = resolve::resolve(&ast, &types);

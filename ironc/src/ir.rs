@@ -7,6 +7,10 @@ use std::collections::HashMap;
 
 pub type FileId = u32;
 
+/// Sentinelle de type de paramètre **non annoté** (20500) : `Type::Generic(INFER_SENTINEL)`. Résolue
+/// en pré-passe (`infer::params`) en `i64` ou générique implicite ; ne doit jamais atteindre `lower`.
+pub(crate) const INFER_SENTINEL: &str = "__infer__";
+
 /// Offsets **octets** demi-ouverts `[start, end)` (V0/README §3). Unité figée = octet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Span {

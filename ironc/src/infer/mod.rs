@@ -6,6 +6,7 @@
 
 pub(crate) mod flow;
 mod local;
+pub(crate) mod params;
 
 use crate::ir::*;
 use std::collections::HashMap;

@@ -125,8 +125,13 @@ impl Parser {
         while !self.is(&TokenKind::RParen) {
             let is_inout = self.eat(&TokenKind::Inout);
             let pname = self.ident()?;
-            self.expect(&TokenKind::Colon, "`:` (type de paramètre requis en V0)")?;
-            let mut pty = self.parse_type()?;
+            // Type de param **optionnel** (20500) : absent → sentinelle résolue en pré-passe (i64 si
+            // usage numérique, sinon générique implicite). L'annotation explicite prime.
+            let mut pty = if self.eat(&TokenKind::Colon) {
+                self.parse_type()?
+            } else {
+                Type::Generic(INFER_SENTINEL.to_string())
+            };
             if is_inout {
                 pty = Type::Ref(Box::new(pty));
             }
