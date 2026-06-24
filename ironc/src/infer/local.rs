@@ -57,6 +57,16 @@ pub(crate) fn stmt(cx: &mut Inf, s: &Stmt, scope: &mut Scope) {
         StmtKind::ExprStmt(e) => {
             expr(cx, e, scope);
         }
+        StmtKind::Match { scrutinee, arms } => {
+            let sty = expr(cx, scrutinee, scope);
+            for arm in arms {
+                let mut s = scope.clone();
+                cx.bind_pattern(&arm.pattern, &sty, &mut s);
+                for st in &arm.body {
+                    stmt(cx, st, &mut s);
+                }
+            }
+        }
         StmtKind::Break | StmtKind::Continue | StmtKind::Pass | StmtKind::RustBlock(_) => {}
     }
 }
@@ -106,6 +116,14 @@ pub(crate) fn expr(cx: &mut Inf, e: &Expr, scope: &Scope) -> Type {
                     _ => cx.sigs.get(name).map(|(_, r)| r.clone()).unwrap_or(Type::Unit),
                 },
                 _ => {
+                    // construction de variante d'enum : `Enum.Variant(...)`
+                    if let ExprKind::Field { base, .. } = &callee.kind {
+                        if let ExprKind::Var(ename) = &base.kind {
+                            if cx.enums.contains_key(ename) {
+                                return cx.set(e.id, Type::Enum(ename.clone()));
+                            }
+                        }
+                    }
                     expr(cx, callee, scope);
                     Type::Unit
                 }

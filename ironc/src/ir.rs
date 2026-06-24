@@ -48,6 +48,10 @@ pub enum TokenKind {
     // mots-clés
     Fn,
     Struct,
+    Enum,
+    Match,
+    Trait,
+    Impl,
     If,
     Elif,
     Else,
@@ -117,6 +121,12 @@ pub enum Type {
     Dict(Box<Type>, Box<Type>),
     /// Type Rust opaque (interop 50200) — stocke le chemin Rust.
     Extern(String),
+    /// Enum utilisateur (V3, 20300).
+    Enum(String),
+    /// Paramètre de type générique opaque (V3, 20300).
+    Generic(String),
+    /// Application de type générique : `Name[args]` → `Name<args>` (V3).
+    App(String, Vec<Type>),
 }
 
 // ---------------------------------------------------------------- AST (10200, §4.2)
@@ -129,15 +139,40 @@ pub type Expr = Node<ExprKind>;
 pub enum ItemKind {
     Fn {
         name: String,
+        generics: Generics,
         params: Vec<(String, Type)>,
         ret: Type,
         body: Vec<Stmt>,
     },
     Struct {
         name: String,
+        generics: Generics,
         fields: Vec<(String, Type)>,
     },
+    /// `enum E:` variantes tuple (V3, 20300).
+    Enum {
+        name: String,
+        generics: Generics,
+        variants: Vec<(String, Vec<Type>)>,
+    },
+    /// `trait T:` — signatures de méthodes (V3, 20300).
+    Trait { name: String, methods: Vec<Method> },
+    /// `impl T for Ty:` — définitions de méthodes (V3, 20300).
+    Impl { trait_name: String, type_name: String, methods: Vec<Method> },
 }
+
+/// Méthode de trait/impl (V3) : `body = None` = signature (trait), `Some` = définition (impl).
+#[derive(Debug, Clone)]
+pub struct Method {
+    pub name: String,
+    pub self_param: bool,
+    pub params: Vec<(String, Type)>,
+    pub ret: Type,
+    pub body: Option<Vec<Stmt>>,
+}
+
+/// Paramètres génériques (V3) : nom + bornes (`[T: Trait + …]`).
+pub type Generics = Vec<(String, Vec<String>)>;
 
 #[derive(Debug, Clone)]
 pub enum StmtKind {
@@ -158,6 +193,25 @@ pub enum StmtKind {
     Pass,
     /// Bloc `rust { … }` : Rust verbatim (interop niveau 1, 50100).
     RustBlock(String),
+    /// `match e:` + bras (V3, 20300).
+    Match { scrutinee: Expr, arms: Vec<MatchArm> },
+}
+
+/// Un bras de `match` : motif + corps (V3).
+#[derive(Debug, Clone)]
+pub struct MatchArm {
+    pub pattern: Pattern,
+    pub body: Vec<Stmt>,
+}
+
+/// Motif de `match` (V3, 20300).
+#[derive(Debug, Clone)]
+pub enum Pattern {
+    Wild,
+    Var(String),
+    Lit(Lit),
+    /// `Some(x)`, `None`, `Shape.Circle(r)` — `path` joint en `::`, `sub` = sous-motifs.
+    Variant { path: Vec<String>, sub: Vec<Pattern> },
 }
 
 #[derive(Debug, Clone)]

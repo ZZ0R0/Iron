@@ -1,0 +1,18 @@
+struct Dog:
+    age: i64
+
+trait Speak:
+    fn sound(self) -> str
+    fn describe(self) -> str
+
+impl Speak for Dog:
+    fn sound(self) -> str:
+        return "woof"
+    fn describe(self) -> str:
+        return self.sound()
+
+fn main():
+    d = Dog(age=3)
+    print(d.sound())
+    print(d.describe())
+    print(d.age)

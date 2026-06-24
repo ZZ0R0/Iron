@@ -74,6 +74,14 @@ fn visit_stmt(s: &Stmt, esc: &mut HashSet<String>) {
             }
         }
         StmtKind::ExprStmt(e) => visit(e, Pos::Value, esc),
+        StmtKind::Match { scrutinee, arms } => {
+            visit(scrutinee, Pos::Value, esc);
+            for arm in arms {
+                for s in &arm.body {
+                    visit_stmt(s, esc);
+                }
+            }
+        }
         StmtKind::Break | StmtKind::Continue | StmtKind::Pass | StmtKind::RustBlock(_) => {}
     }
 }

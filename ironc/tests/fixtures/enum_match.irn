@@ -1,0 +1,23 @@
+enum Shape:
+    Circle(f64)
+    Rect(f64, f64)
+
+fn area(s: Shape) -> f64:
+    match s:
+        Shape.Circle(r):
+            return r * r * 3.0
+        Shape.Rect(w, h):
+            return w * h
+
+fn classify(o: Option[i64]) -> i64:
+    match o:
+        Some(x):
+            return x
+        None:
+            return -1
+
+fn main():
+    print(area(Shape.Circle(2.0)))
+    print(area(Shape.Rect(3.0, 4.0)))
+    print(classify(some(42)))
+    print(classify(none))

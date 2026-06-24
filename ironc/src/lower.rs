@@ -18,7 +18,15 @@ pub fn lower(
     param_modes: &ParamModes,
     bindings: &Bindings,
 ) -> (TokenStream, SourceMap, Vec<Span>) {
-    let mut cx = Cx { sm: SourceMap::default(), types, param_modes, bindings, audit: Vec::new() };
+    let enums: HashSet<String> = ast
+        .items
+        .iter()
+        .filter_map(|it| match &it.kind {
+            ItemKind::Enum { name, .. } => Some(name.clone()),
+            _ => None,
+        })
+        .collect();
+    let mut cx = Cx { sm: SourceMap::default(), types, param_modes, bindings, enums, audit: Vec::new() };
     let items: Vec<TokenStream> = ast.items.iter().map(|it| cx.item(it)).collect();
     let body = quote! { #(#items)* };
     let file = quote! {
@@ -40,6 +48,7 @@ struct Cx<'a> {
     types: &'a TypeMap,
     param_modes: &'a ParamModes,
     bindings: &'a Bindings,
+    enums: HashSet<String>,
     audit: Vec<Span>,
 }
 
@@ -58,8 +67,9 @@ impl Cx<'_> {
 
     fn item(&mut self, it: &Item) -> TokenStream {
         match &it.kind {
-            ItemKind::Fn { name, params, ret, body } => {
+            ItemKind::Fn { name, generics, params, ret, body } => {
                 let fid = format_ident!("{}", name);
+                let gens = lower_generics(generics);
                 let ps: Vec<TokenStream> = params
                     .iter()
                     .enumerate()
@@ -95,10 +105,11 @@ impl Cx<'_> {
                         quote! { -> #ty }
                     }
                 };
-                quote! { fn #fid( #(#ps),* ) #ret_ts { #(#decls)* #(#stmts)* } }
+                quote! { fn #fid #gens ( #(#ps),* ) #ret_ts { #(#decls)* #(#stmts)* } }
             }
-            ItemKind::Struct { name, fields } => {
+            ItemKind::Struct { name, generics, fields } => {
                 let sid = format_ident!("{}", name);
+                let gens = lower_generics(generics);
                 let fs: Vec<TokenStream> = fields
                     .iter()
                     .map(|(n, t)| {
@@ -109,8 +120,90 @@ impl Cx<'_> {
                     .collect();
                 quote! {
                     #[derive(Debug, Clone)]
-                    struct #sid { #(#fs),* }
+                    struct #sid #gens { #(#fs),* }
                 }
+            }
+            ItemKind::Enum { name, generics, variants } => {
+                let eid = format_ident!("{}", name);
+                let gens = lower_generics(generics);
+                let vs: Vec<TokenStream> = variants
+                    .iter()
+                    .map(|(vn, fts)| {
+                        let vid = format_ident!("{}", vn);
+                        if fts.is_empty() {
+                            quote! { #vid }
+                        } else {
+                            let tys: Vec<TokenStream> = fts.iter().map(lower_type).collect();
+                            quote! { #vid( #(#tys),* ) }
+                        }
+                    })
+                    .collect();
+                quote! {
+                    #[derive(Debug, Clone)]
+                    enum #eid #gens { #(#vs),* }
+                }
+            }
+            ItemKind::Trait { name, methods } => {
+                let tid = format_ident!("{}", name);
+                let ms: Vec<TokenStream> = methods.iter().map(|m| self.lower_method(m)).collect();
+                quote! { trait #tid { #(#ms)* } }
+            }
+            ItemKind::Impl { trait_name, type_name, methods } => {
+                let tid = format_ident!("{}", trait_name);
+                let ty = format_ident!("{}", type_name);
+                let ms: Vec<TokenStream> = methods.iter().map(|m| self.lower_method(m)).collect();
+                quote! { impl #tid for #ty { #(#ms)* } }
+            }
+        }
+    }
+
+    fn lower_method(&mut self, m: &Method) -> TokenStream {
+        let mid = format_ident!("{}", m.name);
+        let ps: Vec<TokenStream> = m
+            .params
+            .iter()
+            .map(|(n, t)| {
+                let pid = format_ident!("{}", n);
+                let ty = lower_type(t);
+                quote! { #pid: #ty }
+            })
+            .collect();
+        let sig_params = if m.self_param {
+            if ps.is_empty() {
+                quote! { &self }
+            } else {
+                quote! { &self, #(#ps),* }
+            }
+        } else {
+            quote! { #(#ps),* }
+        };
+        let ret_ts = match &m.ret {
+            Type::Unit => quote! {},
+            t => {
+                let ty = lower_type(t);
+                quote! { -> #ty }
+            }
+        };
+        match &m.body {
+            None => quote! { fn #mid( #sig_params ) #ret_ts; },
+            Some(body) => {
+                let param_names: HashSet<String> = m.params.iter().map(|(n, _)| n.clone()).collect();
+                let mut locals: Vec<(String, Type)> = Vec::new();
+                collect_locals(body, &param_names, self.types, &mut locals);
+                let decls: Vec<TokenStream> = locals
+                    .iter()
+                    .map(|(n, t)| {
+                        let id = format_ident!("{}", n);
+                        if is_annotatable(t) {
+                            let ty = lower_type(t);
+                            quote! { let mut #id: #ty; }
+                        } else {
+                            quote! { let mut #id; }
+                        }
+                    })
+                    .collect();
+                let stmts: Vec<TokenStream> = body.iter().map(|s| self.stmt(s)).collect();
+                quote! { fn #mid( #sig_params ) #ret_ts { #(#decls)* #(#stmts)* } }
             }
         }
     }
@@ -168,8 +261,16 @@ impl Cx<'_> {
             StmtKind::Continue => quote! { continue; },
             StmtKind::Return { value } => match value {
                 Some(e) => {
-                    let e = self.value(e);
-                    quote! { return #e; }
+                    // return d'une variable = dernière utilisation sur ce chemin → move (pas de clone).
+                    let ev = match &e.kind {
+                        ExprKind::Var(n) if n == "none" => quote! { None },
+                        ExprKind::Var(n) => {
+                            let id = format_ident!("{}", n);
+                            quote! { #id }
+                        }
+                        _ => self.value(e),
+                    };
+                    quote! { return #ev; }
                 }
                 None => quote! { return; },
             },
@@ -182,6 +283,18 @@ impl Cx<'_> {
                 Ok(ts) => ts,
                 Err(_) => quote! { compile_error!("bloc rust: non tokenisable"); },
             },
+            StmtKind::Match { scrutinee, arms } => {
+                let s = self.value(scrutinee);
+                let arm_ts: Vec<TokenStream> = arms
+                    .iter()
+                    .map(|arm| {
+                        let pat = lower_pattern(&arm.pattern);
+                        let body: Vec<TokenStream> = arm.body.iter().map(|st| self.stmt(st)).collect();
+                        quote! { #pat => { #(#body)* } }
+                    })
+                    .collect();
+                quote! { match #s { #(#arm_ts)* } }
+            }
         };
         quote! { __irn_mark!(#mark); #body }
     }
@@ -220,6 +333,9 @@ impl Cx<'_> {
     fn place(&mut self, e: &Expr) -> TokenStream {
         match &e.kind {
             ExprKind::Var(n) => {
+                if n == "self" {
+                    return quote! { self };
+                }
                 let id = format_ident!("{}", n);
                 quote! { #id }
             }
@@ -259,6 +375,9 @@ impl Cx<'_> {
                 if n == "none" {
                     return quote! { None };
                 }
+                if n == "self" {
+                    return quote! { self };
+                }
                 let id = format_ident!("{}", n);
                 if is_copy(&self.type_of(e)) {
                     quote! { #id }
@@ -282,6 +401,14 @@ impl Cx<'_> {
             }
             ExprKind::Call { callee, args } => self.call(callee, args),
             ExprKind::Field { base, name } => {
+                // variante d'enum sans champ : `Enum.Variant`
+                if let ExprKind::Var(ename) = &base.kind {
+                    if self.enums.contains(ename) {
+                        let eid = format_ident!("{}", ename);
+                        let vid = format_ident!("{}", name);
+                        return quote! { #eid::#vid };
+                    }
+                }
                 let b = self.place(base);
                 let f = format_ident!("{}", name);
                 if is_copy(&self.type_of(e)) {
@@ -340,6 +467,17 @@ impl Cx<'_> {
     }
 
     fn call(&mut self, callee: &Expr, args: &[Expr]) -> TokenStream {
+        // construction de variante d'enum : `Enum.Variant(args)`
+        if let ExprKind::Field { base, name } = &callee.kind {
+            if let ExprKind::Var(ename) = &base.kind {
+                if self.enums.contains(ename) {
+                    let eid = format_ident!("{}", ename);
+                    let vid = format_ident!("{}", name);
+                    let a: Vec<TokenStream> = args.iter().map(|x| self.value(x)).collect();
+                    return quote! { #eid::#vid( #(#a),* ) };
+                }
+            }
+        }
         if let ExprKind::Var(name) = &callee.kind {
             match name.as_str() {
                 "print" if args.len() == 1 => {
@@ -427,20 +565,75 @@ fn collect_locals(body: &[Stmt], params: &HashSet<String>, types: &TypeMap, out:
             }
             StmtKind::While { body, .. } => collect_locals(body, params, types, out),
             StmtKind::For { body, .. } => collect_locals(body, params, types, out),
+            StmtKind::Match { arms, .. } => {
+                for arm in arms {
+                    collect_locals(&arm.body, params, types, out);
+                }
+            }
             _ => {}
         }
     }
 }
 
+/// Motif Iron → motif Rust (V3).
+fn lower_pattern(p: &Pattern) -> TokenStream {
+    match p {
+        Pattern::Wild => quote! { _ },
+        Pattern::Var(n) => {
+            let id = format_ident!("{}", n);
+            quote! { #id }
+        }
+        Pattern::Lit(l) => match l {
+            Lit::Int(n) => {
+                let n = proc_macro2::Literal::i64_unsuffixed(*n);
+                quote! { #n }
+            }
+            Lit::Bool(b) => quote! { #b },
+            Lit::Str(s) => quote! { #s },
+            Lit::Float(_) => quote! { _ }, // motif flottant illégal en Rust
+        },
+        Pattern::Variant { path, sub } => {
+            let p = lower_path(path);
+            if sub.is_empty() {
+                p
+            } else {
+                let subs: Vec<TokenStream> = sub.iter().map(lower_pattern).collect();
+                quote! { #p( #(#subs),* ) }
+            }
+        }
+    }
+}
+
+fn lower_path(path: &[String]) -> TokenStream {
+    let ids: Vec<proc_macro2::Ident> = path.iter().map(|s| format_ident!("{}", s)).collect();
+    quote! { #(#ids)::* }
+}
+
 /// Annoter une déclaration hoistée ? Oui si le type est **concret** (sans `Unit` — sinon on laisse
 /// l'inférence Rust trancher, p. ex. liste vide).
 fn is_annotatable(t: &Type) -> bool {
-    match t {
-        Type::Unit => false,
-        Type::List(e) | Type::Option(e) | Type::Result(e) => is_annotatable(e),
-        Type::Dict(k, v) => is_annotatable(k) && is_annotatable(v),
-        _ => true,
+    // Seuls les primitifs (fixe l'ambiguïté `{float}`) ; le reste — structs (génériques !), collections,
+    // enums, Option/Result — est laissé à l'inférence Rust (annoter casserait `let mut p: Pair;`).
+    matches!(t, Type::I64 | Type::F64 | Type::Bool | Type::Str)
+}
+
+fn lower_generics(gens: &Generics) -> TokenStream {
+    if gens.is_empty() {
+        return quote! {};
     }
+    let parts: Vec<TokenStream> = gens
+        .iter()
+        .map(|(n, bounds)| {
+            let id = format_ident!("{}", n);
+            if bounds.is_empty() {
+                quote! { #id }
+            } else {
+                let bs: Vec<proc_macro2::Ident> = bounds.iter().map(|b| format_ident!("{}", b)).collect();
+                quote! { #id: #(#bs)+* }
+            }
+        })
+        .collect();
+    quote! { < #(#parts),* > }
 }
 
 fn lower_type(t: &Type) -> TokenStream {
@@ -472,6 +665,19 @@ fn lower_type(t: &Type) -> TokenStream {
             quote! { std::collections::HashMap<#k, #v> }
         }
         Type::Extern(path) => TokenStream::from_str(path).unwrap_or_else(|_| quote! { () }),
+        Type::Enum(n) => {
+            let id = format_ident!("{}", n);
+            quote! { #id }
+        }
+        Type::Generic(n) => {
+            let id = format_ident!("{}", n);
+            quote! { #id }
+        }
+        Type::App(name, args) => {
+            let id = format_ident!("{}", name);
+            let a: Vec<TokenStream> = args.iter().map(lower_type).collect();
+            quote! { #id< #(#a),* > }
+        }
     }
 }
 

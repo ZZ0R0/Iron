@@ -210,6 +210,10 @@ impl<'a> Lexer<'a> {
         let kind = match text.as_str() {
             "fn" => TokenKind::Fn,
             "struct" => TokenKind::Struct,
+            "enum" => TokenKind::Enum,
+            "match" => TokenKind::Match,
+            "trait" => TokenKind::Trait,
+            "impl" => TokenKind::Impl,
             "if" => TokenKind::If,
             "elif" => TokenKind::Elif,
             "else" => TokenKind::Else,

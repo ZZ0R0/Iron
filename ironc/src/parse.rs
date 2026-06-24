@@ -107,7 +107,10 @@ impl Parser {
         match self.cur() {
             TokenKind::Fn => self.fn_item(),
             TokenKind::Struct => self.struct_item(),
-            other => Err(self.err(format!("item attendu (`fn`/`struct`), trouvé {other:?}"))),
+            TokenKind::Enum => self.enum_item(),
+            TokenKind::Trait => self.trait_item(),
+            TokenKind::Impl => self.impl_item(),
+            other => Err(self.err(format!("item attendu, trouvé {other:?}"))),
         }
     }
 
@@ -116,6 +119,7 @@ impl Parser {
         let id = self.fresh();
         self.expect(&TokenKind::Fn, "`fn`")?;
         let name = self.ident()?;
+        let generics = self.parse_generics()?;
         self.expect(&TokenKind::LParen, "`(`")?;
         let mut params = Vec::new();
         while !self.is(&TokenKind::RParen) {
@@ -134,7 +138,29 @@ impl Parser {
             Type::Unit
         };
         let body = self.block()?;
-        Ok(self.node(start, id, ItemKind::Fn { name, params, ret, body }))
+        Ok(self.node(start, id, ItemKind::Fn { name, generics, params, ret, body }))
+    }
+
+    fn parse_generics(&mut self) -> CResult<Generics> {
+        let mut gens = Vec::new();
+        if self.eat(&TokenKind::LBracket) {
+            while !self.is(&TokenKind::RBracket) {
+                let name = self.ident()?;
+                let mut bounds = Vec::new();
+                if self.eat(&TokenKind::Colon) {
+                    bounds.push(self.ident()?);
+                    while self.eat(&TokenKind::Plus) {
+                        bounds.push(self.ident()?);
+                    }
+                }
+                gens.push((name, bounds));
+                if !self.eat(&TokenKind::Comma) {
+                    break;
+                }
+            }
+            self.expect(&TokenKind::RBracket, "`]`")?;
+        }
+        Ok(gens)
     }
 
     fn struct_item(&mut self) -> CResult<Item> {
@@ -142,6 +168,7 @@ impl Parser {
         let id = self.fresh();
         self.adv(); // struct
         let name = self.ident()?;
+        let generics = self.parse_generics()?;
         self.expect(&TokenKind::Colon, "`:`")?;
         self.expect(&TokenKind::Newline, "fin de ligne")?;
         self.expect(&TokenKind::Indent, "bloc indenté")?;
@@ -158,7 +185,124 @@ impl Parser {
             fields.push((fname, fty));
         }
         self.expect(&TokenKind::Dedent, "fin de bloc")?;
-        Ok(self.node(start, id, ItemKind::Struct { name, fields }))
+        Ok(self.node(start, id, ItemKind::Struct { name, generics, fields }))
+    }
+
+    fn enum_item(&mut self) -> CResult<Item> {
+        let start = self.i;
+        let id = self.fresh();
+        self.adv(); // enum
+        let name = self.ident()?;
+        let generics = self.parse_generics()?;
+        self.expect(&TokenKind::Colon, "`:`")?;
+        self.expect(&TokenKind::Newline, "fin de ligne")?;
+        self.expect(&TokenKind::Indent, "bloc indenté")?;
+        let mut variants = Vec::new();
+        loop {
+            while self.is(&TokenKind::Newline) {
+                self.adv();
+            }
+            if self.is(&TokenKind::Dedent) || self.is(&TokenKind::Eof) {
+                break;
+            }
+            let vname = self.ident()?;
+            let mut fields = Vec::new();
+            if self.eat(&TokenKind::LParen) {
+                while !self.is(&TokenKind::RParen) {
+                    fields.push(self.parse_type()?);
+                    if !self.eat(&TokenKind::Comma) {
+                        break;
+                    }
+                }
+                self.expect(&TokenKind::RParen, "`)`")?;
+            }
+            self.stmt_end()?;
+            variants.push((vname, fields));
+        }
+        self.expect(&TokenKind::Dedent, "fin de bloc")?;
+        Ok(self.node(start, id, ItemKind::Enum { name, generics, variants }))
+    }
+
+    fn trait_item(&mut self) -> CResult<Item> {
+        let start = self.i;
+        let id = self.fresh();
+        self.adv(); // trait
+        let name = self.ident()?;
+        self.expect(&TokenKind::Colon, "`:`")?;
+        self.expect(&TokenKind::Newline, "fin de ligne")?;
+        self.expect(&TokenKind::Indent, "bloc indenté")?;
+        let mut methods = Vec::new();
+        loop {
+            while self.is(&TokenKind::Newline) {
+                self.adv();
+            }
+            if self.is(&TokenKind::Dedent) || self.is(&TokenKind::Eof) {
+                break;
+            }
+            methods.push(self.parse_method(false)?);
+        }
+        self.expect(&TokenKind::Dedent, "fin de bloc")?;
+        Ok(self.node(start, id, ItemKind::Trait { name, methods }))
+    }
+
+    fn impl_item(&mut self) -> CResult<Item> {
+        let start = self.i;
+        let id = self.fresh();
+        self.adv(); // impl
+        let trait_name = self.ident()?;
+        self.expect(&TokenKind::For, "`for`")?;
+        let type_name = self.ident()?;
+        self.expect(&TokenKind::Colon, "`:`")?;
+        self.expect(&TokenKind::Newline, "fin de ligne")?;
+        self.expect(&TokenKind::Indent, "bloc indenté")?;
+        let mut methods = Vec::new();
+        loop {
+            while self.is(&TokenKind::Newline) {
+                self.adv();
+            }
+            if self.is(&TokenKind::Dedent) || self.is(&TokenKind::Eof) {
+                break;
+            }
+            methods.push(self.parse_method(true)?);
+        }
+        self.expect(&TokenKind::Dedent, "fin de bloc")?;
+        Ok(self.node(start, id, ItemKind::Impl { trait_name, type_name, methods }))
+    }
+
+    fn parse_method(&mut self, with_body: bool) -> CResult<Method> {
+        self.expect(&TokenKind::Fn, "`fn`")?;
+        let name = self.ident()?;
+        self.expect(&TokenKind::LParen, "`(`")?;
+        let mut self_param = false;
+        if matches!(self.cur(), TokenKind::Ident(s) if s == "self")
+            && matches!(self.nth(1), TokenKind::Comma | TokenKind::RParen)
+        {
+            self.adv();
+            self_param = true;
+            self.eat(&TokenKind::Comma);
+        }
+        let mut params = Vec::new();
+        while !self.is(&TokenKind::RParen) {
+            let pn = self.ident()?;
+            self.expect(&TokenKind::Colon, "`:`")?;
+            params.push((pn, self.parse_type()?));
+            if !self.eat(&TokenKind::Comma) {
+                break;
+            }
+        }
+        self.expect(&TokenKind::RParen, "`)`")?;
+        let ret = if self.eat(&TokenKind::Arrow) {
+            self.parse_type()?
+        } else {
+            Type::Unit
+        };
+        let body = if with_body {
+            Some(self.block()?)
+        } else {
+            self.stmt_end()?;
+            None
+        };
+        Ok(Method { name, self_param, params, ret, body })
     }
 
     fn ident(&mut self) -> CResult<String> {
@@ -204,7 +348,22 @@ impl Parser {
                 self.expect(&TokenKind::RBracket, "`]`")?;
                 Ok(Type::Result(Box::new(t)))
             }
-            _ => Ok(Type::Struct(name)),
+            _ => {
+                if self.is(&TokenKind::LBracket) {
+                    self.adv();
+                    let mut args = Vec::new();
+                    while !self.is(&TokenKind::RBracket) {
+                        args.push(self.parse_type()?);
+                        if !self.eat(&TokenKind::Comma) {
+                            break;
+                        }
+                    }
+                    self.expect(&TokenKind::RBracket, "`]`")?;
+                    Ok(Type::App(name, args))
+                } else {
+                    Ok(Type::Struct(name))
+                }
+            }
         }
     }
 
@@ -273,6 +432,7 @@ impl Parser {
             TokenKind::If => self.if_stmt(),
             TokenKind::While => self.while_stmt(),
             TokenKind::For => self.for_stmt(),
+            TokenKind::Match => self.match_stmt(),
             TokenKind::Pass => self.simple(|_, id, sp| Node { id, span: sp, kind: StmtKind::Pass }),
             TokenKind::Break => self.simple(|_, id, sp| Node { id, span: sp, kind: StmtKind::Break }),
             TokenKind::Continue => {
@@ -350,6 +510,86 @@ impl Parser {
         let iter = self.expr()?;
         let body = self.block()?;
         Ok(self.node(start, id, StmtKind::For { var, iter, body }))
+    }
+
+    fn match_stmt(&mut self) -> CResult<Stmt> {
+        let start = self.i;
+        let id = self.fresh();
+        self.adv(); // match
+        let scrutinee = self.expr()?;
+        self.expect(&TokenKind::Colon, "`:`")?;
+        self.expect(&TokenKind::Newline, "fin de ligne")?;
+        self.expect(&TokenKind::Indent, "bloc indenté")?;
+        let mut arms = Vec::new();
+        loop {
+            while self.is(&TokenKind::Newline) {
+                self.adv();
+            }
+            if self.is(&TokenKind::Dedent) || self.is(&TokenKind::Eof) {
+                break;
+            }
+            let pattern = self.parse_pattern()?;
+            let body = self.block()?;
+            arms.push(MatchArm { pattern, body });
+        }
+        self.expect(&TokenKind::Dedent, "fin de bloc")?;
+        Ok(self.node(start, id, StmtKind::Match { scrutinee, arms }))
+    }
+
+    fn parse_pattern(&mut self) -> CResult<Pattern> {
+        match self.cur().clone() {
+            TokenKind::Int(n) => {
+                self.adv();
+                Ok(Pattern::Lit(Lit::Int(n)))
+            }
+            TokenKind::Bool(b) => {
+                self.adv();
+                Ok(Pattern::Lit(Lit::Bool(b)))
+            }
+            TokenKind::Str(s) => {
+                self.adv();
+                Ok(Pattern::Lit(Lit::Str(s)))
+            }
+            TokenKind::Ident(name) => {
+                self.adv();
+                if name == "_" {
+                    return Ok(Pattern::Wild);
+                }
+                if self.is(&TokenKind::Dot) {
+                    let mut path = vec![name];
+                    while self.eat(&TokenKind::Dot) {
+                        path.push(self.ident()?);
+                    }
+                    let sub = if self.is(&TokenKind::LParen) {
+                        self.parse_pattern_args()?
+                    } else {
+                        Vec::new()
+                    };
+                    Ok(Pattern::Variant { path, sub })
+                } else if self.is(&TokenKind::LParen) {
+                    let sub = self.parse_pattern_args()?;
+                    Ok(Pattern::Variant { path: vec![name], sub })
+                } else if name.chars().next().map_or(false, |c| c.is_uppercase()) {
+                    Ok(Pattern::Variant { path: vec![name], sub: Vec::new() })
+                } else {
+                    Ok(Pattern::Var(name))
+                }
+            }
+            other => Err(self.err(format!("motif attendu, trouvé {other:?}"))),
+        }
+    }
+
+    fn parse_pattern_args(&mut self) -> CResult<Vec<Pattern>> {
+        self.expect(&TokenKind::LParen, "`(`")?;
+        let mut subs = Vec::new();
+        while !self.is(&TokenKind::RParen) {
+            subs.push(self.parse_pattern()?);
+            if !self.eat(&TokenKind::Comma) {
+                break;
+            }
+        }
+        self.expect(&TokenKind::RParen, "`)`")?;
+        Ok(subs)
     }
 
     /// `lhs = rhs` (liaison/affectation) ou expression-instruction.
