@@ -113,6 +113,12 @@ pub(crate) fn expr(cx: &mut Inf, e: &Expr, scope: &Scope) -> Type {
                     "some" => Type::Option(Box::new(arg0_ty(cx, args))),
                     "ok" => Type::Result(Box::new(arg0_ty(cx, args))),
                     "err" => Type::Result(Box::new(Type::Unit)),
+                    // stdlib V4 (80100)
+                    "str" | "concat" => Type::Str,
+                    "sqrt" => Type::F64,
+                    "abs" | "min" | "max" => arg0_ty(cx, args),
+                    "push" => Type::Unit,
+                    "sum" => Type::I64,
                     _ => cx.sigs.get(name).map(|(_, r)| r.clone()).unwrap_or(Type::Unit),
                 },
                 _ => {

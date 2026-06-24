@@ -360,12 +360,14 @@ impl Cx<'_> {
     fn value(&mut self, e: &Expr) -> TokenStream {
         match &e.kind {
             ExprKind::Lit(l) => match l {
+                // littéraux **suffixés** (Iron n'a qu'`i64`/`f64`) → type concret, indispensable pour
+                // les appels de méthode (`abs`/`sqrt`/…) sans ambiguïté `{integer}`/`{float}`.
                 Lit::Int(n) => {
-                    let n = proc_macro2::Literal::i64_unsuffixed(*n);
+                    let n = proc_macro2::Literal::i64_suffixed(*n);
                     quote! { #n }
                 }
                 Lit::Float(f) => {
-                    let f = proc_macro2::Literal::f64_unsuffixed(*f);
+                    let f = proc_macro2::Literal::f64_suffixed(*f);
                     quote! { #f }
                 }
                 Lit::Bool(b) => quote! { #b },
@@ -508,6 +510,43 @@ impl Cx<'_> {
                 "err" if args.len() == 1 => {
                     let a = self.value(&args[0]);
                     return quote! { Err(IronError(#a)) };
+                }
+                // stdlib V4 (80100) — wrappers fins sur std (I5)
+                "str" if args.len() == 1 => {
+                    let a = self.value(&args[0]);
+                    return quote! { (#a).to_string() };
+                }
+                "abs" if args.len() == 1 => {
+                    let a = self.value(&args[0]);
+                    return quote! { (#a).abs() };
+                }
+                "sqrt" if args.len() == 1 => {
+                    let a = self.value(&args[0]);
+                    return quote! { (#a).sqrt() };
+                }
+                "min" if args.len() == 2 => {
+                    let a = self.value(&args[0]);
+                    let b = self.value(&args[1]);
+                    return quote! { (#a).min(#b) };
+                }
+                "max" if args.len() == 2 => {
+                    let a = self.value(&args[0]);
+                    let b = self.value(&args[1]);
+                    return quote! { (#a).max(#b) };
+                }
+                "concat" if args.len() == 2 => {
+                    let a = self.value(&args[0]);
+                    let b = self.value(&args[1]);
+                    return quote! { format!("{}{}", #a, #b) };
+                }
+                "push" if args.len() == 2 => {
+                    let l = self.place(&args[0]);
+                    let x = self.value(&args[1]);
+                    return quote! { #l.push(#x) };
+                }
+                "sum" if args.len() == 1 => {
+                    let l = self.place(&args[0]);
+                    return quote! { #l.iter().sum::<i64>() };
                 }
                 _ => {}
             }

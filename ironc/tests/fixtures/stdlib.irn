@@ -1,0 +1,10 @@
+fn main():
+    print(str(42))
+    print(abs(-7))
+    print(min(3, 8))
+    print(max(3, 8))
+    print(sqrt(16.0))
+    xs = [1, 2, 3]
+    push(xs, 4)
+    print(sum(xs))
+    print(concat("hello ", "world"))
