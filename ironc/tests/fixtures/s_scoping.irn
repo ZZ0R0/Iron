@@ -1,0 +1,10 @@
+fn classify(n: i64) -> i64:
+    if n > 0:
+        r = 1
+    else:
+        r = 0
+    return r
+
+fn main():
+    print(classify(5))
+    print(classify(0))

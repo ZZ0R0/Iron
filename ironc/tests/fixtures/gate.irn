@@ -1,0 +1,38 @@
+# Programme représentatif du gate V0 : struct, fn, if/while/for, récursion,
+# list/dict, Option/Result + ?, et les DEUX syntaxes de bloc (`:` et `{}`).
+
+struct Pt:
+    x: i64
+    y: i64
+
+fn dist2(p: Pt) -> i64 {
+    return p.x * p.x + p.y * p.y
+}
+
+fn lookup(d: dict[i64, i64], k: i64) -> Option[i64]:
+    return some(d[k])
+
+fn sum(xs: list[i64]) -> i64:
+    total = 0
+    for v in xs:
+        total = total + v
+    return total
+
+fn fib(n: i64) -> i64:
+    if n < 2:
+        return n
+    return fib(n - 1) + fib(n - 2)
+
+fn main():
+    p = Pt(x=3, y=4)
+    print(dist2(p))
+    nums = [1, 2, 3, 4, 5]
+    print(sum(nums))
+    print(fib(10))
+    table = {1: 10, 2: 20}
+    print(lookup(table, 2))
+    i = 0
+    while i < 3 {
+        print(i)
+        i = i + 1
+    }

@@ -1,0 +1,18 @@
+fn safe_div(a: i64, b: i64) -> Result[i64]:
+    if b == 0:
+        return err("division par zero")
+    return ok(a / b)
+
+fn checked(a: i64, b: i64) -> Result[i64]:
+    r = safe_div(a, b)?
+    return ok(r + 1)
+
+fn first(xs: list[i64]) -> Option[i64]:
+    for x in xs:
+        return some(x)
+    return none
+
+fn main():
+    print(checked(10, 2))
+    print(checked(10, 0))
+    print(first([7, 8, 9]))

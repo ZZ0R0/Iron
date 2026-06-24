@@ -1,0 +1,6 @@
+fn build() -> list[i64]:
+    xs = []
+    return xs
+
+fn main():
+    print(build())

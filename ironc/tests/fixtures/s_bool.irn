@@ -1,0 +1,8 @@
+fn main():
+    x = true
+    y = false
+    print(x and y)
+    print(x or y)
+    print(not x)
+    if x and (not y):
+        print(42)

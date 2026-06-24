@@ -1,0 +1,271 @@
+//! IR partagé — types **GELÉS** (V0/README §3–4). Aucune vague 2 ne modifie ce fichier.
+//!
+//! Clé de jointure : chaque nœud porte `NodeId` (pré-ordre DFS, dense) + `Span` (octets).
+//! Les passes communiquent par tables annexes indexées par `NodeId` ; l'AST est immuable.
+
+use std::collections::HashMap;
+
+pub type FileId = u32;
+
+/// Offsets **octets** demi-ouverts `[start, end)` (V0/README §3). Unité figée = octet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Span {
+    pub file: FileId,
+    pub start: u32,
+    pub end: u32,
+}
+
+impl Span {
+    pub fn new(file: FileId, start: u32, end: u32) -> Self {
+        Span { file, start, end }
+    }
+    /// Span neutre (stubs / nœuds synthétiques).
+    pub const DUMMY: Span = Span { file: 0, start: 0, end: 0 };
+}
+
+/// `u32` dense, pré-ordre DFS dès 0 ; clé partagée AST ↔ TypeMap ↔ OwnershipMap ↔ SourceMap.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct NodeId(pub u32);
+
+/// Nœud générique : `{ id, span, kind }` (V0/README §4.2).
+#[derive(Debug, Clone)]
+pub struct Node<K> {
+    pub id: NodeId,
+    pub span: Span,
+    pub kind: K,
+}
+
+// ---------------------------------------------------------------- Tokens (10100, §4.1)
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum TokenKind {
+    // littéraux
+    Int(i64),
+    Float(f64),
+    Str(String),
+    Bool(bool),
+    Ident(String),
+    // mots-clés
+    Fn,
+    Struct,
+    If,
+    Elif,
+    Else,
+    While,
+    For,
+    In,
+    Break,
+    Continue,
+    Return,
+    Pass,
+    And,
+    Or,
+    Not,
+    // ponctuation / opérateurs
+    LBrace,
+    RBrace,
+    LParen,
+    RParen,
+    LBracket,
+    RBracket,
+    Semicolon,
+    Comma,
+    Dot,
+    Colon,
+    Arrow,
+    Assign,
+    Plus,
+    Minus,
+    Star,
+    Slash,
+    Percent,
+    EqEq,
+    NotEq,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    Question,
+    // synthétiques (off-side rule, I9)
+    Indent,
+    Dedent,
+    Newline,
+    Eof,
+}
+
+#[derive(Debug, Clone)]
+pub struct Token {
+    pub kind: TokenKind,
+    pub span: Span,
+}
+
+// ---------------------------------------------------------------- Types (§4.3)
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Type {
+    I64,
+    F64,
+    Bool,
+    Str,
+    Unit,
+    Struct(String),
+    Option(Box<Type>),
+    Result(Box<Type>),
+    List(Box<Type>),
+    Dict(Box<Type>, Box<Type>),
+}
+
+// ---------------------------------------------------------------- AST (10200, §4.2)
+
+pub type Item = Node<ItemKind>;
+pub type Stmt = Node<StmtKind>;
+pub type Expr = Node<ExprKind>;
+
+#[derive(Debug, Clone)]
+pub enum ItemKind {
+    Fn {
+        name: String,
+        params: Vec<(String, Type)>,
+        ret: Type,
+        body: Vec<Stmt>,
+    },
+    Struct {
+        name: String,
+        fields: Vec<(String, Type)>,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub enum StmtKind {
+    Let { name: String, value: Expr },
+    Assign { target: Expr, value: Expr },
+    If {
+        cond: Expr,
+        then: Vec<Stmt>,
+        elifs: Vec<(Expr, Vec<Stmt>)>,
+        els: Vec<Stmt>,
+    },
+    While { cond: Expr, body: Vec<Stmt> },
+    For { var: String, iter: Expr, body: Vec<Stmt> },
+    Break,
+    Continue,
+    Return { value: Option<Expr> },
+    ExprStmt(Expr),
+    Pass,
+}
+
+#[derive(Debug, Clone)]
+pub enum Lit {
+    Int(i64),
+    Float(f64),
+    Str(String),
+    Bool(bool),
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum UnOp {
+    Neg,
+    Not,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum BinOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Rem,
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    And,
+    Or,
+}
+
+#[derive(Debug, Clone)]
+pub enum ExprKind {
+    Lit(Lit),
+    Var(String),
+    Unary { op: UnOp, expr: Box<Expr> },
+    Binary { op: BinOp, lhs: Box<Expr>, rhs: Box<Expr> },
+    Call { callee: Box<Expr>, args: Vec<Expr> },
+    StructLit { name: String, fields: Vec<(String, Expr)> },
+    Field { base: Box<Expr>, name: String },
+    Index { base: Box<Expr>, idx: Box<Expr> },
+    ListLit { items: Vec<Expr> },
+    DictLit { pairs: Vec<(Expr, Expr)> },
+    Try { inner: Box<Expr> },
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct Ast {
+    pub items: Vec<Item>,
+}
+
+// ---------------------------------------------------------------- Tables annexes
+
+/// `NodeId → Type` (20100/20200).
+pub type TypeMap = HashMap<NodeId, Type>;
+
+/// Disposition d'une lecture de variable (30100). V0 : pas de `Borrow`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Disposition {
+    Clone,
+    Move,
+}
+
+/// `NodeId(lecture de Var) → Disposition` (30100).
+pub type OwnershipMap = HashMap<NodeId, Disposition>;
+
+// ---------------------------------------------------------------- SourceMap (§4.6)
+
+/// Lien marqueur ↔ origine Iron. Le marqueur émis dans le Rust encode l'**index** de ce lien.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SpanLink {
+    pub node: NodeId,
+    pub iron: Span,
+}
+
+/// Produite par `lower` (40100), consommée par `sourcemap` (60100).
+#[derive(Debug, Clone, Default)]
+pub struct SourceMap {
+    pub links: Vec<SpanLink>,
+}
+
+impl SourceMap {
+    /// Enregistre un lien et renvoie son index (= valeur du marqueur émis).
+    pub fn push(&mut self, node: NodeId, iron: Span) -> usize {
+        let idx = self.links.len();
+        self.links.push(SpanLink { node, iron });
+        idx
+    }
+}
+
+// ---------------------------------------------------------------- Erreur interne
+
+/// Erreur **du compilateur** `ironc`. À ne pas confondre avec le type `IronError`
+/// émis *dans* le crate généré (I13).
+#[derive(Debug)]
+pub struct CompileError {
+    pub span: Option<Span>,
+    pub msg: String,
+}
+
+impl CompileError {
+    pub fn msg(msg: impl Into<String>) -> Self {
+        CompileError { span: None, msg: msg.into() }
+    }
+}
+
+impl std::fmt::Display for CompileError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.msg)
+    }
+}
+
+impl std::error::Error for CompileError {}
+
+pub type CResult<T> = Result<T, CompileError>;

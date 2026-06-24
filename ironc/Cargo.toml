@@ -1,0 +1,18 @@
+[package]
+name = "ironc"
+version = "0.0.0"
+edition = "2021"
+
+[lib]
+name = "ironc"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ironc"
+path = "src/main.rs"
+
+[dependencies]
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", features = ["full"] }
+prettyplease = "0.2"

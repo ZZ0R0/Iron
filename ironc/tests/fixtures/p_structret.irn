@@ -1,0 +1,9 @@
+struct P:
+    a: i64
+
+fn mk(v: i64) -> P:
+    return P(a=v)
+
+fn main():
+    p = mk(7)
+    print(p.a)

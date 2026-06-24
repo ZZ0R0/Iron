@@ -1,0 +1,16 @@
+fn add(a: i64, b: i64) -> i64 {
+    return a + b
+}
+
+fn main():
+    x = add(2, 3)
+    if x > 4 {
+        print(x)
+    } else {
+        print(0)
+    }
+    i = 0
+    while i < 3 {
+        print(i)
+        i = i + 1
+    }
