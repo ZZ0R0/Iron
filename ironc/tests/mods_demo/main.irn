@@ -1,0 +1,8 @@
+# [V6/4.2] Modules multi-fichiers : `import` à plat (70200).
+import geometry
+import arith
+
+fn main():
+    p = Point(x=3, y=4)
+    print(dist_sq(p))
+    print(add(10, 20))

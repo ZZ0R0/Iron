@@ -1,0 +1,3 @@
+import a
+fn fb() -> i64:
+    return 2

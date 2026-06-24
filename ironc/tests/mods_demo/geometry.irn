@@ -1,0 +1,7 @@
+# Module Iron : géométrie (importé à plat par main.irn).
+struct Point:
+    x: i64
+    y: i64
+
+fn dist_sq(p: Point) -> i64:
+    return p.x * p.x + p.y * p.y

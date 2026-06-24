@@ -284,6 +284,8 @@ pub struct Ast {
     pub items: Vec<Item>,
     /// Chemins `.iri` importés via `use "…"` (interop 50200).
     pub imports: Vec<String>,
+    /// Modules Iron importés via `import foo` (→ `foo.irn`) (70200). Fusionnés à plat par le driver.
+    pub modules: Vec<String>,
 }
 
 // ---------------------------------------------------------------- Tables annexes

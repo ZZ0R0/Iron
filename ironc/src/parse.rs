@@ -6,7 +6,16 @@
 use crate::ir::*;
 
 pub fn parse(tokens: Vec<Token>) -> CResult<Ast> {
-    Parser::new(tokens).program()
+    parse_with_id(tokens, 0).map(|(ast, _)| ast)
+}
+
+/// Parse en continuant la numérotation des `NodeId` à partir de `start_id` ; renvoie l'AST + le prochain
+/// id libre. Permet de fusionner plusieurs modules (70200) sans collision d'ids (clés des tables annexes).
+pub fn parse_with_id(tokens: Vec<Token>, start_id: u32) -> CResult<(Ast, u32)> {
+    let mut p = Parser::new(tokens);
+    p.next_id = start_id;
+    let ast = p.program()?;
+    Ok((ast, p.next_id))
 }
 
 struct Parser {
@@ -81,6 +90,7 @@ impl Parser {
     fn program(&mut self) -> CResult<Ast> {
         let mut items = Vec::new();
         let mut imports = Vec::new();
+        let mut modules = Vec::new();
         loop {
             while self.is(&TokenKind::Newline) {
                 self.adv();
@@ -98,9 +108,17 @@ impl Parser {
                 }
                 return Err(self.err("`use` attend un chemin \"….iri\""));
             }
+            if matches!(self.cur(), TokenKind::Ident(s) if s == "import") {
+                self.adv();
+                // `import foo` → module Iron `foo.irn` (70200).
+                let name = self.ident()?;
+                modules.push(name);
+                self.stmt_end()?;
+                continue;
+            }
             items.push(self.item()?);
         }
-        Ok(Ast { items, imports })
+        Ok(Ast { items, imports, modules })
     }
 
     fn item(&mut self) -> CResult<Item> {

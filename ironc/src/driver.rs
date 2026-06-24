@@ -32,7 +32,14 @@ impl Compiled {
 /// Pipeline figé (I9), sans invoquer cargo. Testable isolément.
 pub fn compile(src: &str, file: FileId, base_dir: &Path) -> CResult<Compiled> {
     let tokens = lex::lex(src, file)?;
-    let mut ast = parse::parse(tokens)?;
+    let (mut ast, mut next_id) = parse::parse_with_id(tokens, 0)?;
+    // 70200 : charger + fusionner **à plat** les modules Iron importés. NodeId continus (clés des
+    // tables annexes → pas de collision), FileId distincts (source maps multi-fichiers), cycles détectés.
+    let mut next_file: FileId = file + 1;
+    let (mut loaded, mut loading): (Vec<String>, Vec<String>) = (Vec::new(), Vec::new());
+    for m in std::mem::take(&mut ast.modules) {
+        load_module(&m, base_dir, &mut ast.items, &mut ast.imports, &mut next_id, &mut next_file, &mut loaded, &mut loading)?;
+    }
     // 20500 : résoudre les types de paramètres non annotés (pré-passe, réécrit l'AST) avant tout le reste.
     infer::params::resolve_param_types(&mut ast);
     let bindings = load_bindings(&ast.imports, base_dir)?;
@@ -46,6 +53,48 @@ pub fn compile(src: &str, file: FileId, base_dir: &Path) -> CResult<Compiled> {
     let mappings = sourcemap::resolve(&rust_src, &sm);
 
     Ok(Compiled { rust_src, source_map: sm, mappings, audit, crates: bindings.crates })
+}
+
+/// Charge récursivement un module Iron `name.irn` et fusionne ses items/imports (à plat) dans le
+/// programme. `next_id` thread les `NodeId` (unicité globale), `next_file` les `FileId`. `loaded`
+/// (déjà fusionné, évite le double-merge en diamant) et `loading` (pile en cours → cycle). (70200)
+#[allow(clippy::too_many_arguments)]
+fn load_module(
+    name: &str,
+    base_dir: &Path,
+    items: &mut Vec<Item>,
+    imports: &mut Vec<String>,
+    next_id: &mut u32,
+    next_file: &mut FileId,
+    loaded: &mut Vec<String>,
+    loading: &mut Vec<String>,
+) -> CResult<()> {
+    let path = base_dir.join(format!("{name}.irn"));
+    let key = path.to_string_lossy().to_string();
+    if loaded.contains(&key) {
+        return Ok(()); // import en diamant : déjà fusionné
+    }
+    if loading.contains(&key) {
+        return Err(CompileError::msg(format!("cycle d'import détecté sur le module `{name}`")));
+    }
+    loading.push(key.clone());
+    let src = std::fs::read_to_string(&path)
+        .map_err(|e| CompileError::msg(format!("import `{name}` ({}) : {e}", path.display())))?;
+    let fid = *next_file;
+    *next_file += 1;
+    let tokens = lex::lex(&src, fid)?;
+    let (mod_ast, new_next) = parse::parse_with_id(tokens, *next_id)?;
+    *next_id = new_next;
+    let mod_dir = path.parent().map(Path::to_path_buf).unwrap_or_else(|| base_dir.to_path_buf());
+    // dépendances du module d'abord (relatives au dossier du module).
+    for sub in &mod_ast.modules {
+        load_module(sub, &mod_dir, items, imports, next_id, next_file, loaded, loading)?;
+    }
+    items.extend(mod_ast.items);
+    imports.extend(mod_ast.imports);
+    loading.retain(|k| k != &key);
+    loaded.push(key);
+    Ok(())
 }
 
 /// Charge et fusionne les bindings `.iri` importés (chemins relatifs au `.irn`).
