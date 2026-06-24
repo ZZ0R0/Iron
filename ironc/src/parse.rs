@@ -666,7 +666,9 @@ impl Parser {
 
     fn cmp_expr(&mut self) -> CResult<Expr> {
         let start = self.i;
-        let mut lhs = self.add_expr()?;
+        // Collecte la chaîne complète `o0 op0 o1 op1 o2 …` (10300, comparaison chaînée).
+        let mut operands = vec![self.add_expr()?];
+        let mut ops: Vec<BinOp> = Vec::new();
         loop {
             let op = match self.cur() {
                 TokenKind::EqEq => BinOp::Eq,
@@ -678,11 +680,29 @@ impl Parser {
                 _ => break,
             };
             self.adv();
-            let id = self.fresh();
-            let rhs = self.add_expr()?;
-            lhs = self.node(start, id, ExprKind::Binary { op, lhs: Box::new(lhs), rhs: Box::new(rhs) });
+            ops.push(op);
+            operands.push(self.add_expr()?);
         }
-        Ok(lhs)
+        if ops.is_empty() {
+            return Ok(operands.pop().unwrap());
+        }
+        // `a op b op c` ≡ `(a op b) and (b op c)` ; opérande médian dupliqué (effet de bord → évalué
+        // deux fois : limitation notée, OK pour des opérandes purs `1 < x < 10`).
+        let mut result: Option<Expr> = None;
+        for (k, op) in ops.iter().enumerate() {
+            let l = operands[k].clone();
+            let r = operands[k + 1].clone();
+            let id = self.fresh();
+            let cmp = self.node(start, id, ExprKind::Binary { op: *op, lhs: Box::new(l), rhs: Box::new(r) });
+            result = Some(match result {
+                None => cmp,
+                Some(prev) => {
+                    let aid = self.fresh();
+                    self.node(start, aid, ExprKind::Binary { op: BinOp::And, lhs: Box::new(prev), rhs: Box::new(cmp) })
+                }
+            });
+        }
+        Ok(result.unwrap())
     }
 
     fn add_expr(&mut self) -> CResult<Expr> {
