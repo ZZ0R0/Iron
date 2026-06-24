@@ -1,0 +1,3 @@
+use "math.iri"
+fn main():
+    print(sqrt(9))

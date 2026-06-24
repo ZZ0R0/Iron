@@ -57,7 +57,7 @@ pub(crate) fn stmt(cx: &mut Inf, s: &Stmt, scope: &mut Scope) {
         StmtKind::ExprStmt(e) => {
             expr(cx, e, scope);
         }
-        StmtKind::Break | StmtKind::Continue | StmtKind::Pass => {}
+        StmtKind::Break | StmtKind::Continue | StmtKind::Pass | StmtKind::RustBlock(_) => {}
     }
 }
 

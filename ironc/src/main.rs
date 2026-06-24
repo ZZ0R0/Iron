@@ -1,6 +1,6 @@
 //! CLI `ironc build|run [--audit] <fichier.irn>`.
 
-use ironc::driver;
+use ironc::{bind, driver};
 use std::path::Path;
 use std::process::exit;
 
@@ -16,6 +16,7 @@ fn main() {
     let res = match positional[0].as_str() {
         "build" => driver::build(input, audit).map(|_| ()),
         "run" => driver::run(input, audit),
+        "bind" => bind::bind(input, positional.get(2).map(|s| s.as_str())).map(|iri| print!("{iri}")),
         other => {
             eprintln!("ironc: commande inconnue : {other}");
             exit(2);

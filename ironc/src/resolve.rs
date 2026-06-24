@@ -74,7 +74,7 @@ fn visit_stmt(s: &Stmt, esc: &mut HashSet<String>) {
             }
         }
         StmtKind::ExprStmt(e) => visit(e, Pos::Value, esc),
-        StmtKind::Break | StmtKind::Continue | StmtKind::Pass => {}
+        StmtKind::Break | StmtKind::Continue | StmtKind::Pass | StmtKind::RustBlock(_) => {}
     }
 }
 

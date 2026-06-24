@@ -80,6 +80,7 @@ impl Parser {
 
     fn program(&mut self) -> CResult<Ast> {
         let mut items = Vec::new();
+        let mut imports = Vec::new();
         loop {
             while self.is(&TokenKind::Newline) {
                 self.adv();
@@ -87,9 +88,19 @@ impl Parser {
             if self.is(&TokenKind::Eof) {
                 break;
             }
+            if matches!(self.cur(), TokenKind::Ident(s) if s == "use") {
+                self.adv();
+                if let TokenKind::Str(p) = self.cur() {
+                    imports.push(p.clone());
+                    self.adv();
+                    self.stmt_end()?;
+                    continue;
+                }
+                return Err(self.err("`use` attend un chemin \"….iri\""));
+            }
             items.push(self.item()?);
         }
-        Ok(Ast { items })
+        Ok(Ast { items, imports })
     }
 
     fn item(&mut self) -> CResult<Item> {
@@ -249,6 +260,14 @@ impl Parser {
     // ---------------------------------------------------------------- statements
 
     fn stmt(&mut self) -> CResult<Stmt> {
+        if let TokenKind::RustVerbatim(s) = self.cur() {
+            let s = s.clone();
+            let start = self.i;
+            let id = self.fresh();
+            self.adv();
+            self.stmt_end()?;
+            return Ok(self.node(start, id, StmtKind::RustBlock(s)));
+        }
         match self.cur() {
             TokenKind::Return => self.return_stmt(),
             TokenKind::If => self.if_stmt(),

@@ -1,0 +1,4 @@
+use "gen_libm.iri"
+
+fn main():
+    print(sqrt(49.0))

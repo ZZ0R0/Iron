@@ -9,14 +9,16 @@ use crate::ir::*;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use std::collections::HashSet;
+use std::str::FromStr;
 
 pub fn lower(
     ast: &Ast,
     types: &TypeMap,
     _own: &OwnershipMap,
     param_modes: &ParamModes,
+    bindings: &Bindings,
 ) -> (TokenStream, SourceMap, Vec<Span>) {
-    let mut cx = Cx { sm: SourceMap::default(), types, param_modes, audit: Vec::new() };
+    let mut cx = Cx { sm: SourceMap::default(), types, param_modes, bindings, audit: Vec::new() };
     let items: Vec<TokenStream> = ast.items.iter().map(|it| cx.item(it)).collect();
     let body = quote! { #(#items)* };
     let file = quote! {
@@ -37,6 +39,7 @@ struct Cx<'a> {
     sm: SourceMap,
     types: &'a TypeMap,
     param_modes: &'a ParamModes,
+    bindings: &'a Bindings,
     audit: Vec<Span>,
 }
 
@@ -70,13 +73,18 @@ impl Cx<'_> {
                     })
                     .collect();
                 let param_names: HashSet<String> = params.iter().map(|(n, _)| n.clone()).collect();
-                let mut locals = Vec::new();
-                collect_locals(body, &param_names, &mut locals);
+                let mut locals: Vec<(String, Type)> = Vec::new();
+                collect_locals(body, &param_names, self.types, &mut locals);
                 let decls: Vec<TokenStream> = locals
                     .iter()
-                    .map(|n| {
+                    .map(|(n, t)| {
                         let id = format_ident!("{}", n);
-                        quote! { let mut #id; }
+                        if is_annotatable(t) {
+                            let ty = lower_type(t);
+                            quote! { let mut #id: #ty; }
+                        } else {
+                            quote! { let mut #id; }
+                        }
                     })
                     .collect();
                 let stmts: Vec<TokenStream> = body.iter().map(|s| self.stmt(s)).collect();
@@ -170,6 +178,10 @@ impl Cx<'_> {
                 quote! { #e; }
             }
             StmtKind::Pass => quote! {},
+            StmtKind::RustBlock(text) => match TokenStream::from_str(text) {
+                Ok(ts) => ts,
+                Err(_) => quote! { compile_error!("bloc rust: non tokenisable"); },
+            },
         };
         quote! { __irn_mark!(#mark); #body }
     }
@@ -361,6 +373,13 @@ impl Cx<'_> {
                 }
                 _ => {}
             }
+            // fonction externe (`.iri`) → chemin Rust (50200).
+            if let Some(ef) = self.bindings.fns.get(name) {
+                let path = TokenStream::from_str(&ef.path).unwrap_or_else(|_| quote! { () });
+                let a: Vec<TokenStream> = args.iter().map(|x| self.value(x)).collect();
+                let _ = ef;
+                return quote! { #path( #(#a),* ) };
+            }
         }
         // appel utilisateur : `&x` pour un param `ByRef`, valeur sinon.
         let modes = match &callee.kind {
@@ -388,26 +407,39 @@ impl Cx<'_> {
     }
 }
 
-/// Collecte (ordonnée, dédupliquée) les variables locales liées par `Let`, récursivement, hors params.
-fn collect_locals(body: &[Stmt], params: &HashSet<String>, out: &mut Vec<String>) {
+/// Collecte (ordonnée, dédupliquée) les variables locales liées par `Let`, avec leur type inféré,
+/// récursivement, hors params. Pour le hoisting (scoping Python) + annotation de type.
+fn collect_locals(body: &[Stmt], params: &HashSet<String>, types: &TypeMap, out: &mut Vec<(String, Type)>) {
     for s in body {
         match &s.kind {
-            StmtKind::Let { name, .. } => {
-                if !params.contains(name) && !out.contains(name) {
-                    out.push(name.clone());
+            StmtKind::Let { name, value } => {
+                if !params.contains(name) && !out.iter().any(|(n, _)| n == name) {
+                    let t = types.get(&value.id).cloned().unwrap_or(Type::Unit);
+                    out.push((name.clone(), t));
                 }
             }
             StmtKind::If { then, elifs, els, .. } => {
-                collect_locals(then, params, out);
+                collect_locals(then, params, types, out);
                 for (_, b) in elifs {
-                    collect_locals(b, params, out);
+                    collect_locals(b, params, types, out);
                 }
-                collect_locals(els, params, out);
+                collect_locals(els, params, types, out);
             }
-            StmtKind::While { body, .. } => collect_locals(body, params, out),
-            StmtKind::For { body, .. } => collect_locals(body, params, out),
+            StmtKind::While { body, .. } => collect_locals(body, params, types, out),
+            StmtKind::For { body, .. } => collect_locals(body, params, types, out),
             _ => {}
         }
+    }
+}
+
+/// Annoter une déclaration hoistée ? Oui si le type est **concret** (sans `Unit` — sinon on laisse
+/// l'inférence Rust trancher, p. ex. liste vide).
+fn is_annotatable(t: &Type) -> bool {
+    match t {
+        Type::Unit => false,
+        Type::List(e) | Type::Option(e) | Type::Result(e) => is_annotatable(e),
+        Type::Dict(k, v) => is_annotatable(k) && is_annotatable(v),
+        _ => true,
     }
 }
 
@@ -439,6 +471,7 @@ fn lower_type(t: &Type) -> TokenStream {
             let v = lower_type(v);
             quote! { std::collections::HashMap<#k, #v> }
         }
+        Type::Extern(path) => TokenStream::from_str(path).unwrap_or_else(|_| quote! { () }),
     }
 }
 

@@ -1,0 +1,2 @@
+crate libm = "0.2"
+extern fn csqrt(x: f64) -> f64 = "libm::sqrt"

@@ -15,6 +15,7 @@ pub struct Compiled {
     pub source_map: SourceMap,
     pub mappings: Vec<sourcemap::Mapping>,
     pub audit: Vec<Span>,
+    pub crates: Vec<(String, String)>,
 }
 
 impl Compiled {
@@ -29,36 +30,55 @@ impl Compiled {
 }
 
 /// Pipeline figé (I9), sans invoquer cargo. Testable isolément.
-pub fn compile(src: &str, file: FileId) -> CResult<Compiled> {
+pub fn compile(src: &str, file: FileId, base_dir: &Path) -> CResult<Compiled> {
     let tokens = lex::lex(src, file)?;
     let ast = parse::parse(tokens)?;
-    let types = infer::infer(&ast);
+    let bindings = load_bindings(&ast.imports, base_dir)?;
+    let types = infer::infer(&ast, &bindings);
     let (own, param_modes) = resolve::resolve(&ast, &types);
-    let (ts, sm, audit) = lower::lower(&ast, &types, &own, &param_modes);
+    let (ts, sm, audit) = lower::lower(&ast, &types, &own, &param_modes, &bindings);
 
     let syn_file: syn::File = syn::parse2(ts)
         .map_err(|e| CompileError::msg(format!("lowering a produit du Rust invalide : {e}")))?;
     let rust_src = prettyplease::unparse(&syn_file);
     let mappings = sourcemap::resolve(&rust_src, &sm);
 
-    Ok(Compiled { rust_src, source_map: sm, mappings, audit })
+    Ok(Compiled { rust_src, source_map: sm, mappings, audit, crates: bindings.crates })
+}
+
+/// Charge et fusionne les bindings `.iri` importés (chemins relatifs au `.irn`).
+fn load_bindings(imports: &[String], base_dir: &Path) -> CResult<Bindings> {
+    let mut b = Bindings::default();
+    for imp in imports {
+        let path = base_dir.join(imp);
+        let src = std::fs::read_to_string(&path)
+            .map_err(|e| CompileError::msg(format!("lecture binding {} : {e}", path.display())))?;
+        let bb = crate::iri::parse(&src, 0)?;
+        b.fns.extend(bb.fns);
+        b.types.extend(bb.types);
+        b.crates.extend(bb.crates);
+    }
+    Ok(b)
 }
 
 /// Écrit un projet cargo autonome `{Cargo.toml, src/main.rs}` dans `out_dir`.
-pub fn emit_project(out_dir: &Path, rust_src: &str) -> std::io::Result<()> {
+pub fn emit_project(out_dir: &Path, rust_src: &str, crates: &[(String, String)]) -> std::io::Result<()> {
     std::fs::create_dir_all(out_dir.join("src"))?;
-    std::fs::write(out_dir.join("Cargo.toml"), CARGO_TOML)?;
+    let deps: String = crates.iter().map(|(n, v)| format!("{n} = \"{v}\"\n")).collect();
+    // `[workspace]` vide → projet généré **autonome** (jamais membre d'un workspace parent).
+    let cargo = format!(
+        "[workspace]\n\n[package]\nname = \"iron_out\"\nversion = \"0.0.0\"\nedition = \"2021\"\n\n[dependencies]\n{deps}"
+    );
+    std::fs::write(out_dir.join("Cargo.toml"), cargo)?;
     std::fs::write(out_dir.join("src").join("main.rs"), rust_src)?;
     Ok(())
 }
 
-// `[workspace]` vide → projet généré **autonome** (jamais membre d'un workspace parent).
-const CARGO_TOML: &str = "[workspace]\n\n[package]\nname = \"iron_out\"\nversion = \"0.0.0\"\nedition = \"2021\"\n";
-
 pub fn build(input: &Path, audit: bool) -> CResult<PathBuf> {
     let src = std::fs::read_to_string(input)
         .map_err(|e| CompileError::msg(format!("lecture {} : {e}", input.display())))?;
-    let compiled = compile(&src, 0)?;
+    let base_dir = input.parent().unwrap_or(Path::new("."));
+    let compiled = compile(&src, 0, base_dir)?;
     if audit {
         for span in &compiled.audit {
             let (l, c) = line_col(&src, span.start);
@@ -66,7 +86,7 @@ pub fn build(input: &Path, audit: bool) -> CResult<PathBuf> {
         }
     }
     let out_dir = out_dir_for(input);
-    emit_project(&out_dir, &compiled.rust_src)
+    emit_project(&out_dir, &compiled.rust_src, &compiled.crates)
         .map_err(|e| CompileError::msg(format!("émission projet : {e}")))?;
 
     let output = Command::new("cargo")

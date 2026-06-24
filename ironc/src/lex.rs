@@ -85,7 +85,7 @@ impl<'a> Lexer<'a> {
                     }
                 }
                 b'0'..=b'9' => self.lex_number()?,
-                c if is_ident_start(c) => self.lex_ident(),
+                c if is_ident_start(c) => self.lex_ident()?,
                 b'"' => self.lex_string()?,
                 _ => self.lex_op()?,
             }
@@ -184,7 +184,7 @@ impl<'a> Lexer<'a> {
         Ok(())
     }
 
-    fn lex_ident(&mut self) {
+    fn lex_ident(&mut self) -> CResult<()> {
         let start = self.pos;
         while let Some(c) = self.peek() {
             if is_ident_continue(c) {
@@ -193,8 +193,21 @@ impl<'a> Lexer<'a> {
                 break;
             }
         }
-        let text = std::str::from_utf8(&self.src[start..self.pos]).unwrap();
-        let kind = match text {
+        let text = std::str::from_utf8(&self.src[start..self.pos]).unwrap().to_string();
+        // `rust {` → capture brute du bloc (interop niveau 1, 50100).
+        if text == "rust" {
+            let mut p = self.pos;
+            while matches!(self.src.get(p), Some(b' ') | Some(b'\t')) {
+                p += 1;
+            }
+            if self.src.get(p) == Some(&b'{') {
+                self.pos = p + 1; // après le `{`
+                let inner = self.capture_rust_block(start)?;
+                self.push(TokenKind::RustVerbatim(inner), start);
+                return Ok(());
+            }
+        }
+        let kind = match text.as_str() {
             "fn" => TokenKind::Fn,
             "struct" => TokenKind::Struct,
             "if" => TokenKind::If,
@@ -212,9 +225,63 @@ impl<'a> Lexer<'a> {
             "not" => TokenKind::Not,
             "true" => TokenKind::Bool(true),
             "false" => TokenKind::Bool(false),
-            _ => TokenKind::Ident(text.to_string()),
+            _ => TokenKind::Ident(text.clone()),
         };
         self.push(kind, start);
+        Ok(())
+    }
+
+    /// Capte le contenu brut d'un `rust { … }` jusqu'au `}` apparié (en sautant chaînes et `//`).
+    fn capture_rust_block(&mut self, start: usize) -> CResult<String> {
+        let inner_start = self.pos;
+        let mut depth = 1usize;
+        while depth > 0 {
+            match self.peek() {
+                None => return Err(self.err(start, "bloc `rust { }` non terminé")),
+                Some(b'{') => {
+                    depth += 1;
+                    self.pos += 1;
+                }
+                Some(b'}') => {
+                    depth -= 1;
+                    self.pos += 1;
+                }
+                Some(b'"') => self.skip_rust_string()?,
+                Some(b'/') if self.peek2() == Some(b'/') => {
+                    while let Some(c) = self.peek() {
+                        if c == b'\n' {
+                            break;
+                        }
+                        self.pos += 1;
+                    }
+                }
+                Some(_) => self.pos += 1,
+            }
+        }
+        let inner = std::str::from_utf8(&self.src[inner_start..self.pos - 1])
+            .unwrap_or("")
+            .to_string();
+        Ok(inner)
+    }
+
+    fn skip_rust_string(&mut self) -> CResult<()> {
+        self.pos += 1; // guillemet ouvrant
+        loop {
+            match self.peek() {
+                None => return Err(self.err(self.pos, "chaîne Rust non terminée dans `rust { }`")),
+                Some(b'\\') => {
+                    self.pos += 1;
+                    if self.peek().is_some() {
+                        self.pos += 1;
+                    }
+                }
+                Some(b'"') => {
+                    self.pos += 1;
+                    return Ok(());
+                }
+                Some(_) => self.pos += 1,
+            }
+        }
     }
 
     fn lex_string(&mut self) -> CResult<()> {

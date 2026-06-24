@@ -15,7 +15,7 @@ pub(crate) type Sigs = HashMap<String, (Vec<Type>, Type)>;
 /// Champs de structs : nom → (champ → type).
 pub(crate) type Structs = HashMap<String, Vec<(String, Type)>>;
 
-pub fn infer(ast: &Ast) -> TypeMap {
+pub fn infer(ast: &Ast, bindings: &Bindings) -> TypeMap {
     let mut sigs = Sigs::new();
     let mut structs = Structs::new();
     for it in &ast.items {
@@ -27,6 +27,10 @@ pub fn infer(ast: &Ast) -> TypeMap {
                 structs.insert(name.clone(), fields.clone());
             }
         }
+    }
+
+    for (name, ef) in &bindings.fns {
+        sigs.insert(name.clone(), (ef.params.clone(), ef.ret.clone()));
     }
 
     let mut tm = TypeMap::new();

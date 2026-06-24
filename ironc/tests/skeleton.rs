@@ -7,7 +7,7 @@ use ironc::ir::*;
 
 #[test]
 fn squelette_compile_et_marqueur_roundtrip() {
-    let compiled = driver::compile("fn main():\n    pass\n", 0).expect("compile ok");
+    let compiled = driver::compile("fn main():\n    pass\n", 0, std::path::Path::new(".")).expect("compile ok");
 
     // 1. Le Rust généré porte l'invariant I2 (forbid unsafe) + le marqueur.
     assert!(
@@ -31,7 +31,7 @@ fn squelette_compile_et_marqueur_roundtrip() {
 #[test]
 fn rust_genere_est_du_rust_valide() {
     // compile() échoue si lower produit du Rust que syn ne peut pas parser.
-    let compiled = driver::compile("fn main():\n    pass\n", 0).expect("compile ok");
+    let compiled = driver::compile("fn main():\n    pass\n", 0, std::path::Path::new(".")).expect("compile ok");
     assert!(compiled.rust_src.contains("fn main()"));
 }
 
@@ -39,7 +39,8 @@ fn rust_genere_est_du_rust_valide() {
 fn fixtures_compilent_vers_du_rust_valide() {
     for name in ["factorial", "collections", "result", "structs", "braces", "gate"] {
         let src = std::fs::read_to_string(format!("tests/fixtures/{name}.irn")).unwrap();
-        let c = driver::compile(&src, 0).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let c = driver::compile(&src, 0, std::path::Path::new("tests/fixtures"))
+            .unwrap_or_else(|e| panic!("{name}: {e}"));
         assert!(c.rust_src.contains("forbid(unsafe_code)"), "{name}: forbid(unsafe_code) manquant");
         assert!(!c.mappings.is_empty(), "{name}: source map vide");
     }

@@ -1,0 +1,6 @@
+fn main():
+    x = 9.0
+    rust {
+        let r = x.sqrt();
+        println!("{}", r);
+    }

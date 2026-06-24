@@ -90,6 +90,8 @@ pub enum TokenKind {
     Indent,
     Dedent,
     Newline,
+    /// Contenu brut d'un bloc `rust { … }` (interop niveau 1, capté sans tokenisation Iron).
+    RustVerbatim(String),
     Eof,
 }
 
@@ -113,6 +115,8 @@ pub enum Type {
     Result(Box<Type>),
     List(Box<Type>),
     Dict(Box<Type>, Box<Type>),
+    /// Type Rust opaque (interop 50200) — stocke le chemin Rust.
+    Extern(String),
 }
 
 // ---------------------------------------------------------------- AST (10200, §4.2)
@@ -152,6 +156,8 @@ pub enum StmtKind {
     Return { value: Option<Expr> },
     ExprStmt(Expr),
     Pass,
+    /// Bloc `rust { … }` : Rust verbatim (interop niveau 1, 50100).
+    RustBlock(String),
 }
 
 #[derive(Debug, Clone)]
@@ -203,6 +209,8 @@ pub enum ExprKind {
 #[derive(Debug, Clone, Default)]
 pub struct Ast {
     pub items: Vec<Item>,
+    /// Chemins `.iri` importés via `use "…"` (interop 50200).
+    pub imports: Vec<String>,
 }
 
 // ---------------------------------------------------------------- Tables annexes
@@ -230,6 +238,22 @@ pub enum ParamMode {
 
 /// `fn_name → modes de ses paramètres`.
 pub type ParamModes = HashMap<String, Vec<ParamMode>>;
+
+/// Fonction Rust externe importée via `.iri` (50200) : signature Iron + chemin Rust.
+#[derive(Debug, Clone)]
+pub struct ExternFn {
+    pub params: Vec<Type>,
+    pub ret: Type,
+    pub path: String,
+}
+
+/// Bindings chargés depuis les `.iri` importés (50200).
+#[derive(Debug, Clone, Default)]
+pub struct Bindings {
+    pub fns: HashMap<String, ExternFn>,
+    pub types: HashMap<String, String>,
+    pub crates: Vec<(String, String)>,
+}
 
 // ---------------------------------------------------------------- SourceMap (§4.6)
 

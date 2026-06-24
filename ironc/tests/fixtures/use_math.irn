@@ -1,0 +1,5 @@
+use "math.iri"
+
+fn main():
+    r = sqrt(16.0)
+    print(r)
