@@ -22,10 +22,13 @@
 | **V3** | Système de types avancé | 20300 | M5 | enums + match + traits + génériques → Rust idiomatique ; projection I6 tient | 🔶 provisoire |
 | **V4** | Stdlib | 80100 | M6 | surface stdlib utilisable (wrappers fins, pas de runtime lourd I5) ; I7 | ✅ réalisé |
 | **V5** | Complétude : `move` (I1), `inout` (I3), inférence méthode, NaN (I12), métrique | G1–G8 | M2++ | invariants comblés ; corpus inchangé ; **0 clone** mesuré | ✅ réalisé |
-| **V6** | Finition : les **18 manques** de l'audit (I11 flux, I5 `Rc`, I8 expr, closures, modules…) | 20400 30300 20700 20500 20600 30400 60200 50400 70200 80200 10300 90100 | M5+/M6+ | I11/I5/I8 honorés + dettes payées | 🔶 **cadré** |
+| **V6** | Finition : les **18 manques** de l'audit (I11 flux, I5 `Rc`, closures, modules…) | 20400 30300 20700 20500 20600 30400 50400 70200 80200 10300 (60200·90100 différés) | M5+/M6+ | I11/I5 honorés + dettes payées | ✅ **réalisé** (10/12) |
 
-> **V0–V5 réalisés** (commits `bfa610f` → `a52d981`), chacun avec sa trace `specs/Vn/realisation.md`.
-> **V6 cadré** : 12 specs écrites (`specs/V6/`) couvrant les 18 manques ; planification + réalisation à venir.
+> **V0–V6 réalisés**, chacun avec sa trace `specs/Vn/realisation.md`.
+> **V6 réalisé** : 10/12 specs implémentées + prouvées (gate **vert** : 37/37 corpus, 0 `unsafe`, 3 clones
+> intentionnels, remontée I8 OK, modules multi-fichiers OK). **2 différées par conception** : 60200
+> (source-maps expression — mécanisme 🔶-ouvert) et 90100 (métrique de vérité — exige le gel du langage).
+> Détail & faiblesses→V7 : `specs/V6/realisation.md`.
 
 ## Pourquoi cet ordre
 
