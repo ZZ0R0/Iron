@@ -20,9 +20,12 @@
 | **V1** | Qualité du Rust : élision d'emprunt | 30200 | M2+ | clone-fallback → emprunt là où prouvé sûr ; `--audit` liste les fallbacks ; **sémantique inchangée** vs V0 ; aliasing mutable jamais auto-cloné (I3) | 🔶 provisoire |
 | **V2** | Interop Rust par niveaux (I7) | 50100, 50200, 50300 | M4 | appel de crates réelles aux 3 niveaux ; ordre I7 respecté (50300 en fin) | 🔶 provisoire |
 | **V3** | Système de types avancé | 20300 | M5 | enums + match + traits + génériques → Rust idiomatique ; projection I6 tient | 🔶 provisoire |
-| **V4** | Stdlib | 80100 | M6 | surface stdlib utilisable (wrappers fins, pas de runtime lourd I5) ; I7 | 🔶 provisoire |
+| **V4** | Stdlib | 80100 | M6 | surface stdlib utilisable (wrappers fins, pas de runtime lourd I5) ; I7 | ✅ réalisé |
+| **V5** | Complétude : `move` (I1), `inout` (I3), inférence méthode, NaN (I12), métrique | G1–G8 | M2++ | invariants comblés ; corpus inchangé ; **0 clone** mesuré | ✅ réalisé |
+| **V6** | Finition : les **18 manques** de l'audit (I11 flux, I5 `Rc`, I8 expr, closures, modules…) | 20400 30300 20700 20500 20600 30400 60200 50400 70200 80200 10300 90100 | M5+/M6+ | I11/I5/I8 honorés + dettes payées | 🔶 **cadré** |
 
-> V0 est détaillée dans `specs/V0/generated.md`. V1–V4 ont une carte **provisoire** (`specs/Vn/generated.md`) : détail complet produit **au début de leur cycle**, corrections de Vn-1 intégrées.
+> **V0–V5 réalisés** (commits `bfa610f` → `a52d981`), chacun avec sa trace `specs/Vn/realisation.md`.
+> **V6 cadré** : 12 specs écrites (`specs/V6/`) couvrant les 18 manques ; planification + réalisation à venir.
 
 ## Pourquoi cet ordre
 
