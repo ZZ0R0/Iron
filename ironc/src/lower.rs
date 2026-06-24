@@ -633,6 +633,10 @@ impl Cx<'_> {
                 "concat" if args.len() == 2 => {
                     let a = self.value(&args[0]);
                     let b = self.value(&args[1]);
+                    // concat sur listes (80200) → extension ; sinon concaténation de chaînes (80100).
+                    if matches!(self.type_of(&args[0]), Type::List(_)) {
+                        return quote! { { let mut __v = #a; __v.extend(#b); __v } };
+                    }
                     return quote! { format!("{}{}", #a, #b) };
                 }
                 "push" if args.len() == 2 => {
@@ -642,7 +646,42 @@ impl Cx<'_> {
                 }
                 "sum" if args.len() == 1 => {
                     let l = self.place(&args[0]);
-                    return quote! { #l.iter().sum::<i64>() };
+                    // somme générique (80200) : type d'élément déduit (i64 par défaut).
+                    let et = match self.type_of(&args[0]) {
+                        Type::List(e) => lower_type(&e),
+                        _ => quote! { i64 },
+                    };
+                    return quote! { #l.iter().sum::<#et>() };
+                }
+                // stdlib élargie V6 (80200)
+                "sort" if args.len() == 1 => {
+                    let v = self.value(&args[0]);
+                    return quote! { { let mut __v = #v; __v.sort_by(|a, b| a.partial_cmp(b).unwrap()); __v } };
+                }
+                "input" if args.is_empty() => {
+                    return quote! {{
+                        let mut __s = String::new();
+                        std::io::stdin().read_line(&mut __s).ok();
+                        __s.trim_end().to_string()
+                    }};
+                }
+                "upper" if args.len() == 1 => {
+                    let a = self.value(&args[0]);
+                    return quote! { (#a).to_uppercase() };
+                }
+                "lower" if args.len() == 1 => {
+                    let a = self.value(&args[0]);
+                    return quote! { (#a).to_lowercase() };
+                }
+                "split" if args.len() == 2 => {
+                    let a = self.value(&args[0]);
+                    let b = self.value(&args[1]);
+                    return quote! { (#a).split((#b).as_str()).map(|__p| __p.to_string()).collect::<Vec<_>>() };
+                }
+                "index_of" if args.len() == 2 => {
+                    let a = self.value(&args[0]);
+                    let b = self.value(&args[1]);
+                    return quote! { (#a).find((#b).as_str()).map(|__i| __i as i64).unwrap_or(-1i64) };
                 }
                 // map/filter (20700) : la fonction est une closure inline (`|x| …`) ou un nom (fn/var).
                 "map" if args.len() == 2 => {

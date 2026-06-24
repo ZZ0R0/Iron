@@ -118,11 +118,23 @@ pub(crate) fn expr(cx: &mut Inf, e: &Expr, scope: &Scope) -> Type {
                     "ok" => Type::Result(Box::new(arg0_ty(cx, args))),
                     "err" => Type::Result(Box::new(Type::Unit)),
                     // stdlib V4 (80100)
-                    "str" | "concat" => Type::Str,
+                    "str" => Type::Str,
                     "sqrt" => Type::F64,
                     "abs" | "min" | "max" => arg0_ty(cx, args),
                     "push" => Type::Unit,
-                    "sum" => Type::I64,
+                    // stdlib élargie V6 (80200)
+                    "sum" => match args.first().and_then(|a| cx.tm.get(&a.id)) {
+                        Some(Type::List(e)) => (**e).clone(),
+                        _ => Type::I64,
+                    },
+                    "concat" => match args.first().and_then(|a| cx.tm.get(&a.id)) {
+                        Some(Type::List(e)) => Type::List(e.clone()),
+                        _ => Type::Str,
+                    },
+                    "sort" => arg0_ty(cx, args),
+                    "input" | "upper" | "lower" => Type::Str,
+                    "split" => Type::List(Box::new(Type::Str)),
+                    "index_of" => Type::I64,
                     // map/filter (20700) : best-effort = type de la liste source (args[1]).
                     "map" | "filter" => args.get(1).and_then(|a| cx.tm.get(&a.id)).cloned().unwrap_or(Type::Unit),
                     _ => cx.sigs.get(name).map(|(_, r)| r.clone()).unwrap_or(Type::Unit),

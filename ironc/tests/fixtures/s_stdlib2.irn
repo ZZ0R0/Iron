@@ -1,0 +1,10 @@
+# [V6/4.3] Stdlib élargie (80200) : sort, sum générique, concat de listes, upper/lower, index_of, split.
+
+fn main():
+    print(sort([3, 1, 2]))
+    print(sum([1.5, 2.5, 3.0]))
+    print(concat([1, 2], [3, 4]))
+    print(upper("hello"))
+    print(lower("WORLD"))
+    print(index_of("abcdef", "cd"))
+    print(split("a,b,c", ","))
