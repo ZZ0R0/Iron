@@ -34,6 +34,7 @@ pub fn lower(
         enums,
         own,
         inout_params: HashSet::new(),
+        byref_params: HashSet::new(),
         flow_wrap: None,
         audit: Vec::new(),
     };
@@ -69,6 +70,8 @@ struct Cx<'a> {
     enums: HashSet<String>,
     own: &'a OwnershipMap,
     inout_params: HashSet<String>,
+    /// Params passés en `&T` (ByRef) pour la fn en cours — base non possédée → pas de move-hors-struct.
+    byref_params: HashSet<String>,
     /// Emballage du retour pour la fn en cours de lowering (None hors fn flux-Option/Result).
     flow_wrap: Option<FlowWrap>,
     audit: Vec<Span>,
@@ -109,6 +112,13 @@ impl Cx<'_> {
                 let param_names: HashSet<String> = params.iter().map(|(n, _)| n.clone()).collect();
                 self.inout_params =
                     params.iter().filter_map(|(n, t)| matches!(t, Type::Ref(_)).then(|| n.clone())).collect();
+                self.byref_params = params
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, (n, _))| {
+                        matches!(mode_of(self.param_modes, name, i), ParamMode::ByRef).then(|| n.clone())
+                    })
+                    .collect();
                 // I11 par flux : type effectif (`tm[fn.id]`) vs déclaré (AST). S'ils divergent vers
                 // Option/Result, on emballe les retours et (Option) on ajoute la chute `None`.
                 let declared = ret;
@@ -325,14 +335,7 @@ impl Cx<'_> {
                     quote! { return None; }
                 }
                 Some(e) => {
-                    // return d'une variable = dernière utilisation sur ce chemin → move (pas de clone).
-                    let ev = match &e.kind {
-                        ExprKind::Var(n) => {
-                            let id = format_ident!("{}", n);
-                            quote! { #id }
-                        }
-                        _ => self.value(e),
-                    };
+                    let ev = self.return_value(e);
                     // I11 par flux : emballe le retour si la fn est flux-Option/Result.
                     match self.flow_wrap {
                         Some(FlowWrap::Some_) => quote! { return Some(#ev); },
@@ -580,6 +583,29 @@ impl Cx<'_> {
                 let b = self.value(body);
                 quote! { | #(#ps),* | #b }
             }
+        }
+    }
+
+    /// Valeur retournée : un `return` est terminal, donc on **move** plutôt que cloner quand c'est sûr.
+    fn return_value(&mut self, e: &Expr) -> TokenStream {
+        match &e.kind {
+            // return d'une variable = dernière utilisation → move (pas de clone).
+            ExprKind::Var(n) => {
+                let id = format_ident!("{}", n);
+                quote! { #id }
+            }
+            // DX2 (30400) : `return p.a` où `p` est possédé (pas ByRef ni Shared) et `a` non-Copy →
+            // move-hors-struct (move partiel sûr car le `return` quitte la fn → pas de borne Clone).
+            ExprKind::Field { base, name } => {
+                let owned_base = matches!(&base.kind, ExprKind::Var(bn) if !self.byref_params.contains(bn));
+                if owned_base && !is_copy(&self.type_of(e)) && !matches!(self.type_of(base), Type::Shared(_)) {
+                    let b = self.place(base);
+                    let f = format_ident!("{}", name);
+                    return quote! { #b.#f };
+                }
+                self.value(e)
+            }
+            _ => self.value(e),
         }
     }
 

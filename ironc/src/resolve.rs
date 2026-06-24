@@ -185,6 +185,13 @@ fn visit_stmt(s: &Stmt, esc: &mut HashSet<String>) {
         }
         StmtKind::Return { value } => {
             if let Some(e) = value {
+                // DX2 (30400) : `return p.a` → `p` doit être **possédé** (ByValue) pour permettre le
+                // move-hors-struct (sinon clone + borne Clone). On marque sa base comme échappante.
+                if let ExprKind::Field { base, .. } = &e.kind {
+                    if let ExprKind::Var(n) = &base.kind {
+                        esc.insert(n.clone());
+                    }
+                }
                 visit(e, Pos::Value, esc);
             }
         }

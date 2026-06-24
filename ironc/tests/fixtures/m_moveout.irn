@@ -1,0 +1,20 @@
+# [V6/3.3] Move-hors-struct (DX2, 30400) : retour d'un champ non-Copy (générique) sans borne Clone.
+
+struct Box[T]:
+    item: T
+
+fn unwrap[T](b: Box[T]) -> T:
+    return b.item
+
+struct Pair:
+    name: str
+    count: i64
+
+fn take_name(p: Pair) -> str:
+    return p.name
+
+fn main():
+    bs = Box(item="treasure")
+    print(unwrap(bs))
+    p = Pair(name="widget", count=5)
+    print(take_name(p))
