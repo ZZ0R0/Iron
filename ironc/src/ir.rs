@@ -286,6 +286,8 @@ pub struct Ast {
     pub imports: Vec<String>,
     /// Modules Iron importés via `import foo` (→ `foo.irn`) (70200). Fusionnés à plat par le driver.
     pub modules: Vec<String>,
+    /// Types opaques `extern type Name = "rust::path"` (50400) : nom → chemin Rust ; émis en alias.
+    pub extern_types: Vec<(String, String)>,
 }
 
 // ---------------------------------------------------------------- Tables annexes

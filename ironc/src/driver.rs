@@ -37,9 +37,11 @@ pub fn compile(src: &str, file: FileId, base_dir: &Path) -> CResult<Compiled> {
     // tables annexes → pas de collision), FileId distincts (source maps multi-fichiers), cycles détectés.
     let mut next_file: FileId = file + 1;
     let (mut loaded, mut loading): (Vec<String>, Vec<String>) = (Vec::new(), Vec::new());
+    let mut ext = std::mem::take(&mut ast.extern_types);
     for m in std::mem::take(&mut ast.modules) {
-        load_module(&m, base_dir, &mut ast.items, &mut ast.imports, &mut next_id, &mut next_file, &mut loaded, &mut loading)?;
+        load_module(&m, base_dir, &mut ast.items, &mut ast.imports, &mut ext, &mut next_id, &mut next_file, &mut loaded, &mut loading)?;
     }
+    ast.extern_types = ext;
     // 20500 : résoudre les types de paramètres non annotés (pré-passe, réécrit l'AST) avant tout le reste.
     infer::params::resolve_param_types(&mut ast);
     let bindings = load_bindings(&ast.imports, base_dir)?;
@@ -64,6 +66,7 @@ fn load_module(
     base_dir: &Path,
     items: &mut Vec<Item>,
     imports: &mut Vec<String>,
+    extern_types: &mut Vec<(String, String)>,
     next_id: &mut u32,
     next_file: &mut FileId,
     loaded: &mut Vec<String>,
@@ -88,10 +91,11 @@ fn load_module(
     let mod_dir = path.parent().map(Path::to_path_buf).unwrap_or_else(|| base_dir.to_path_buf());
     // dépendances du module d'abord (relatives au dossier du module).
     for sub in &mod_ast.modules {
-        load_module(sub, &mod_dir, items, imports, next_id, next_file, loaded, loading)?;
+        load_module(sub, &mod_dir, items, imports, extern_types, next_id, next_file, loaded, loading)?;
     }
     items.extend(mod_ast.items);
     imports.extend(mod_ast.imports);
+    extern_types.extend(mod_ast.extern_types);
     loading.retain(|k| k != &key);
     loaded.push(key);
     Ok(())

@@ -39,7 +39,17 @@ pub fn lower(
         audit: Vec::new(),
     };
     let items: Vec<TokenStream> = ast.items.iter().map(|it| cx.item(it)).collect();
-    let body = quote! { #(#items)* };
+    // Alias des types opaques `extern type Name = "path"` (50400) → `type Name = path;`.
+    let aliases: Vec<TokenStream> = ast
+        .extern_types
+        .iter()
+        .map(|(name, path)| {
+            let id = format_ident!("{}", name);
+            let ty = TokenStream::from_str(path).unwrap_or_else(|_| quote! { () });
+            quote! { type #id = #ty; }
+        })
+        .collect();
+    let body = quote! { #(#aliases)* #(#items)* };
     let file = quote! {
         #![forbid(unsafe_code)]
         #![allow(dead_code, unused_macros, unused_variables, unused_mut, unused_parens, unused_imports)]

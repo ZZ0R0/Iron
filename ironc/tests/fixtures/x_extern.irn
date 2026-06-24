@@ -1,0 +1,13 @@
+# [V6/4.1] Type opaque inline `extern type` (50400) : type Iron + alias dans un bloc rust.
+extern type Duration = "std::time::Duration"
+
+fn seconds(n: i64) -> Duration:
+    rust {
+        return std::time::Duration::from_secs(n as u64);
+    }
+
+fn main():
+    d = seconds(3)
+    rust {
+        println!("duration = {} s", d.as_secs());
+    }

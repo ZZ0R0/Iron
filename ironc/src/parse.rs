@@ -22,6 +22,8 @@ struct Parser {
     toks: Vec<Token>,
     i: usize,
     next_id: u32,
+    /// Types opaques déclarés `extern type Name = "rust::path"` (50400) : nom → chemin Rust.
+    extern_types: Vec<(String, String)>,
 }
 
 fn same(a: &TokenKind, b: &TokenKind) -> bool {
@@ -30,7 +32,7 @@ fn same(a: &TokenKind, b: &TokenKind) -> bool {
 
 impl Parser {
     fn new(toks: Vec<Token>) -> Self {
-        Parser { toks, i: 0, next_id: 0 }
+        Parser { toks, i: 0, next_id: 0, extern_types: Vec::new() }
     }
 
     fn fresh(&mut self) -> NodeId {
@@ -116,9 +118,27 @@ impl Parser {
                 self.stmt_end()?;
                 continue;
             }
+            if matches!(self.cur(), TokenKind::Ident(s) if s == "extern") {
+                self.adv();
+                // `extern type Name = "rust::path"` → type opaque (50400).
+                if !matches!(self.cur(), TokenKind::Ident(s) if s == "type") {
+                    return Err(self.err("`extern` attend `type Name = \"chemin::rust\"`"));
+                }
+                self.adv();
+                let name = self.ident()?;
+                self.expect(&TokenKind::Assign, "`=`")?;
+                let path = match self.cur() {
+                    TokenKind::Str(p) => p.clone(),
+                    _ => return Err(self.err("`extern type` attend un chemin Rust entre guillemets")),
+                };
+                self.adv();
+                self.stmt_end()?;
+                self.extern_types.push((name, path));
+                continue;
+            }
             items.push(self.item()?);
         }
-        Ok(Ast { items, imports, modules })
+        Ok(Ast { items, imports, modules, extern_types: std::mem::take(&mut self.extern_types) })
     }
 
     fn item(&mut self) -> CResult<Item> {
@@ -388,6 +408,10 @@ impl Parser {
                 Ok(Type::Result(Box::new(t)))
             }
             _ => {
+                // type opaque déclaré `extern type Name = "path"` (50400) → Type::Extern(path).
+                if let Some((_, path)) = self.extern_types.iter().find(|(n, _)| n == &name) {
+                    return Ok(Type::Extern(path.clone()));
+                }
                 if self.is(&TokenKind::LBracket) {
                     self.adv();
                     let mut args = Vec::new();
