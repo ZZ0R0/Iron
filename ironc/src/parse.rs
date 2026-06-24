@@ -345,6 +345,13 @@ impl Parser {
                 self.expect(&TokenKind::RBracket, "`]`")?;
                 Ok(Type::Dict(Box::new(k), Box::new(v)))
             }
+            "shared" => {
+                // partage explicite (30300, I5) : `shared[T]` → `Rc<RefCell<T>>`.
+                self.expect(&TokenKind::LBracket, "`[`")?;
+                let t = self.parse_type()?;
+                self.expect(&TokenKind::RBracket, "`]`")?;
+                Ok(Type::Shared(Box::new(t)))
+            }
             "Option" => {
                 self.expect(&TokenKind::LBracket, "`[`")?;
                 let t = self.parse_type()?;

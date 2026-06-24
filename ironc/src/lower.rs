@@ -268,16 +268,27 @@ impl Cx<'_> {
             }
             StmtKind::Assign { target, value } => {
                 let v = self.value(value);
-                if let ExprKind::Index { base, idx } = &target.kind {
-                    let b = self.place(base);
-                    let i = self.value(idx);
-                    match self.type_of(base) {
-                        Type::Dict(..) => quote! { #b.insert(#i, #v); },
-                        _ => quote! { #b[(#i) as usize] = #v; },
+                match &target.kind {
+                    ExprKind::Index { base, idx } => {
+                        let b = self.place(base);
+                        let i = self.value(idx);
+                        match self.type_of(base) {
+                            Type::Dict(..) => quote! { #b.insert(#i, #v); },
+                            _ => quote! { #b[(#i) as usize] = #v; },
+                        }
                     }
-                } else {
-                    let t = self.place(target);
-                    quote! { #t = #v; }
+                    // écriture de champ à travers un shared[Struct] (30300) → borrow_mut().
+                    ExprKind::Field { base, name } if matches!(self.type_of(base), Type::Shared(_)) => {
+                        let b = self.place(base);
+                        let f = format_ident!("{}", name);
+                        // RHS évalué dans un temp D'ABORD : sinon `c.value = c.value + 1` tiendrait
+                        // borrow() et borrow_mut() simultanément → panic RefCell (footgun I5, spec 🔶).
+                        quote! { { let __v = #v; #b.borrow_mut().#f = __v; } }
+                    }
+                    _ => {
+                        let t = self.place(target);
+                        quote! { #t = #v; }
+                    }
                 }
             }
             StmtKind::If { cond, then, elifs, els } => {
@@ -410,8 +421,13 @@ impl Cx<'_> {
                 quote! { #id }
             }
             ExprKind::Field { base, name } => {
-                let b = self.place(base);
                 let f = format_ident!("{}", name);
+                // place de champ à travers un shared[Struct] (30300) → borrow() (lecture empruntée).
+                if matches!(self.type_of(base), Type::Shared(_)) {
+                    let b = self.place(base);
+                    return quote! { #b.borrow().#f };
+                }
+                let b = self.place(base);
                 quote! { #b.#f }
             }
             ExprKind::Index { base, idx } => {
@@ -459,6 +475,11 @@ impl Cx<'_> {
                         quote! { (*#id).clone() }
                     };
                 }
+                // Shared (Rc, 30300, I5) : TOUJOURS `Rc::clone` (partage explicite, cheap) — jamais un
+                // move sur dernière utilisation, sinon le 2ᵉ propriétaire perdrait l'accès.
+                if matches!(self.type_of(e), Type::Shared(_)) {
+                    return quote! { #id.clone() };
+                }
                 // I1 : `Copy` ou `Move` (dernière utilisation, V5) → pas de clone.
                 if is_copy(&self.type_of(e)) || self.own.get(&e.id) == Some(&Disposition::Move) {
                     quote! { #id }
@@ -490,8 +511,17 @@ impl Cx<'_> {
                         return quote! { #eid::#vid };
                     }
                 }
-                let b = self.place(base);
                 let f = format_ident!("{}", name);
+                // lecture de champ à travers un shared[Struct] (30300) → borrow().
+                if matches!(self.type_of(base), Type::Shared(_)) {
+                    let b = self.place(base);
+                    return if is_copy(&self.type_of(e)) {
+                        quote! { #b.borrow().#f }
+                    } else {
+                        quote! { #b.borrow().#f.clone() }
+                    };
+                }
+                let b = self.place(base);
                 if is_copy(&self.type_of(e)) {
                     quote! { #b.#f }
                 } else {
@@ -682,6 +712,11 @@ impl Cx<'_> {
                     let a = self.value(&args[0]);
                     let b = self.value(&args[1]);
                     return quote! { (#a).find((#b).as_str()).map(|__i| __i as i64).unwrap_or(-1i64) };
+                }
+                // partage explicite (30300, I5) : Rc<RefCell<T>>.
+                "ref" if args.len() == 1 => {
+                    let a = self.value(&args[0]);
+                    return quote! { std::rc::Rc::new(std::cell::RefCell::new(#a)) };
                 }
                 // map/filter (20700) : la fonction est une closure inline (`|x| …`) ou un nom (fn/var).
                 "map" if args.len() == 2 => {
@@ -880,6 +915,11 @@ fn lower_type(t: &Type) -> TokenStream {
             let pa: Vec<TokenStream> = ps.iter().map(lower_type).collect();
             let rt = lower_type(r);
             quote! { impl Fn( #(#pa),* ) -> #rt }
+        }
+        // Partage explicite (30300, I5) : Rc<RefCell<T>> ; chemins complets → aucun `use` à gérer.
+        Type::Shared(t) => {
+            let inner = lower_type(t);
+            quote! { std::rc::Rc<std::cell::RefCell<#inner>> }
         }
     }
 }

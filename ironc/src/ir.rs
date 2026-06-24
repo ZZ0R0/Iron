@@ -134,6 +134,9 @@ pub enum Type {
     /// Type fonction / closure (V6, 20700) : `fn(args) -> ret`. Lowering best-effort —
     /// les closures inline laissent `rustc` inférer (I2).
     Fn(Vec<Type>, Box<Type>),
+    /// Partage explicite (V6, 30300, I5) : `shared[T]` → `Rc<RefCell<T>>`. Le clone est un
+    /// `Rc::clone` (partage du pointeur), jamais une copie profonde.
+    Shared(Box<Type>),
 }
 
 // ---------------------------------------------------------------- AST (10200, §4.2)

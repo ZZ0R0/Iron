@@ -1,0 +1,19 @@
+# [V6/2.2] Partage explicite (30300, I5) : Rc<RefCell<T>> via `ref`.
+# 2 propriétaires d'un même nœud + mutation partagée (dans les 2 sens) + mutation via fonction.
+
+struct Counter:
+    value: i64
+
+fn bump(c: shared[Counter]):
+    c.value = c.value + 1
+
+fn main():
+    a = ref(Counter(value=0))
+    b = a
+    a.value = 42
+    print(b.value)
+    b.value = 100
+    print(a.value)
+    bump(a)
+    bump(b)
+    print(a.value)

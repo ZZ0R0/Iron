@@ -135,6 +135,8 @@ pub(crate) fn expr(cx: &mut Inf, e: &Expr, scope: &Scope) -> Type {
                     "input" | "upper" | "lower" => Type::Str,
                     "split" => Type::List(Box::new(Type::Str)),
                     "index_of" => Type::I64,
+                    // partage explicite (30300, I5)
+                    "ref" => Type::Shared(Box::new(arg0_ty(cx, args))),
                     // map/filter (20700) : best-effort = type de la liste source (args[1]).
                     "map" | "filter" => args.get(1).and_then(|a| cx.tm.get(&a.id)).cloned().unwrap_or(Type::Unit),
                     _ => cx.sigs.get(name).map(|(_, r)| r.clone()).unwrap_or(Type::Unit),
@@ -172,6 +174,11 @@ pub(crate) fn expr(cx: &mut Inf, e: &Expr, scope: &Scope) -> Type {
             let bt = expr(cx, base, scope);
             match bt {
                 Type::Struct(s) => cx.field_type(&s, name),
+                // accès de champ à travers un `shared[Struct]` (30300) → borrow() au lowering.
+                Type::Shared(inner) => match &*inner {
+                    Type::Struct(s) => cx.field_type(s, name),
+                    _ => Type::Unit,
+                },
                 _ => Type::Unit,
             }
         }
