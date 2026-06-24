@@ -1,9 +1,8 @@
-//! [40100] Lowering AST → TokenStream — réel (planify-2.5).
+//! [40100 + 30200] Lowering AST → TokenStream — réel (planify-2.2 / 2.5).
 //!
-//! Émet le Rust via `proc_macro2::TokenStream` (I10, **jamais de chaînes**) + la `SourceMap`
-//! (marqueur `__irn_mark!` par instruction, lié au `NodeId`). Sémantique par valeur (I1) :
-//! une **place** (var/champ/index) non-`Copy` lue comme **valeur** est clonée (fallback total
-//! qui compile toujours ; l'optimisation move/dernière-utilisation = raffinement 30100).
+//! Émet le Rust via `proc_macro2::TokenStream` (I10) + la `SourceMap`. Respecte les `ParamModes`
+//! (escape analysis V1) : param `ByRef` → `&T` en signature, `&x` au call site ; `print`/`len`
+//! empruntent (pas de clone). Sinon clone-fallback (I1) collecté pour `--audit` (I4).
 //! Crate généré : `forbid(unsafe_code)` (I2) + `IronError` (I13).
 
 use crate::ir::*;
@@ -11,8 +10,13 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use std::collections::HashSet;
 
-pub fn lower(ast: &Ast, types: &TypeMap, _own: &OwnershipMap) -> (TokenStream, SourceMap) {
-    let mut cx = Cx { sm: SourceMap::default(), types };
+pub fn lower(
+    ast: &Ast,
+    types: &TypeMap,
+    _own: &OwnershipMap,
+    param_modes: &ParamModes,
+) -> (TokenStream, SourceMap, Vec<Span>) {
+    let mut cx = Cx { sm: SourceMap::default(), types, param_modes, audit: Vec::new() };
     let items: Vec<TokenStream> = ast.items.iter().map(|it| cx.item(it)).collect();
     let body = quote! { #(#items)* };
     let file = quote! {
@@ -26,16 +30,22 @@ pub fn lower(ast: &Ast, types: &TypeMap, _own: &OwnershipMap) -> (TokenStream, S
 
         #body
     };
-    (file, cx.sm)
+    (file, cx.sm, cx.audit)
 }
 
 struct Cx<'a> {
     sm: SourceMap,
     types: &'a TypeMap,
+    param_modes: &'a ParamModes,
+    audit: Vec<Span>,
 }
 
 fn is_copy(t: &Type) -> bool {
     matches!(t, Type::I64 | Type::F64 | Type::Bool | Type::Unit)
+}
+
+fn mode_of(pm: &ParamModes, fn_name: &str, i: usize) -> ParamMode {
+    pm.get(fn_name).and_then(|v| v.get(i)).copied().unwrap_or(ParamMode::ByValue)
 }
 
 impl Cx<'_> {
@@ -49,15 +59,16 @@ impl Cx<'_> {
                 let fid = format_ident!("{}", name);
                 let ps: Vec<TokenStream> = params
                     .iter()
-                    .map(|(n, t)| {
+                    .enumerate()
+                    .map(|(i, (n, t))| {
                         let pid = format_ident!("{}", n);
                         let ty = lower_type(t);
-                        quote! { #pid: #ty }
+                        match mode_of(self.param_modes, name, i) {
+                            ParamMode::ByRef => quote! { #pid: &#ty },
+                            ParamMode::ByValue => quote! { #pid: #ty },
+                        }
                     })
                     .collect();
-                // Scoping Python (fonction-level) : on **hisse** la déclaration de toutes les
-                // variables locales en tête de fonction, puis chaque liaison devient une affectation.
-                // (Sinon un `let` dans une branche serait block-scopé côté Rust — bug D7.)
                 let param_names: HashSet<String> = params.iter().map(|(n, _)| n.clone()).collect();
                 let mut locals = Vec::new();
                 collect_locals(body, &param_names, &mut locals);
@@ -163,7 +174,6 @@ impl Cx<'_> {
         quote! { __irn_mark!(#mark); #body }
     }
 
-    /// Itérable d'un `for` : `range(..)` → `lo..hi` ; sinon `.iter().cloned()` (list) / `.keys()` (dict).
     fn for_iter(&mut self, iter: &Expr) -> TokenStream {
         if let ExprKind::Call { callee, args } = &iter.kind {
             if let ExprKind::Var(n) = &callee.kind {
@@ -194,7 +204,7 @@ impl Cx<'_> {
         }
     }
 
-    /// Lowering d'une **place** (lvalue) : pas de clone (cible d'affectation, base de champ/index).
+    /// Lowering d'une **place** (lvalue / emprunt) : pas de clone.
     fn place(&mut self, e: &Expr) -> TokenStream {
         match &e.kind {
             ExprKind::Var(n) => {
@@ -209,13 +219,16 @@ impl Cx<'_> {
             ExprKind::Index { base, idx } => {
                 let b = self.place(base);
                 let i = self.value(idx);
-                quote! { #b[(#i) as usize] }
+                match self.type_of(base) {
+                    Type::Dict(..) => quote! { #b[&#i] },
+                    _ => quote! { #b[(#i) as usize] },
+                }
             }
             _ => self.value(e),
         }
     }
 
-    /// Lowering d'une **valeur** (rvalue possédée) : clone les places non-`Copy` (I1).
+    /// Lowering d'une **valeur** possédée : clone les places non-`Copy` (I1, collecté pour `--audit`).
     fn value(&mut self, e: &Expr) -> TokenStream {
         match &e.kind {
             ExprKind::Lit(l) => match l {
@@ -238,6 +251,7 @@ impl Cx<'_> {
                 if is_copy(&self.type_of(e)) {
                     quote! { #id }
                 } else {
+                    self.audit.push(e.span);
                     quote! { #id.clone() }
                 }
             }
@@ -261,6 +275,7 @@ impl Cx<'_> {
                 if is_copy(&self.type_of(e)) {
                     quote! { #b.#f }
                 } else {
+                    self.audit.push(e.span);
                     quote! { #b.#f.clone() }
                 }
             }
@@ -274,6 +289,7 @@ impl Cx<'_> {
                 if is_copy(&self.type_of(e)) {
                     quote! { #access }
                 } else {
+                    self.audit.push(e.span);
                     quote! { #access.clone() }
                 }
             }
@@ -315,7 +331,7 @@ impl Cx<'_> {
         if let ExprKind::Var(name) = &callee.kind {
             match name.as_str() {
                 "print" if args.len() == 1 => {
-                    let a = self.value(&args[0]);
+                    let a = self.place(&args[0]); // println! emprunte → pas de clone
                     return match self.type_of(&args[0]) {
                         Type::List(_) | Type::Dict(..) | Type::Struct(_) | Type::Option(_) | Type::Result(_) => {
                             quote! { println!("{:?}", #a) }
@@ -346,14 +362,33 @@ impl Cx<'_> {
                 _ => {}
             }
         }
+        // appel utilisateur : `&x` pour un param `ByRef`, valeur sinon.
+        let modes = match &callee.kind {
+            ExprKind::Var(name) => self.param_modes.get(name).cloned(),
+            _ => None,
+        };
         let c = self.place(callee);
-        let a: Vec<TokenStream> = args.iter().map(|x| self.value(x)).collect();
+        let a: Vec<TokenStream> = args
+            .iter()
+            .enumerate()
+            .map(|(i, x)| {
+                let byref = modes
+                    .as_ref()
+                    .and_then(|m| m.get(i))
+                    .map_or(false, |m| *m == ParamMode::ByRef);
+                if byref {
+                    let p = self.place(x);
+                    quote! { &#p }
+                } else {
+                    self.value(x)
+                }
+            })
+            .collect();
         quote! { #c( #(#a),* ) }
     }
 }
 
-/// Collecte (ordonnée, dédupliquée) les variables locales liées par `Let` dans un corps,
-/// récursivement dans les blocs imbriqués, hors paramètres. Pour le hoisting (scoping Python).
+/// Collecte (ordonnée, dédupliquée) les variables locales liées par `Let`, récursivement, hors params.
 fn collect_locals(body: &[Stmt], params: &HashSet<String>, out: &mut Vec<String>) {
     for s in body {
         match &s.kind {

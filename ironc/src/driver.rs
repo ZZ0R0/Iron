@@ -14,6 +14,7 @@ pub struct Compiled {
     pub rust_src: String,
     pub source_map: SourceMap,
     pub mappings: Vec<sourcemap::Mapping>,
+    pub audit: Vec<Span>,
 }
 
 impl Compiled {
@@ -32,15 +33,15 @@ pub fn compile(src: &str, file: FileId) -> CResult<Compiled> {
     let tokens = lex::lex(src, file)?;
     let ast = parse::parse(tokens)?;
     let types = infer::infer(&ast);
-    let own = resolve::resolve(&ast, &types);
-    let (ts, sm) = lower::lower(&ast, &types, &own);
+    let (own, param_modes) = resolve::resolve(&ast, &types);
+    let (ts, sm, audit) = lower::lower(&ast, &types, &own, &param_modes);
 
     let syn_file: syn::File = syn::parse2(ts)
         .map_err(|e| CompileError::msg(format!("lowering a produit du Rust invalide : {e}")))?;
     let rust_src = prettyplease::unparse(&syn_file);
     let mappings = sourcemap::resolve(&rust_src, &sm);
 
-    Ok(Compiled { rust_src, source_map: sm, mappings })
+    Ok(Compiled { rust_src, source_map: sm, mappings, audit })
 }
 
 /// Écrit un projet cargo autonome `{Cargo.toml, src/main.rs}` dans `out_dir`.
@@ -54,10 +55,16 @@ pub fn emit_project(out_dir: &Path, rust_src: &str) -> std::io::Result<()> {
 // `[workspace]` vide → projet généré **autonome** (jamais membre d'un workspace parent).
 const CARGO_TOML: &str = "[workspace]\n\n[package]\nname = \"iron_out\"\nversion = \"0.0.0\"\nedition = \"2021\"\n";
 
-pub fn build(input: &Path) -> CResult<PathBuf> {
+pub fn build(input: &Path, audit: bool) -> CResult<PathBuf> {
     let src = std::fs::read_to_string(input)
         .map_err(|e| CompileError::msg(format!("lecture {} : {e}", input.display())))?;
     let compiled = compile(&src, 0)?;
+    if audit {
+        for span in &compiled.audit {
+            let (l, c) = line_col(&src, span.start);
+            eprintln!("{}:{}:{}: perf: clone-fallback (I4, --audit)", input.display(), l, c);
+        }
+    }
     let out_dir = out_dir_for(input);
     emit_project(&out_dir, &compiled.rust_src)
         .map_err(|e| CompileError::msg(format!("émission projet : {e}")))?;
@@ -74,8 +81,8 @@ pub fn build(input: &Path) -> CResult<PathBuf> {
     Ok(out_dir)
 }
 
-pub fn run(input: &Path) -> CResult<()> {
-    let out_dir = build(input)?;
+pub fn run(input: &Path, audit: bool) -> CResult<()> {
+    let out_dir = build(input, audit)?;
     let status = Command::new("cargo")
         .args(["run", "--quiet"])
         .current_dir(&out_dir)

@@ -210,15 +210,26 @@ pub struct Ast {
 /// `NodeId → Type` (20100/20200).
 pub type TypeMap = HashMap<NodeId, Type>;
 
-/// Disposition d'une lecture de variable (30100). V0 : pas de `Borrow`.
+/// Disposition d'une lecture de variable (30100 / 30200).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Disposition {
     Clone,
     Move,
+    Borrow,
 }
 
-/// `NodeId(lecture de Var) → Disposition` (30100).
+/// `NodeId(lecture de Var) → Disposition`.
 pub type OwnershipMap = HashMap<NodeId, Disposition>;
+
+/// Mode de passage d'un paramètre (escape analysis, V1/30200) : `&T` (ByRef) ou `T` (ByValue).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParamMode {
+    ByValue,
+    ByRef,
+}
+
+/// `fn_name → modes de ses paramètres`.
+pub type ParamModes = HashMap<String, Vec<ParamMode>>;
 
 // ---------------------------------------------------------------- SourceMap (§4.6)
 

@@ -1,19 +1,21 @@
-//! CLI `ironc build|run <fichier.irn>` — squelette (planify-1.1).
+//! CLI `ironc build|run [--audit] <fichier.irn>`.
 
 use ironc::driver;
 use std::path::Path;
 use std::process::exit;
 
 fn main() {
-    let args: Vec<String> = std::env::args().collect();
-    if args.len() < 3 {
-        eprintln!("usage: ironc <build|run> <fichier.irn>");
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let audit = args.iter().any(|a| a == "--audit");
+    let positional: Vec<&String> = args.iter().filter(|a| !a.starts_with("--")).collect();
+    if positional.len() < 2 {
+        eprintln!("usage: ironc <build|run> [--audit] <fichier.irn>");
         exit(2);
     }
-    let input = Path::new(&args[2]);
-    let res = match args[1].as_str() {
-        "build" => driver::build(input).map(|_| ()),
-        "run" => driver::run(input),
+    let input = Path::new(positional[1].as_str());
+    let res = match positional[0].as_str() {
+        "build" => driver::build(input, audit).map(|_| ()),
+        "run" => driver::run(input, audit),
         other => {
             eprintln!("ironc: commande inconnue : {other}");
             exit(2);
