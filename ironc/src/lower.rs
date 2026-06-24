@@ -349,8 +349,15 @@ impl Cx<'_> {
                     .iter()
                     .map(|arm| {
                         let pat = lower_pattern(&arm.pattern);
+                        let guard = match &arm.guard {
+                            Some(g) => {
+                                let gv = self.value(g);
+                                quote! { if #gv }
+                            }
+                            None => quote! {},
+                        };
                         let body: Vec<TokenStream> = arm.body.iter().map(|st| self.stmt(st)).collect();
-                        quote! { #pat => { #(#body)* } }
+                        quote! { #pat #guard => { #(#body)* } }
                     })
                     .collect();
                 quote! { match #s { #(#arm_ts)* } }

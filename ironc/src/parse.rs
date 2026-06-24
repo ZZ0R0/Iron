@@ -538,8 +538,10 @@ impl Parser {
                 break;
             }
             let pattern = self.parse_pattern()?;
+            // Garde optionnelle (20600) : `<motif> if <cond>:` — l'expr s'arrête sur `:`/`{`.
+            let guard = if self.eat(&TokenKind::If) { Some(self.expr()?) } else { None };
             let body = self.block()?;
-            arms.push(MatchArm { pattern, body });
+            arms.push(MatchArm { pattern, guard, body });
         }
         self.expect(&TokenKind::Dedent, "fin de bloc")?;
         Ok(self.node(start, id, StmtKind::Match { scrutinee, arms }))

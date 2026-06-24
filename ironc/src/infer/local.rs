@@ -62,6 +62,10 @@ pub(crate) fn stmt(cx: &mut Inf, s: &Stmt, scope: &mut Scope) {
             for arm in arms {
                 let mut s = scope.clone();
                 cx.bind_pattern(&arm.pattern, &sty, &mut s);
+                // La garde voit les liaisons du motif (20600).
+                if let Some(g) = &arm.guard {
+                    expr(cx, g, &mut s);
+                }
                 for st in &arm.body {
                     stmt(cx, st, &mut s);
                 }

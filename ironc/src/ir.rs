@@ -204,10 +204,12 @@ pub enum StmtKind {
     Match { scrutinee: Expr, arms: Vec<MatchArm> },
 }
 
-/// Un bras de `match` : motif + corps (V3).
+/// Un bras de `match` : motif + garde optionnelle + corps (V3 ; garde V6/20600).
 #[derive(Debug, Clone)]
 pub struct MatchArm {
     pub pattern: Pattern,
+    /// Garde `if <cond>` (V6, 20600) : le bras ne filtre que si la condition est vraie.
+    pub guard: Option<Expr>,
     pub body: Vec<Stmt>,
 }
 

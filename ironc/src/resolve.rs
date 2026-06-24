@@ -95,6 +95,9 @@ fn creads_stmt(s: &Stmt, in_loop: bool, out: &mut Vec<(String, NodeId, bool)>) {
         StmtKind::Match { scrutinee, arms } => {
             creads(scrutinee, Pos::Value, in_loop, out);
             for arm in arms {
+                if let Some(g) = &arm.guard {
+                    creads(g, Pos::Borrow, in_loop, out);
+                }
                 arm.body.iter().for_each(|s| creads_stmt(s, in_loop, out));
             }
         }
@@ -189,6 +192,9 @@ fn visit_stmt(s: &Stmt, esc: &mut HashSet<String>) {
         StmtKind::Match { scrutinee, arms } => {
             visit(scrutinee, Pos::Value, esc);
             for arm in arms {
+                if let Some(g) = &arm.guard {
+                    visit(g, Pos::Value, esc);
+                }
                 for s in &arm.body {
                     visit_stmt(s, esc);
                 }
