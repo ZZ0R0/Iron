@@ -1,0 +1,14 @@
+# [V6/2.3] Closures (20700) : lambda inline, map/filter, closure liée à une variable, fn nommée.
+
+fn double(n: i64) -> i64:
+    return n * 2
+
+fn main():
+    squares = map(lambda x: x * x, [1, 2, 3, 4])
+    print(squares)
+    bigs = filter(lambda x: x > 2, [1, 2, 3, 4])
+    print(bigs)
+    inc = lambda n: n + 1
+    print(inc(41))
+    doubled = map(double, [10, 20, 30])
+    print(doubled)

@@ -818,6 +818,22 @@ impl Parser {
                 self.adv();
                 Ok(self.node(start, id, ExprKind::Var(name)))
             }
+            TokenKind::Lambda => {
+                // `lambda x, y: expr` (V6, 20700) — corps mono-expression, types inférés par Rust.
+                self.adv();
+                let mut params = Vec::new();
+                if !self.is(&TokenKind::Colon) {
+                    loop {
+                        params.push(self.ident()?);
+                        if !self.eat(&TokenKind::Comma) {
+                            break;
+                        }
+                    }
+                }
+                self.expect(&TokenKind::Colon, "`:` (corps de la lambda)")?;
+                let body = self.expr()?;
+                Ok(self.node(start, id, ExprKind::Lambda { params, body: Box::new(body) }))
+            }
             TokenKind::LParen => {
                 self.adv();
                 let e = self.expr()?;

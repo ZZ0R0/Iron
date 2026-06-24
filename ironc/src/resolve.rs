@@ -139,6 +139,8 @@ fn creads(e: &Expr, pos: Pos, in_loop: bool, out: &mut Vec<(String, NodeId, bool
             creads(v, Pos::Value, in_loop, out);
         }),
         ExprKind::Try { inner } => creads(inner, Pos::Value, in_loop, out),
+        // Closure (20700) : capture par référence → position Borrow (jamais un move de capture).
+        ExprKind::Lambda { body, .. } => creads(body, Pos::Borrow, in_loop, out),
         ExprKind::Lit(_) => {}
     }
 }
@@ -231,6 +233,8 @@ fn visit(e: &Expr, pos: Pos, esc: &mut HashSet<String>) {
             visit(v, Pos::Value, esc);
         }),
         ExprKind::Try { inner } => visit(inner, Pos::Value, esc),
+        // Closure (20700) : un param capturé peut s'échapper → position Value (conservateur, sûr).
+        ExprKind::Lambda { body, .. } => visit(body, Pos::Value, esc),
         ExprKind::Lit(_) => {}
     }
 }

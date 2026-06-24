@@ -119,6 +119,8 @@ pub(crate) fn expr(cx: &mut Inf, e: &Expr, scope: &Scope) -> Type {
                     "abs" | "min" | "max" => arg0_ty(cx, args),
                     "push" => Type::Unit,
                     "sum" => Type::I64,
+                    // map/filter (20700) : best-effort = type de la liste source (args[1]).
+                    "map" | "filter" => args.get(1).and_then(|a| cx.tm.get(&a.id)).cloned().unwrap_or(Type::Unit),
                     _ => cx.sigs.get(name).map(|(_, r)| r.clone()).unwrap_or(Type::Unit),
                 },
                 _ => {
@@ -197,6 +199,15 @@ pub(crate) fn expr(cx: &mut Inf, e: &Expr, scope: &Scope) -> Type {
                 Type::Result(x) => *x,
                 other => other,
             }
+        }
+        ExprKind::Lambda { params, body } => {
+            // Types des params laissés à l'inférence Rust (I2) ; on annote quand même le corps.
+            let mut inner = scope.clone();
+            for p in params {
+                inner.insert(p.clone(), Type::Unit);
+            }
+            let bt = expr(cx, body, &mut inner);
+            Type::Fn(params.iter().map(|_| Type::Unit).collect(), Box::new(bt))
         }
     };
     cx.set(e.id, ty)

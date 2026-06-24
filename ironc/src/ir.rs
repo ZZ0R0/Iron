@@ -53,6 +53,7 @@ pub enum TokenKind {
     Trait,
     Impl,
     Inout,
+    Lambda,
     If,
     Elif,
     Else,
@@ -130,6 +131,9 @@ pub enum Type {
     App(String, Vec<Type>),
     /// `inout x: T` → `&mut T` (I3 — partage mutable explicite, V5).
     Ref(Box<Type>),
+    /// Type fonction / closure (V6, 20700) : `fn(args) -> ret`. Lowering best-effort —
+    /// les closures inline laissent `rustc` inférer (I2).
+    Fn(Vec<Type>, Box<Type>),
 }
 
 // ---------------------------------------------------------------- AST (10200, §4.2)
@@ -261,6 +265,9 @@ pub enum ExprKind {
     ListLit { items: Vec<Expr> },
     DictLit { pairs: Vec<(Expr, Expr)> },
     Try { inner: Box<Expr> },
+    /// Closure (V6, 20700) : `lambda x, y: expr`. Corps mono-expression ; types des params
+    /// laissés à l'inférence Rust (I2).
+    Lambda { params: Vec<String>, body: Box<Expr> },
 }
 
 #[derive(Debug, Clone, Default)]

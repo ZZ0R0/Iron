@@ -537,6 +537,23 @@ impl Cx<'_> {
                 let x = self.value(inner);
                 quote! { (#x?) }
             }
+            ExprKind::Lambda { params, body } => {
+                // Closure Rust (20700) : types des params inférés par rustc (I2).
+                let ps: Vec<proc_macro2::Ident> = params.iter().map(|p| format_ident!("{}", p)).collect();
+                let b = self.value(body);
+                quote! { | #(#ps),* | #b }
+            }
+        }
+    }
+
+    /// Argument-fonction de `map`/`filter` : nom nu (fn ou var-closure) ou closure inline.
+    fn fn_arg(&mut self, e: &Expr) -> TokenStream {
+        match &e.kind {
+            ExprKind::Var(n) => {
+                let id = format_ident!("{}", n);
+                quote! { #id }
+            }
+            _ => self.value(e),
         }
     }
 
@@ -619,6 +636,18 @@ impl Cx<'_> {
                 "sum" if args.len() == 1 => {
                     let l = self.place(&args[0]);
                     return quote! { #l.iter().sum::<i64>() };
+                }
+                // map/filter (20700) : la fonction est une closure inline (`|x| …`) ou un nom (fn/var).
+                "map" if args.len() == 2 => {
+                    let f = self.fn_arg(&args[0]);
+                    let xs = self.value(&args[1]);
+                    return quote! { (#xs).into_iter().map(#f).collect::<Vec<_>>() };
+                }
+                "filter" if args.len() == 2 => {
+                    let f = self.fn_arg(&args[0]);
+                    let xs = self.value(&args[1]);
+                    // prédicat sur une copie de l'élément (robuste pour tout type `Clone`).
+                    return quote! { (#xs).into_iter().filter(|__e| (#f)(__e.clone())).collect::<Vec<_>>() };
                 }
                 _ => {}
             }
@@ -798,6 +827,13 @@ fn lower_type(t: &Type) -> TokenStream {
         Type::Ref(t) => {
             let inner = lower_type(t);
             quote! { &mut #inner }
+        }
+        // Type fonction (20700) : rarement matérialisé (closures inline laissées à rustc) ; on émet
+        // un `impl Fn` valide en position retour si jamais atteint.
+        Type::Fn(ps, r) => {
+            let pa: Vec<TokenStream> = ps.iter().map(lower_type).collect();
+            let rt = lower_type(r);
+            quote! { impl Fn( #(#pa),* ) -> #rt }
         }
     }
 }

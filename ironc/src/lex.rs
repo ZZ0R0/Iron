@@ -215,6 +215,7 @@ impl<'a> Lexer<'a> {
             "trait" => TokenKind::Trait,
             "impl" => TokenKind::Impl,
             "inout" => TokenKind::Inout,
+            "lambda" => TokenKind::Lambda,
             "if" => TokenKind::If,
             "elif" => TokenKind::Elif,
             "else" => TokenKind::Else,
