@@ -102,6 +102,28 @@ fn is_copy(t: &Type) -> bool {
     matches!(t, Type::I64 | Type::F64 | Type::Bool | Type::Unit | Type::Num(_) | Type::Char)
 }
 
+/// Une méthode mute-t-elle `self` (affectation à `self.champ`/`self[i]`) → `&mut self` (surface Python).
+fn stmts_mutate_self(body: &[Stmt]) -> bool {
+    body.iter().any(|s| match &s.kind {
+        StmtKind::Assign { target, .. } => expr_is_self_place(target),
+        StmtKind::If { then, elifs, els, .. } => {
+            stmts_mutate_self(then) || elifs.iter().any(|(_, b)| stmts_mutate_self(b)) || stmts_mutate_self(els)
+        }
+        StmtKind::While { body, .. } | StmtKind::For { body, .. } => stmts_mutate_self(body),
+        StmtKind::Match { arms, .. } => arms.iter().any(|a| stmts_mutate_self(&a.body)),
+        _ => false,
+    })
+}
+
+fn expr_is_self_place(e: &Expr) -> bool {
+    match &e.kind {
+        ExprKind::Field { base, .. } | ExprKind::Index { base, .. } => {
+            matches!(&base.kind, ExprKind::Var(n) if n == "self") || expr_is_self_place(base)
+        }
+        _ => false,
+    }
+}
+
 /// Type affiché via `{:?}` (Debug) plutôt que `{}` (Display) — collections, structs, Option/Result.
 /// Utilisé par `print` ET les f-strings pour choisir le spécificateur de format.
 fn is_debug_type(t: &Type) -> bool {
@@ -238,10 +260,14 @@ impl Cx<'_> {
                 quote! { trait #tid { #(#ms)* } }
             }
             ItemKind::Impl { trait_name, type_name, methods } => {
-                let tid = format_ident!("{}", trait_name);
                 let ty = format_ident!("{}", type_name);
                 let ms: Vec<TokenStream> = methods.iter().map(|m| self.lower_method(m)).collect();
-                quote! { impl #tid for #ty { #(#ms)* } }
+                if trait_name.is_empty() {
+                    quote! { impl #ty { #(#ms)* } } // impl inhérent (méthodes sans trait)
+                } else {
+                    let tid = format_ident!("{}", trait_name);
+                    quote! { impl #tid for #ty { #(#ms)* } }
+                }
             }
         }
     }
@@ -257,11 +283,22 @@ impl Cx<'_> {
                 quote! { #pid: #ty }
             })
             .collect();
+        // `&mut self` si la méthode mute `self` (ex. `self.value += by`), sinon `&self` (surface Python).
+        let self_ts = if m.self_param {
+            let mutates = m.body.as_ref().map_or(false, |b| stmts_mutate_self(b));
+            if mutates {
+                quote! { &mut self }
+            } else {
+                quote! { &self }
+            }
+        } else {
+            quote! {}
+        };
         let sig_params = if m.self_param {
             if ps.is_empty() {
-                quote! { &self }
+                quote! { #self_ts }
             } else {
-                quote! { &self, #(#ps),* }
+                quote! { #self_ts, #(#ps),* }
             }
         } else {
             quote! { #(#ps),* }

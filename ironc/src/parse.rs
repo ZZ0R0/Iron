@@ -308,9 +308,10 @@ impl Parser {
         let start = self.i;
         let id = self.fresh();
         self.adv(); // impl
-        let trait_name = self.ident()?;
-        self.expect(&TokenKind::For, "`for`")?;
-        let type_name = self.ident()?;
+        let first = self.ident()?;
+        // `impl Trait for Type:` (trait) ou `impl Type:` (inhérent, surface Python) — trait vide.
+        let (trait_name, type_name) =
+            if self.eat(&TokenKind::For) { (first, self.ident()?) } else { (String::new(), first) };
         self.expect(&TokenKind::Colon, "`:`")?;
         self.expect(&TokenKind::Newline, "fin de ligne")?;
         self.expect(&TokenKind::Indent, "bloc indenté")?;

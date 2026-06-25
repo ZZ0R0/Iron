@@ -212,6 +212,7 @@ impl<'a> Lexer<'a> {
         }
         let kind = match text.as_str() {
             "fn" => TokenKind::Fn,
+            "def" => TokenKind::Fn, // alias Python (surface P) — `def` ≡ `fn`
             "struct" => TokenKind::Struct,
             "enum" => TokenKind::Enum,
             "match" => TokenKind::Match,
