@@ -760,7 +760,13 @@ impl Cx<'_> {
                 "print" if args.len() == 1 => {
                     let a = self.place(&args[0]); // println! emprunte → pas de clone
                     return match self.type_of(&args[0]) {
-                        Type::List(_) | Type::Dict(..) | Type::Struct(_) | Type::Option(_) | Type::Result(_) => {
+                        Type::List(_)
+                        | Type::Dict(..)
+                        | Type::Struct(_)
+                        | Type::Option(_)
+                        | Type::Result(_)
+                        | Type::Set(_)
+                        | Type::Tuple(_) => {
                             quote! { println!("{:?}", #a) }
                         }
                         _ => quote! { println!("{}", #a) },
@@ -878,6 +884,31 @@ impl Cx<'_> {
                     let xs = self.value(&args[1]);
                     // prédicat sur une copie de l'élément (robuste pour tout type `Clone`).
                     return quote! { (#xs).into_iter().filter(|__e| (#f)(__e.clone())).collect::<Vec<_>>() };
+                }
+                // ensembles (20900)
+                "set" if args.len() == 1 => {
+                    let l = self.value(&args[0]);
+                    return quote! { (#l).into_iter().collect::<std::collections::HashSet<_>>() };
+                }
+                "add" if args.len() == 2 => {
+                    let s = self.place(&args[0]);
+                    let x = self.value(&args[1]);
+                    return quote! { #s.insert(#x) };
+                }
+                "union" if args.len() == 2 => {
+                    let a = self.place(&args[0]);
+                    let b = self.place(&args[1]);
+                    return quote! { (&#a | &#b) };
+                }
+                "inter" if args.len() == 2 => {
+                    let a = self.place(&args[0]);
+                    let b = self.place(&args[1]);
+                    return quote! { (&#a & &#b) };
+                }
+                "diff" if args.len() == 2 => {
+                    let a = self.place(&args[0]);
+                    let b = self.place(&args[1]);
+                    return quote! { (&#a - &#b) };
                 }
                 // casts numériques `to_<t>(x)` → `(x as t)` (20800).
                 cast if args.len() == 1

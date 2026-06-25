@@ -154,6 +154,13 @@ pub(crate) fn expr(cx: &mut Inf, e: &Expr, scope: &Scope) -> Type {
                     "index_of" => Type::I64,
                     // partage explicite (30300, I5)
                     "ref" => Type::Shared(Box::new(arg0_ty(cx, args))),
+                    // ensembles (20900)
+                    "set" => match args.first().and_then(|a| cx.tm.get(&a.id)) {
+                        Some(Type::List(e)) => Type::Set(e.clone()),
+                        _ => Type::Set(Box::new(Type::Unit)),
+                    },
+                    "add" => Type::Unit,
+                    "union" | "inter" | "diff" => arg0_ty(cx, args),
                     // casts numériques `to_<t>(x)` (20800)
                     cast if cast.strip_prefix("to_").and_then(numeric_type_by_name).is_some() => {
                         numeric_type_by_name(&cast[3..]).unwrap()

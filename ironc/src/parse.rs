@@ -419,6 +419,13 @@ impl Parser {
                 self.expect(&TokenKind::RBracket, "`]`")?;
                 Ok(Type::Shared(Box::new(t)))
             }
+            "set" => {
+                // ensemble (20900) : `set[T]` → `HashSet<T>`.
+                self.expect(&TokenKind::LBracket, "`[`")?;
+                let t = self.parse_type()?;
+                self.expect(&TokenKind::RBracket, "`]`")?;
+                Ok(Type::Set(Box::new(t)))
+            }
             "Option" => {
                 self.expect(&TokenKind::LBracket, "`[`")?;
                 let t = self.parse_type()?;
@@ -1194,18 +1201,42 @@ impl Parser {
             }
             TokenKind::LBrace => {
                 self.adv();
-                let mut pairs = Vec::new();
-                while !self.is(&TokenKind::RBrace) {
-                    let k = self.expr()?;
-                    self.expect(&TokenKind::Colon, "`:`")?;
-                    let v = self.expr()?;
-                    pairs.push((k, v));
-                    if !self.eat(&TokenKind::Comma) {
-                        break;
-                    }
+                if self.is(&TokenKind::RBrace) {
+                    self.adv();
+                    return Ok(self.node(start, id, ExprKind::DictLit { pairs: Vec::new() })); // `{}` vide = dict
                 }
-                self.expect(&TokenKind::RBrace, "`}`")?;
-                Ok(self.node(start, id, ExprKind::DictLit { pairs }))
+                let first = self.expr()?;
+                if self.eat(&TokenKind::Colon) {
+                    // dict `{k: v, …}`
+                    let v = self.expr()?;
+                    let mut pairs = vec![(first, v)];
+                    while self.eat(&TokenKind::Comma) {
+                        if self.is(&TokenKind::RBrace) {
+                            break;
+                        }
+                        let k = self.expr()?;
+                        self.expect(&TokenKind::Colon, "`:`")?;
+                        let v = self.expr()?;
+                        pairs.push((k, v));
+                    }
+                    self.expect(&TokenKind::RBrace, "`}`")?;
+                    Ok(self.node(start, id, ExprKind::DictLit { pairs }))
+                } else {
+                    // set `{a, b, …}` → désucré en `set([a, b, …])` (20900).
+                    let mut items = vec![first];
+                    while self.eat(&TokenKind::Comma) {
+                        if self.is(&TokenKind::RBrace) {
+                            break;
+                        }
+                        items.push(self.expr()?);
+                    }
+                    self.expect(&TokenKind::RBrace, "`}`")?;
+                    let lid = self.fresh();
+                    let list = self.node(start, lid, ExprKind::ListLit { items });
+                    let cid = self.fresh();
+                    let callee = self.node(start, cid, ExprKind::Var("set".to_string()));
+                    Ok(self.node(start, id, ExprKind::Call { callee: Box::new(callee), args: vec![list] }))
+                }
             }
             other => Err(self.err(format!("expression attendue, trouvé {other:?}"))),
         }
