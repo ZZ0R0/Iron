@@ -102,6 +102,21 @@ fn is_copy(t: &Type) -> bool {
     matches!(t, Type::I64 | Type::F64 | Type::Bool | Type::Unit | Type::Num(_) | Type::Char)
 }
 
+/// Type affiché via `{:?}` (Debug) plutôt que `{}` (Display) — collections, structs, Option/Result.
+/// Utilisé par `print` ET les f-strings pour choisir le spécificateur de format.
+fn is_debug_type(t: &Type) -> bool {
+    matches!(
+        t,
+        Type::List(_)
+            | Type::Dict(..)
+            | Type::Set(_)
+            | Type::Tuple(_)
+            | Type::Struct(_)
+            | Type::Option(_)
+            | Type::Result(_)
+    )
+}
+
 fn mode_of(pm: &ParamModes, fn_name: &str, i: usize) -> ParamMode {
     pm.get(fn_name).and_then(|v| v.get(i)).copied().unwrap_or(ParamMode::ByValue)
 }
@@ -681,7 +696,8 @@ impl Cx<'_> {
                     match p {
                         FStringPart::Lit(s) => fmt.push_str(&s.replace('{', "{{").replace('}', "}}")),
                         FStringPart::Expr(e) => {
-                            fmt.push_str("{}");
+                            // Debug pour les collections/structs, Display sinon (comme `print`).
+                            fmt.push_str(if is_debug_type(&self.type_of(e)) { "{:?}" } else { "{}" });
                             args.push(self.place(e)); // format! emprunte → pas de clone
                         }
                     }
@@ -790,17 +806,10 @@ impl Cx<'_> {
             match name.as_str() {
                 "print" if args.len() == 1 => {
                     let a = self.place(&args[0]); // println! emprunte → pas de clone
-                    return match self.type_of(&args[0]) {
-                        Type::List(_)
-                        | Type::Dict(..)
-                        | Type::Struct(_)
-                        | Type::Option(_)
-                        | Type::Result(_)
-                        | Type::Set(_)
-                        | Type::Tuple(_) => {
-                            quote! { println!("{:?}", #a) }
-                        }
-                        _ => quote! { println!("{}", #a) },
+                    return if is_debug_type(&self.type_of(&args[0])) {
+                        quote! { println!("{:?}", #a) }
+                    } else {
+                        quote! { println!("{}", #a) }
                     };
                 }
                 "len" if args.len() == 1 => {
