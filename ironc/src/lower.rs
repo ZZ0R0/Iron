@@ -493,6 +493,7 @@ impl Cx<'_> {
                 }
                 Lit::Bool(b) => quote! { #b },
                 Lit::Str(s) => quote! { #s.to_string() },
+                Lit::Char(c) => quote! { #c },
             },
             ExprKind::Var(n) => {
                 if n == "none" {
@@ -829,6 +830,14 @@ impl Cx<'_> {
                     // prédicat sur une copie de l'élément (robuste pour tout type `Clone`).
                     return quote! { (#xs).into_iter().filter(|__e| (#f)(__e.clone())).collect::<Vec<_>>() };
                 }
+                // casts numériques `to_<t>(x)` → `(x as t)` (20800).
+                cast if args.len() == 1
+                    && cast.strip_prefix("to_").map_or(false, |t| numeric_type_by_name(t).is_some()) =>
+                {
+                    let a = self.value(&args[0]);
+                    let ty = format_ident!("{}", &cast[3..]);
+                    return quote! { (#a as #ty) };
+                }
                 _ => {}
             }
             // fonction externe (`.iri`) → chemin Rust (50200).
@@ -916,6 +925,7 @@ fn lower_pattern(p: &Pattern) -> TokenStream {
             }
             Lit::Bool(b) => quote! { #b },
             Lit::Str(s) => quote! { #s },
+            Lit::Char(c) => quote! { #c },
             Lit::Float(_) => quote! { _ }, // motif flottant illégal en Rust
         },
         Pattern::Variant { path, sub } => {

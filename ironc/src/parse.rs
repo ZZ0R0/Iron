@@ -420,6 +420,13 @@ impl Parser {
                 Ok(Type::Result(Box::new(t)))
             }
             _ => {
+                // char + zoo numérique élargi (20800)
+                if name == "char" {
+                    return Ok(Type::Char);
+                }
+                if let Some(t) = numeric_type_by_name(&name) {
+                    return Ok(t);
+                }
                 // type opaque déclaré `extern type Name = "path"` (50400) → Type::Extern(path).
                 if let Some((_, path)) = self.extern_types.iter().find(|(n, _)| n == &name) {
                     return Ok(Type::Extern(path.clone()));
@@ -1033,6 +1040,10 @@ impl Parser {
                 self.adv();
                 let parts = self.parse_fstring(&raw)?;
                 Ok(self.node(start, id, ExprKind::FString(parts)))
+            }
+            TokenKind::Char(c) => {
+                self.adv();
+                Ok(self.node(start, id, ExprKind::Lit(Lit::Char(c))))
             }
             TokenKind::Ident(name) => {
                 self.adv();

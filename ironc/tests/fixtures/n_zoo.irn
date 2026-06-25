@@ -1,0 +1,14 @@
+# [V7/2.3] Zoo numérique + char : littéral 'a', casts to_<t>, types élargis par annotation.
+
+fn code(c: char) -> u8:
+    return to_u8(c)
+
+fn main():
+    print('A')
+    print(code('A'))
+    n = to_u32(300)
+    print(n)
+    big = to_u64(5000000000)
+    print(big)
+    neg = to_i32(-42)
+    print(neg)

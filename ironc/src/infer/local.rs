@@ -98,6 +98,7 @@ pub(crate) fn expr(cx: &mut Inf, e: &Expr, scope: &Scope) -> Type {
             Lit::Float(_) => Type::F64,
             Lit::Bool(_) => Type::Bool,
             Lit::Str(_) => Type::Str,
+            Lit::Char(_) => Type::Char,
         },
         ExprKind::Var(n) => {
             if n == "none" {
@@ -153,6 +154,10 @@ pub(crate) fn expr(cx: &mut Inf, e: &Expr, scope: &Scope) -> Type {
                     "index_of" => Type::I64,
                     // partage explicite (30300, I5)
                     "ref" => Type::Shared(Box::new(arg0_ty(cx, args))),
+                    // casts numériques `to_<t>(x)` (20800)
+                    cast if cast.strip_prefix("to_").and_then(numeric_type_by_name).is_some() => {
+                        numeric_type_by_name(&cast[3..]).unwrap()
+                    }
                     // map/filter (20700) : best-effort = type de la liste source (args[1]).
                     "map" | "filter" => args.get(1).and_then(|a| cx.tm.get(&a.id)).cloned().unwrap_or(Type::Unit),
                     _ => cx.sigs.get(name).map(|(_, r)| r.clone()).unwrap_or(Type::Unit),

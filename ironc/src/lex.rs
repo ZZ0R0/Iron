@@ -89,6 +89,7 @@ impl<'a> Lexer<'a> {
                 b'f' if self.src.get(self.pos + 1) == Some(&b'"') => self.lex_fstring()?,
                 c if is_ident_start(c) => self.lex_ident()?,
                 b'"' => self.lex_string()?,
+                b'\'' => self.lex_char()?, // littéral caractère (20800)
                 _ => self.lex_op()?,
             }
         }
@@ -290,6 +291,38 @@ impl<'a> Lexer<'a> {
                 Some(_) => self.pos += 1,
             }
         }
+    }
+
+    /// littéral caractère `'a'` (20800) ; échappements simples `\n \t \' \\ \0`.
+    fn lex_char(&mut self) -> CResult<()> {
+        let start = self.pos;
+        self.pos += 1; // '
+        let c = match self.peek() {
+            None => return Err(self.err(start, "littéral caractère non terminé")),
+            Some(b'\\') => {
+                self.pos += 1;
+                let e = match self.peek() {
+                    Some(b'n') => '\n',
+                    Some(b't') => '\t',
+                    Some(b'\'') => '\'',
+                    Some(b'\\') => '\\',
+                    Some(b'0') => '\0',
+                    _ => return Err(self.err(self.pos, "échappement de caractère invalide")),
+                };
+                self.pos += 1;
+                e
+            }
+            Some(c) => {
+                self.pos += 1;
+                c as char
+            }
+        };
+        if self.peek() != Some(b'\'') {
+            return Err(self.err(start, "littéral caractère : `'` fermant attendu"));
+        }
+        self.pos += 1; // '
+        self.push(TokenKind::Char(c), start);
+        Ok(())
     }
 
     /// f-string `f"…"` (10500) : capture le contenu brut intérieur (`{`/`}` préservés pour le parser).

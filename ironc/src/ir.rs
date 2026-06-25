@@ -49,6 +49,8 @@ pub enum TokenKind {
     Str(String),
     /// f-string `f"…"` (V7, 10500) : contenu brut intérieur (avec `{`/`}` préservés).
     FStr(String),
+    /// littéral caractère `'a'` (V7, 20800).
+    Char(char),
     Bool(bool),
     Ident(String),
     // mots-clés
@@ -172,6 +174,27 @@ pub enum NumKind {
     F32,
 }
 
+/// Nom de type numérique → `Type` (zoo + `i64`/`f64`), pour `parse_type` et les casts `to_<t>` (20800).
+pub(crate) fn numeric_type_by_name(name: &str) -> Option<Type> {
+    Some(match name {
+        "i64" => Type::I64,
+        "f64" => Type::F64,
+        "i8" => Type::Num(NumKind::I8),
+        "i16" => Type::Num(NumKind::I16),
+        "i32" => Type::Num(NumKind::I32),
+        "i128" => Type::Num(NumKind::I128),
+        "isize" => Type::Num(NumKind::Isize),
+        "u8" => Type::Num(NumKind::U8),
+        "u16" => Type::Num(NumKind::U16),
+        "u32" => Type::Num(NumKind::U32),
+        "u64" => Type::Num(NumKind::U64),
+        "u128" => Type::Num(NumKind::U128),
+        "usize" => Type::Num(NumKind::Usize),
+        "f32" => Type::Num(NumKind::F32),
+        _ => return None,
+    })
+}
+
 // ---------------------------------------------------------------- AST (10200, §4.2)
 
 pub type Item = Node<ItemKind>;
@@ -271,6 +294,8 @@ pub enum Lit {
     Float(f64),
     Str(String),
     Bool(bool),
+    /// Littéral caractère `'a'` (V7, 20800).
+    Char(char),
 }
 
 #[derive(Debug, Clone, Copy)]
