@@ -521,6 +521,10 @@ impl Parser {
             self.stmt_end()?;
             return Ok(self.node(start, id, StmtKind::RustBlock(s)));
         }
+        // `assert` (10800) : soft-keyword (comme `use`/`import`/`extern`).
+        if matches!(self.cur(), TokenKind::Ident(s) if s == "assert") {
+            return self.assert_stmt();
+        }
         match self.cur() {
             TokenKind::Return => self.return_stmt(),
             TokenKind::If => self.if_stmt(),
@@ -547,6 +551,16 @@ impl Parser {
         self.stmt_end()?;
         let sp = self.span_from(start);
         Ok(make(self, id, sp))
+    }
+
+    fn assert_stmt(&mut self) -> CResult<Stmt> {
+        let start = self.i;
+        let id = self.fresh();
+        self.adv(); // assert
+        let cond = self.expr()?;
+        let msg = if self.eat(&TokenKind::Comma) { Some(self.expr()?) } else { None };
+        self.stmt_end()?;
+        Ok(self.node(start, id, StmtKind::Assert { cond, msg }))
     }
 
     fn return_stmt(&mut self) -> CResult<Stmt> {
@@ -760,7 +774,22 @@ impl Parser {
     // ---------------------------------------------------------------- expressions (Pratt)
 
     fn expr(&mut self) -> CResult<Expr> {
-        self.or_expr()
+        let start = self.i;
+        let e = self.or_expr()?;
+        // ternaire `a if cond else b` (10800) : `if` infixe (le `if` d'instruction est en tête).
+        if self.is(&TokenKind::If) {
+            self.adv();
+            let cond = self.or_expr()?;
+            self.expect(&TokenKind::Else, "`else` (ternaire)")?;
+            let els = self.expr()?; // associatif à droite
+            let id = self.fresh();
+            return Ok(self.node(
+                start,
+                id,
+                ExprKind::Ternary { cond: Box::new(cond), then: Box::new(e), els: Box::new(els) },
+            ));
+        }
+        Ok(e)
     }
 
     /// Découpe une f-string brute (10500) en fragments littéraux + sous-expressions (`{…}` apparié,
@@ -899,6 +928,12 @@ impl Parser {
                 TokenKind::Le => BinOp::Le,
                 TokenKind::Gt => BinOp::Gt,
                 TokenKind::Ge => BinOp::Ge,
+                TokenKind::In => BinOp::In,
+                // `not in` (10800) : on saute `not`, le `in` est consommé par l'adv ci-dessous.
+                TokenKind::Not if matches!(self.nth(1), TokenKind::In) => {
+                    self.adv();
+                    BinOp::NotIn
+                }
                 _ => break,
             };
             self.adv();
@@ -1029,10 +1064,26 @@ impl Parser {
                 }
                 TokenKind::LBracket => {
                     self.adv();
-                    let idx = self.expr()?;
-                    self.expect(&TokenKind::RBracket, "`]`")?;
-                    let id = self.fresh();
-                    e = self.node(start, id, ExprKind::Index { base: Box::new(e), idx: Box::new(idx) });
+                    // slice `xs[lo:hi]` (bornes optionnelles, 10800) vs index `xs[i]`.
+                    let lo = if self.is(&TokenKind::Colon) { None } else { Some(self.expr()?) };
+                    if self.eat(&TokenKind::Colon) {
+                        let hi = if self.is(&TokenKind::RBracket) { None } else { Some(self.expr()?) };
+                        self.expect(&TokenKind::RBracket, "`]`")?;
+                        let id = self.fresh();
+                        e = self.node(
+                            start,
+                            id,
+                            ExprKind::Slice { base: Box::new(e), lo: lo.map(Box::new), hi: hi.map(Box::new) },
+                        );
+                    } else {
+                        let idx = match lo {
+                            Some(x) => x,
+                            None => return Err(self.err("index vide")),
+                        };
+                        self.expect(&TokenKind::RBracket, "`]`")?;
+                        let id = self.fresh();
+                        e = self.node(start, id, ExprKind::Index { base: Box::new(e), idx: Box::new(idx) });
+                    }
                 }
                 TokenKind::Dot => {
                     self.adv();

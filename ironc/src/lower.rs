@@ -533,10 +533,10 @@ impl Cx<'_> {
             }
             ExprKind::Binary { op, lhs, rhs } => {
                 let l = self.value(lhs);
-                let r = self.value(rhs);
                 match op {
                     // `**` (10700) : flottant → powf ; entier → pow(exposant en u32).
                     BinOp::Pow => {
+                        let r = self.value(rhs);
                         if matches!(self.type_of(lhs), Type::F64 | Type::Num(NumKind::F32)) {
                             quote! { (#l).powf(#r) }
                         } else {
@@ -544,8 +544,25 @@ impl Cx<'_> {
                         }
                     }
                     // `//` (10700) : division entière/plancher (Euclidienne).
-                    BinOp::FloorDiv => quote! { (#l).div_euclid(#r) },
+                    BinOp::FloorDiv => {
+                        let r = self.value(rhs);
+                        quote! { (#l).div_euclid(#r) }
+                    }
+                    // `in`/`not in` (10800) : contains / contains_key.
+                    BinOp::In | BinOp::NotIn => {
+                        let coll = self.place(rhs);
+                        let contains = match self.type_of(rhs) {
+                            Type::Dict(..) => quote! { #coll.contains_key(&#l) },
+                            _ => quote! { #coll.contains(&#l) }, // list, set
+                        };
+                        if matches!(op, BinOp::NotIn) {
+                            quote! { (!#contains) }
+                        } else {
+                            contains
+                        }
+                    }
                     _ => {
+                        let r = self.value(rhs);
                         let o = lower_binop(*op);
                         quote! { (#l #o #r) }
                     }
@@ -667,9 +684,27 @@ impl Cx<'_> {
                 quote! { if #c { #t } else { #e } }
             }
             ExprKind::Comp { .. } => quote! { Vec::new() }, // stub 1.1 → 2.7
-            ExprKind::Slice { base, .. } => {
+            ExprKind::Slice { base, lo, hi } => {
                 let b = self.place(base);
-                quote! { #b.to_vec() } // stub 1.1 → 2.5
+                let lo_ts = match lo {
+                    Some(l) => {
+                        let l = self.value(l);
+                        quote! { (#l) as usize }
+                    }
+                    None => quote! { 0usize },
+                };
+                let range = match hi {
+                    Some(h) => {
+                        let h = self.value(h);
+                        quote! { #lo_ts..((#h) as usize) }
+                    }
+                    None => quote! { #lo_ts.. },
+                };
+                if matches!(self.type_of(base), Type::Str) {
+                    quote! { #b[#range].to_string() }
+                } else {
+                    quote! { #b[#range].to_vec() }
+                }
             }
         }
     }

@@ -1,0 +1,17 @@
+# [V7/2.5] Ternaire, in/not in, assert, slicing.
+
+fn main():
+    a = 3
+    b = 7
+    m = a if a > b else b
+    print(m)
+    xs = [1, 2, 3, 4, 5]
+    print(3 in xs)
+    print(9 not in xs)
+    assert m == 7
+    assert len(xs) == 5, "taille inattendue"
+    print(xs[1:3])
+    print(xs[2:])
+    print(xs[:2])
+    s = "hello world"
+    print(s[0:5])
