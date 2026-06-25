@@ -277,6 +277,10 @@ pub enum StmtKind {
     Assert { cond: Expr, msg: Option<Expr> },
     /// Affectation déstructurée `a, b = value` (V7, 10400).
     Destructure { targets: Vec<String>, value: Expr },
+    /// `try: … except [e]: …` (surface Python) — capture les erreurs `Result`/`?` du corps.
+    TryExcept { body: Vec<Stmt>, err_name: Option<String>, handler: Vec<Stmt> },
+    /// `raise <expr>` (surface Python) → `return Err(IronError(...))`.
+    Raise { value: Expr },
 }
 
 /// Un bras de `match` : motif + garde optionnelle + corps (V3 ; garde V6/20600).

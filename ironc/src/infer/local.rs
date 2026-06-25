@@ -87,6 +87,21 @@ pub(crate) fn stmt(cx: &mut Inf, s: &Stmt, scope: &mut Scope) {
                 scope.insert(name.clone(), et);
             }
         }
+        StmtKind::TryExcept { body, err_name, handler } => {
+            for s in body {
+                stmt(cx, s, scope);
+            }
+            let mut h = scope.clone();
+            if let Some(e) = err_name {
+                h.insert(e.clone(), Type::Str); // l'erreur capturée = message (str)
+            }
+            for s in handler {
+                stmt(cx, s, &mut h);
+            }
+        }
+        StmtKind::Raise { value } => {
+            expr(cx, value, scope);
+        }
         StmtKind::Break | StmtKind::Continue | StmtKind::Pass | StmtKind::RustBlock(_) => {}
     }
 }

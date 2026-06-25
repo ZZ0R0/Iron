@@ -487,6 +487,33 @@ impl Cx<'_> {
                 let ids: Vec<proc_macro2::Ident> = targets.iter().map(|t| format_ident!("{}", t)).collect();
                 quote! { let ( #(mut #ids),* ) = #v; }
             }
+            // `try: … except [e]: …` (surface Python) : IIFE renvoyant Result, capture les `?`/raise.
+            // Les locaux du corps sont hoistés (fn-level) → le closure les assigne par &mut.
+            StmtKind::TryExcept { body, err_name, handler } => {
+                let body_ts: Vec<TokenStream> = body.iter().map(|s| self.stmt(s)).collect();
+                let handler_ts: Vec<TokenStream> = handler.iter().map(|s| self.stmt(s)).collect();
+                let err_arm = match err_name {
+                    Some(e) => {
+                        let id = format_ident!("{}", e);
+                        quote! { Err(__err) => { let #id = __err.0; #(#handler_ts)* } }
+                    }
+                    None => quote! { Err(_) => { #(#handler_ts)* } },
+                };
+                quote! {
+                    match (|| -> Result<(), IronError> { #(#body_ts)* Ok(()) })() {
+                        Ok(()) => {}
+                        #err_arm
+                    }
+                }
+            }
+            StmtKind::Raise { value } => {
+                let v = self.value(value);
+                if matches!(self.type_of(value), Type::Str) {
+                    quote! { return Err(IronError(#v)); }
+                } else {
+                    quote! { return Err(IronError(format!("{}", #v))); }
+                }
+            }
         };
         quote! { __irn_mark!(#mark); #body }
     }
@@ -1096,6 +1123,10 @@ fn collect_locals(body: &[Stmt], params: &HashSet<String>, types: &TypeMap, out:
                 for arm in arms {
                     collect_locals(&arm.body, params, types, out);
                 }
+            }
+            StmtKind::TryExcept { body, handler, .. } => {
+                collect_locals(body, params, types, out);
+                collect_locals(handler, params, types, out);
             }
             _ => {}
         }

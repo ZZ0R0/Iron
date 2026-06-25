@@ -582,6 +582,13 @@ impl Parser {
         if matches!(self.cur(), TokenKind::Ident(s) if s == "assert") {
             return self.assert_stmt();
         }
+        // `try`/`raise` (surface Python) : soft-keywords.
+        if matches!(self.cur(), TokenKind::Ident(s) if s == "try") {
+            return self.try_stmt();
+        }
+        if matches!(self.cur(), TokenKind::Ident(s) if s == "raise") {
+            return self.raise_stmt();
+        }
         match self.cur() {
             TokenKind::Return => self.return_stmt(),
             TokenKind::If => self.if_stmt(),
@@ -608,6 +615,43 @@ impl Parser {
         self.stmt_end()?;
         let sp = self.span_from(start);
         Ok(make(self, id, sp))
+    }
+
+    fn try_stmt(&mut self) -> CResult<Stmt> {
+        let start = self.i;
+        let id = self.fresh();
+        self.adv(); // try
+        let body = self.block()?;
+        while self.is(&TokenKind::Newline) {
+            self.adv();
+        }
+        if !matches!(self.cur(), TokenKind::Ident(s) if s == "except") {
+            return Err(self.err("`try:` attend `except [nom]:`"));
+        }
+        self.adv(); // except
+        // `except:` / `except e:` / `except Type as e:`
+        let err_name = if matches!(self.cur(), TokenKind::Ident(_)) {
+            let first = self.ident()?;
+            if matches!(self.cur(), TokenKind::Ident(s) if s == "as") {
+                self.adv();
+                Some(self.ident()?)
+            } else {
+                Some(first)
+            }
+        } else {
+            None
+        };
+        let handler = self.block()?;
+        Ok(self.node(start, id, StmtKind::TryExcept { body, err_name, handler }))
+    }
+
+    fn raise_stmt(&mut self) -> CResult<Stmt> {
+        let start = self.i;
+        let id = self.fresh();
+        self.adv(); // raise
+        let value = self.expr()?;
+        self.stmt_end()?;
+        Ok(self.node(start, id, StmtKind::Raise { value }))
     }
 
     fn assert_stmt(&mut self) -> CResult<Stmt> {

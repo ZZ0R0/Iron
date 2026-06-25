@@ -108,6 +108,11 @@ fn creads_stmt(s: &Stmt, in_loop: bool, out: &mut Vec<(String, NodeId, bool)>) {
             }
         }
         StmtKind::Destructure { value, .. } => creads(value, Pos::Value, in_loop, out),
+        StmtKind::TryExcept { body, handler, .. } => {
+            body.iter().for_each(|s| creads_stmt(s, in_loop, out));
+            handler.iter().for_each(|s| creads_stmt(s, in_loop, out));
+        }
+        StmtKind::Raise { value } => creads(value, Pos::Value, in_loop, out),
         StmtKind::Break | StmtKind::Continue | StmtKind::Pass | StmtKind::RustBlock(_) => {}
     }
 }
@@ -248,6 +253,11 @@ fn visit_stmt(s: &Stmt, esc: &mut HashSet<String>) {
             }
         }
         StmtKind::Destructure { value, .. } => visit(value, Pos::Value, esc),
+        StmtKind::TryExcept { body, handler, .. } => {
+            body.iter().for_each(|s| visit_stmt(s, esc));
+            handler.iter().for_each(|s| visit_stmt(s, esc));
+        }
+        StmtKind::Raise { value } => visit(value, Pos::Value, esc),
         StmtKind::Break | StmtKind::Continue | StmtKind::Pass | StmtKind::RustBlock(_) => {}
     }
 }
