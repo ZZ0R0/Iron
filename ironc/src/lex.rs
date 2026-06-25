@@ -16,6 +16,8 @@ struct Lexer<'a> {
     out: Vec<Token>,
     indents: Vec<usize>,
     brace_depth: usize,
+    /// Profondeur de `(`/`[` (collections/appels/tuples) : newline ignorée dedans (continuation Python).
+    bracket_depth: usize,
     line_has_content: bool,
 }
 
@@ -28,6 +30,7 @@ impl<'a> Lexer<'a> {
             out: Vec::new(),
             indents: vec![0],
             brace_depth: 0,
+            bracket_depth: 0,
             line_has_content: false,
         }
     }
@@ -65,6 +68,9 @@ impl<'a> Lexer<'a> {
                 b'\n' => {
                     let start = self.pos;
                     self.pos += 1;
+                    if self.bracket_depth > 0 {
+                        continue; // continuation implicite dans (...)/[...] (style Python)
+                    }
                     if self.line_has_content {
                         let span = Span::new(self.file, start as u32, self.pos as u32);
                         self.out.push(Token { kind: TokenKind::Newline, span });
@@ -432,10 +438,22 @@ impl<'a> Lexer<'a> {
             (b'*', _) => one!(TokenKind::Star),
             (b'/', _) => one!(TokenKind::Slash),
             (b'%', _) => one!(TokenKind::Percent),
-            (b'(', _) => one!(TokenKind::LParen),
-            (b')', _) => one!(TokenKind::RParen),
-            (b'[', _) => one!(TokenKind::LBracket),
-            (b']', _) => one!(TokenKind::RBracket),
+            (b'(', _) => {
+                self.bracket_depth += 1;
+                one!(TokenKind::LParen)
+            }
+            (b')', _) => {
+                self.bracket_depth = self.bracket_depth.saturating_sub(1);
+                one!(TokenKind::RParen)
+            }
+            (b'[', _) => {
+                self.bracket_depth += 1;
+                one!(TokenKind::LBracket)
+            }
+            (b']', _) => {
+                self.bracket_depth = self.bracket_depth.saturating_sub(1);
+                one!(TokenKind::RBracket)
+            }
             (b';', _) => one!(TokenKind::Semicolon),
             (b',', _) => one!(TokenKind::Comma),
             (b'.', _) => one!(TokenKind::Dot),
