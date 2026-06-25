@@ -302,35 +302,41 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    /// littéral caractère `'a'` (20800) ; échappements simples `\n \t \' \\ \0`.
+    /// `'…'` : **1 caractère** → `char` (20800, interop) ; **sinon** → `str` (compat Python `'…'`).
     fn lex_char(&mut self) -> CResult<()> {
         let start = self.pos;
         self.pos += 1; // '
-        let c = match self.peek() {
-            None => return Err(self.err(start, "littéral caractère non terminé")),
-            Some(b'\\') => {
-                self.pos += 1;
-                let e = match self.peek() {
-                    Some(b'n') => '\n',
-                    Some(b't') => '\t',
-                    Some(b'\'') => '\'',
-                    Some(b'\\') => '\\',
-                    Some(b'0') => '\0',
-                    _ => return Err(self.err(self.pos, "échappement de caractère invalide")),
-                };
-                self.pos += 1;
-                e
+        let mut s = String::new();
+        loop {
+            match self.peek() {
+                None | Some(b'\n') => return Err(self.err(start, "chaîne `'…'` non terminée")),
+                Some(b'\'') => {
+                    self.pos += 1;
+                    break;
+                }
+                Some(b'\\') => {
+                    self.pos += 1;
+                    match self.peek() {
+                        Some(b'n') => s.push('\n'),
+                        Some(b't') => s.push('\t'),
+                        Some(b'\'') => s.push('\''),
+                        Some(b'\\') => s.push('\\'),
+                        Some(b'0') => s.push('\0'),
+                        _ => return Err(self.err(self.pos, "échappement invalide")),
+                    }
+                    self.pos += 1;
+                }
+                Some(c) => {
+                    s.push(c as char);
+                    self.pos += 1;
+                }
             }
-            Some(c) => {
-                self.pos += 1;
-                c as char
-            }
-        };
-        if self.peek() != Some(b'\'') {
-            return Err(self.err(start, "littéral caractère : `'` fermant attendu"));
         }
-        self.pos += 1; // '
-        self.push(TokenKind::Char(c), start);
+        let mut chars = s.chars();
+        match (chars.next(), chars.next()) {
+            (Some(c), None) => self.push(TokenKind::Char(c), start), // 1 char → char
+            _ => self.push(TokenKind::Str(s), start),                // 0 ou ≥2 → string (Python)
+        }
         Ok(())
     }
 
