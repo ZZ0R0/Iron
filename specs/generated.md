@@ -23,8 +23,11 @@
 | **V4** | Stdlib | 80100 | M6 | surface stdlib utilisable (wrappers fins, pas de runtime lourd I5) ; I7 | ✅ réalisé |
 | **V5** | Complétude : `move` (I1), `inout` (I3), inférence méthode, NaN (I12), métrique | G1–G8 | M2++ | invariants comblés ; corpus inchangé ; **0 clone** mesuré | ✅ réalisé |
 | **V6** | Finition : les **18 manques** de l'audit (I11 flux, I5 `Rc`, closures, modules…) | 20400 30300 20700 20500 20600 30400 50400 70200 80200 10300 (60200·90100 différés) | M5+/M6+ | I11/I5 honorés + dettes payées | ✅ **réalisé** (10/12) |
+| **V7** | **« Langage réel »** : langage-cœur (tuples/f-strings/compréhensions/numériques), crates Rust réelles, stdlib solide (wrappers `std`), lint, tooling/cargo | A:10400–21000 · B:50500–50800 · C:80300–80800 · D:60200–60400 · E:70300–70600 · F:30500–90200 (~28) | M1–M7 | Iron **utilisable pour de vrai** | 🔶 **cadré** |
 
-> **V0–V6 réalisés**, chacun avec sa trace `specs/Vn/realisation.md`.
+> **V0–V6 réalisés**, chacun avec sa trace `specs/Vn/realisation.md`. **V7 cadrée** (`specs/V7/README.md`) :
+> 6 chantiers, décisions structurantes tranchées (D1 zoo numérique · D2 stdlib = wrappers `std` namespacés ·
+> D5 crates hybride auto+`.iri`). `async`/lifetimes/LSP/auto-hébergement = V8+.
 > **V6 réalisé** : 10/12 specs implémentées + prouvées (gate **vert** : 37/37 corpus, 0 `unsafe`, 3 clones
 > intentionnels, remontée I8 OK, modules multi-fichiers OK). **2 différées par conception** : 60200
 > (source-maps expression — mécanisme 🔶-ouvert) et 90100 (métrique de vérité — exige le gel du langage).
