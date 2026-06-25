@@ -130,6 +130,15 @@ impl Parser {
                 self.stmt_end()?;
                 continue;
             }
+            if matches!(self.cur(), TokenKind::Ident(s) if s == "class") {
+                // `class Name:` (surface Python) → struct + impl inhérent.
+                let (st, im) = self.class_item()?;
+                items.push(st);
+                if let Some(im) = im {
+                    items.push(im);
+                }
+                continue;
+            }
             if matches!(self.cur(), TokenKind::Ident(s) if s == "extern") {
                 self.adv();
                 // `extern type Name = "rust::path"` → type opaque (50400).
@@ -245,6 +254,52 @@ impl Parser {
         }
         self.expect(&TokenKind::Dedent, "fin de bloc")?;
         Ok(self.node(start, id, ItemKind::Struct { name, generics, fields }))
+    }
+
+    /// `class Name:` (surface Python, P.3) → désucré en `struct` (champs) + `impl` inhérent (méthodes `def`).
+    fn class_item(&mut self) -> CResult<(Item, Option<Item>)> {
+        let start = self.i;
+        self.adv(); // class
+        let name = self.ident()?;
+        let generics = self.parse_generics()?;
+        self.expect(&TokenKind::Colon, "`:`")?;
+        self.expect(&TokenKind::Newline, "fin de ligne")?;
+        self.expect(&TokenKind::Indent, "bloc indenté")?;
+        let mut fields = Vec::new();
+        let mut methods = Vec::new();
+        while !self.is(&TokenKind::Dedent) && !self.is(&TokenKind::Eof) {
+            while self.is(&TokenKind::Newline) {
+                self.adv(); // lignes vides entre champs/méthodes (style Python)
+            }
+            if self.is(&TokenKind::Dedent) || self.is(&TokenKind::Eof) {
+                break;
+            }
+            if self.eat(&TokenKind::Pass) {
+                self.expect(&TokenKind::Newline, "fin de ligne")?;
+                continue;
+            }
+            if self.is(&TokenKind::Fn) {
+                // `def`/`fn` méthode (self implicite)
+                methods.push(self.parse_method(true)?);
+            } else {
+                let fname = self.ident()?;
+                self.expect(&TokenKind::Colon, "`:`")?;
+                let fty = self.parse_type()?;
+                self.expect(&TokenKind::Newline, "fin de ligne")?;
+                fields.push((fname, fty));
+            }
+        }
+        self.expect(&TokenKind::Dedent, "fin de bloc")?;
+        let sid = self.fresh();
+        let struct_item =
+            self.node(start, sid, ItemKind::Struct { name: name.clone(), generics, fields });
+        let impl_item = if methods.is_empty() {
+            None
+        } else {
+            let iid = self.fresh();
+            Some(self.node(start, iid, ItemKind::Impl { trait_name: String::new(), type_name: name, methods }))
+        };
+        Ok((struct_item, impl_item))
     }
 
     fn enum_item(&mut self) -> CResult<Item> {
