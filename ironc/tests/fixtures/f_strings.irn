@@ -1,0 +1,10 @@
+# [V7/2.2] f-strings : interpolation, expression, accolades littérales.
+
+fn main():
+    name = "Iron"
+    age = 1
+    print(f"{name} a {age} ans")
+    a = 2
+    b = 3
+    print(f"somme = {a + b}")
+    print(f"{{litteral}}")

@@ -85,6 +85,8 @@ impl<'a> Lexer<'a> {
                     }
                 }
                 b'0'..=b'9' => self.lex_number()?,
+                // f-string `f"…"` (10500) : `f` immédiatement suivi de `"`.
+                b'f' if self.src.get(self.pos + 1) == Some(&b'"') => self.lex_fstring()?,
                 c if is_ident_start(c) => self.lex_ident()?,
                 b'"' => self.lex_string()?,
                 _ => self.lex_op()?,
@@ -288,6 +290,39 @@ impl<'a> Lexer<'a> {
                 Some(_) => self.pos += 1,
             }
         }
+    }
+
+    /// f-string `f"…"` (10500) : capture le contenu brut intérieur (`{`/`}` préservés pour le parser).
+    fn lex_fstring(&mut self) -> CResult<()> {
+        let start = self.pos;
+        self.pos += 2; // f"
+        let mut s = String::new();
+        loop {
+            match self.peek() {
+                None | Some(b'\n') => return Err(self.err(start, "f-string non terminée")),
+                Some(b'"') => {
+                    self.pos += 1;
+                    break;
+                }
+                Some(b'\\') => {
+                    self.pos += 1;
+                    match self.peek() {
+                        Some(b'n') => s.push('\n'),
+                        Some(b't') => s.push('\t'),
+                        Some(b'"') => s.push('"'),
+                        Some(b'\\') => s.push('\\'),
+                        _ => return Err(self.err(self.pos, "échappement invalide")),
+                    }
+                    self.pos += 1;
+                }
+                Some(c) => {
+                    s.push(c as char);
+                    self.pos += 1;
+                }
+            }
+        }
+        self.push(TokenKind::FStr(s), start);
+        Ok(())
     }
 
     fn lex_string(&mut self) -> CResult<()> {

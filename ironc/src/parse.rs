@@ -728,6 +728,76 @@ impl Parser {
         self.or_expr()
     }
 
+    /// Découpe une f-string brute (10500) en fragments littéraux + sous-expressions (`{…}` apparié,
+    /// `{{`/`}}` = accolades littérales).
+    fn parse_fstring(&mut self, raw: &str) -> CResult<Vec<FStringPart>> {
+        let mut parts = Vec::new();
+        let mut lit = String::new();
+        let chars: Vec<char> = raw.chars().collect();
+        let mut i = 0;
+        while i < chars.len() {
+            match chars[i] {
+                '{' if chars.get(i + 1) == Some(&'{') => {
+                    lit.push('{');
+                    i += 2;
+                }
+                '}' if chars.get(i + 1) == Some(&'}') => {
+                    lit.push('}');
+                    i += 2;
+                }
+                '{' => {
+                    if !lit.is_empty() {
+                        parts.push(FStringPart::Lit(std::mem::take(&mut lit)));
+                    }
+                    let mut depth = 1;
+                    let mut src = String::new();
+                    i += 1;
+                    while i < chars.len() && depth > 0 {
+                        match chars[i] {
+                            '{' => depth += 1,
+                            '}' => {
+                                depth -= 1;
+                                if depth == 0 {
+                                    i += 1;
+                                    break;
+                                }
+                            }
+                            _ => {}
+                        }
+                        if depth > 0 {
+                            src.push(chars[i]);
+                        }
+                        i += 1;
+                    }
+                    if depth != 0 {
+                        return Err(self.err("f-string : `{` non fermé"));
+                    }
+                    let e = self.parse_sub_expr(&src)?;
+                    parts.push(FStringPart::Expr(Box::new(e)));
+                }
+                '}' => return Err(self.err("f-string : `}` non apparié")),
+                c => {
+                    lit.push(c);
+                    i += 1;
+                }
+            }
+        }
+        if !lit.is_empty() {
+            parts.push(FStringPart::Lit(lit));
+        }
+        Ok(parts)
+    }
+
+    /// Parse une sous-expression de f-string en threadant la numérotation des `NodeId`.
+    fn parse_sub_expr(&mut self, src: &str) -> CResult<Expr> {
+        let toks = crate::lex::lex(src, 0)?;
+        let mut sub = Parser::new(toks);
+        sub.next_id = self.next_id;
+        let e = sub.expr()?;
+        self.next_id = sub.next_id;
+        Ok(e)
+    }
+
     /// Parse une expression ; si suivie de `,`, collecte un `Tuple` (retour multiple / RHS déstructuré, 10400).
     fn expr_or_tuple(&mut self) -> CResult<Expr> {
         let start = self.i;
@@ -958,6 +1028,11 @@ impl Parser {
             TokenKind::Str(s) => {
                 self.adv();
                 Ok(self.node(start, id, ExprKind::Lit(Lit::Str(s))))
+            }
+            TokenKind::FStr(raw) => {
+                self.adv();
+                let parts = self.parse_fstring(&raw)?;
+                Ok(self.node(start, id, ExprKind::FString(parts)))
             }
             TokenKind::Ident(name) => {
                 self.adv();

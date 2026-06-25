@@ -47,6 +47,8 @@ pub enum TokenKind {
     Int(i64),
     Float(f64),
     Str(String),
+    /// f-string `f"…"` (V7, 10500) : contenu brut intérieur (avec `{`/`}` préservés).
+    FStr(String),
     Bool(bool),
     Ident(String),
     // mots-clés

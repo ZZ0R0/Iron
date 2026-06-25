@@ -639,7 +639,7 @@ impl Cx<'_> {
                         FStringPart::Lit(s) => fmt.push_str(&s.replace('{', "{{").replace('}', "}}")),
                         FStringPart::Expr(e) => {
                             fmt.push_str("{}");
-                            args.push(self.value(e));
+                            args.push(self.place(e)); // format! emprunte → pas de clone
                         }
                     }
                 }
