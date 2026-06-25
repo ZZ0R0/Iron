@@ -26,12 +26,21 @@ pub fn lower(
             _ => None,
         })
         .collect();
+    let user_fns: HashSet<String> = ast
+        .items
+        .iter()
+        .filter_map(|it| match &it.kind {
+            ItemKind::Fn { name, .. } => Some(name.clone()),
+            _ => None,
+        })
+        .collect();
     let mut cx = Cx {
         sm: SourceMap::default(),
         types,
         param_modes,
         bindings,
         enums,
+        user_fns,
         own,
         inout_params: HashSet::new(),
         byref_params: HashSet::new(),
@@ -78,6 +87,8 @@ struct Cx<'a> {
     param_modes: &'a ParamModes,
     bindings: &'a Bindings,
     enums: HashSet<String>,
+    /// Fns définies par l'utilisateur — priment sur les built-ins homonymes (ex. un `fn add` perso).
+    user_fns: HashSet<String>,
     own: &'a OwnershipMap,
     inout_params: HashSet<String>,
     /// Params passés en `&T` (ByRef) pour la fn en cours — base non possédée → pas de move-hors-struct.
@@ -756,6 +767,8 @@ impl Cx<'_> {
             }
         }
         if let ExprKind::Var(name) = &callee.kind {
+            // les fns utilisateur priment sur les built-ins homonymes (ex. un `fn add` perso).
+            if !self.user_fns.contains(name) {
             match name.as_str() {
                 "print" if args.len() == 1 => {
                     let a = self.place(&args[0]); // println! emprunte → pas de clone
@@ -919,6 +932,7 @@ impl Cx<'_> {
                     return quote! { (#a as #ty) };
                 }
                 _ => {}
+            }
             }
             // fonction externe (`.iri`) → chemin Rust (50200).
             if let Some(ef) = self.bindings.fns.get(name) {

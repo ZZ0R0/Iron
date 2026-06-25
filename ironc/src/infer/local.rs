@@ -127,6 +127,10 @@ pub(crate) fn expr(cx: &mut Inf, e: &Expr, scope: &Scope) -> Type {
                 expr(cx, a, scope);
             }
             match &callee.kind {
+                // les fns utilisateur/externes (dans `sigs`) priment sur les built-ins homonymes.
+                ExprKind::Var(name) if cx.sigs.contains_key(name) => {
+                    cx.sigs.get(name).map(|(_, r)| r.clone()).unwrap_or(Type::Unit)
+                }
                 ExprKind::Var(name) => match name.as_str() {
                     "print" => Type::Unit,
                     "len" => Type::I64,
