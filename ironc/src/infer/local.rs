@@ -215,7 +215,11 @@ pub(crate) fn expr(cx: &mut Inf, e: &Expr, scope: &Scope) -> Type {
             for (_, v) in fields {
                 expr(cx, v, scope);
             }
-            Type::Struct(name.clone())
+            // `Name(champ=val)` : appel à arguments nommés si `Name` est une fn → son type de retour.
+            match cx.sigs.get(name) {
+                Some((_, ret)) => ret.clone(),
+                None => Type::Struct(name.clone()),
+            }
         }
         ExprKind::Field { base, name } => {
             let bt = expr(cx, base, scope);

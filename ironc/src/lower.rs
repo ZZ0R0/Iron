@@ -34,12 +34,16 @@ pub fn lower(
             _ => None,
         })
         .collect();
+    let mut fn_params: HashMap<String, Vec<String>> = HashMap::new();
     let mut fn_defaults: HashMap<String, Vec<Option<Expr>>> = HashMap::new();
     let mut method_defaults: HashMap<(String, String), Vec<Option<Expr>>> = HashMap::new();
     for it in &ast.items {
         match &it.kind {
-            ItemKind::Fn { name, defaults, .. } if defaults.iter().any(Option::is_some) => {
-                fn_defaults.insert(name.clone(), defaults.clone());
+            ItemKind::Fn { name, params, defaults, .. } => {
+                fn_params.insert(name.clone(), params.iter().map(|(n, _)| n.clone()).collect());
+                if defaults.iter().any(Option::is_some) {
+                    fn_defaults.insert(name.clone(), defaults.clone());
+                }
             }
             ItemKind::Impl { type_name, methods, .. } => {
                 for m in methods {
@@ -58,6 +62,7 @@ pub fn lower(
         bindings,
         enums,
         user_fns,
+        fn_params,
         fn_defaults,
         method_defaults,
         own,
@@ -108,6 +113,8 @@ struct Cx<'a> {
     enums: HashSet<String>,
     /// Fns définies par l'utilisateur — priment sur les built-ins homonymes (ex. un `fn add` perso).
     user_fns: HashSet<String>,
+    /// Noms des params par fn (surface Python) : pour réordonner les arguments nommés `f(x=1, y=2)`.
+    fn_params: HashMap<String, Vec<String>>,
     /// Valeurs par défaut des params (surface Python) : fn → defaults ; (type, méthode) → defaults.
     fn_defaults: HashMap<String, Vec<Option<Expr>>>,
     method_defaults: HashMap<(String, String), Vec<Option<Expr>>>,
@@ -749,6 +756,40 @@ impl Cx<'_> {
                 quote! { { let mut __d = std::collections::HashMap::new(); #(#ins)* __d } }
             }
             ExprKind::StructLit { name, fields } => {
+                // `Name(champ=val)` : appel à **arguments nommés** si `Name` est une fn, sinon construction.
+                if self.user_fns.contains(name) {
+                    let fid = format_ident!("{}", name);
+                    let params = self.fn_params.get(name).cloned().unwrap_or_default();
+                    let defaults = self.fn_defaults.get(name).cloned().unwrap_or_default();
+                    let modes = self.param_modes.get(name).cloned();
+                    let args: Vec<TokenStream> = params
+                        .iter()
+                        .enumerate()
+                        .map(|(i, p)| {
+                            let arg = fields
+                                .iter()
+                                .find(|(fname, _)| fname == p)
+                                .map(|(_, e)| e.clone())
+                                .or_else(|| defaults.get(i).and_then(|o| o.clone()));
+                            let mode = modes.as_ref().and_then(|m| m.get(i)).copied().unwrap_or(ParamMode::ByValue);
+                            match arg {
+                                Some(e) => match mode {
+                                    ParamMode::ByRef => {
+                                        let pl = self.place(&e);
+                                        quote! { &#pl }
+                                    }
+                                    ParamMode::InOut => {
+                                        let pl = self.place(&e);
+                                        quote! { &mut #pl }
+                                    }
+                                    ParamMode::ByValue => self.value(&e),
+                                },
+                                None => quote! { Default::default() },
+                            }
+                        })
+                        .collect();
+                    return quote! { #fid( #(#args),* ) };
+                }
                 let sid = format_ident!("{}", name);
                 let fs: Vec<TokenStream> = fields
                     .iter()
