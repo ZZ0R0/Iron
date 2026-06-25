@@ -88,7 +88,7 @@ struct Cx<'a> {
 }
 
 fn is_copy(t: &Type) -> bool {
-    matches!(t, Type::I64 | Type::F64 | Type::Bool | Type::Unit)
+    matches!(t, Type::I64 | Type::F64 | Type::Bool | Type::Unit | Type::Num(_) | Type::Char)
 }
 
 fn mode_of(pm: &ParamModes, fn_name: &str, i: usize) -> ParamMode {
@@ -386,6 +386,22 @@ impl Cx<'_> {
                     .collect();
                 quote! { match #s { #(#arm_ts)* } }
             }
+            // V7 — assert (10800) + destructuring (10400) : lowering réel.
+            StmtKind::Assert { cond, msg } => {
+                let c = self.value(cond);
+                match msg {
+                    Some(m) => {
+                        let mv = self.value(m);
+                        quote! { assert!(#c, "{}", #mv); }
+                    }
+                    None => quote! { assert!(#c); },
+                }
+            }
+            StmtKind::Destructure { targets, value } => {
+                let v = self.value(value);
+                let ids: Vec<proc_macro2::Ident> = targets.iter().map(|t| format_ident!("{}", t)).collect();
+                quote! { let ( #(mut #ids),* ) = #v; }
+            }
         };
         quote! { __irn_mark!(#mark); #body }
     }
@@ -592,6 +608,36 @@ impl Cx<'_> {
                 let ps: Vec<proc_macro2::Ident> = params.iter().map(|p| format_ident!("{}", p)).collect();
                 let b = self.value(body);
                 quote! { | #(#ps),* | #b }
+            }
+            // V7 — tuple/f-string/ternaire : lowering réel ; comp/slice : raffinés en 2.7/2.5.
+            ExprKind::Tuple(items) => {
+                let xs: Vec<TokenStream> = items.iter().map(|e| self.value(e)).collect();
+                quote! { ( #(#xs),* ) }
+            }
+            ExprKind::FString(parts) => {
+                let mut fmt = String::new();
+                let mut args: Vec<TokenStream> = Vec::new();
+                for p in parts {
+                    match p {
+                        FStringPart::Lit(s) => fmt.push_str(&s.replace('{', "{{").replace('}', "}}")),
+                        FStringPart::Expr(e) => {
+                            fmt.push_str("{}");
+                            args.push(self.value(e));
+                        }
+                    }
+                }
+                quote! { format!(#fmt #(, #args)*) }
+            }
+            ExprKind::Ternary { cond, then, els } => {
+                let c = self.value(cond);
+                let t = self.value(then);
+                let e = self.value(els);
+                quote! { if #c { #t } else { #e } }
+            }
+            ExprKind::Comp { .. } => quote! { Vec::new() }, // stub 1.1 → 2.7
+            ExprKind::Slice { base, .. } => {
+                let b = self.place(base);
+                quote! { #b.to_vec() } // stub 1.1 → 2.5
             }
         }
     }
@@ -864,6 +910,10 @@ fn lower_pattern(p: &Pattern) -> TokenStream {
                 quote! { #p( #(#subs),* ) }
             }
         }
+        Pattern::Tuple(subs) => {
+            let ps: Vec<TokenStream> = subs.iter().map(lower_pattern).collect();
+            quote! { ( #(#ps),* ) }
+        }
     }
 }
 
@@ -877,7 +927,7 @@ fn lower_path(path: &[String]) -> TokenStream {
 fn is_annotatable(t: &Type) -> bool {
     // Seuls les primitifs (fixe l'ambiguïté `{float}`) ; le reste — structs (génériques !), collections,
     // enums, Option/Result — est laissé à l'inférence Rust (annoter casserait `let mut p: Pair;`).
-    matches!(t, Type::I64 | Type::F64 | Type::Bool | Type::Str)
+    matches!(t, Type::I64 | Type::F64 | Type::Bool | Type::Str | Type::Num(_) | Type::Char)
 }
 
 fn lower_generics(gens: &Generics) -> TokenStream {
@@ -957,6 +1007,42 @@ fn lower_type(t: &Type) -> TokenStream {
             let inner = lower_type(t);
             quote! { std::rc::Rc<std::cell::RefCell<#inner>> }
         }
+        // V7 (10400/20900/20800/30600)
+        Type::Tuple(ts) => {
+            let xs: Vec<TokenStream> = ts.iter().map(lower_type).collect();
+            quote! { ( #(#xs),* ) }
+        }
+        Type::Set(t) => {
+            let i = lower_type(t);
+            quote! { std::collections::HashSet<#i> }
+        }
+        Type::Num(k) => {
+            let id = format_ident!("{}", num_kind_str(*k));
+            quote! { #id }
+        }
+        Type::Char => quote! { char },
+        Type::Weak(t) => {
+            let i = lower_type(t);
+            quote! { std::rc::Weak<std::cell::RefCell<#i>> }
+        }
+    }
+}
+
+/// Nom Rust d'un `NumKind` (V7, 20800).
+fn num_kind_str(k: NumKind) -> &'static str {
+    match k {
+        NumKind::I8 => "i8",
+        NumKind::I16 => "i16",
+        NumKind::I32 => "i32",
+        NumKind::I128 => "i128",
+        NumKind::Isize => "isize",
+        NumKind::U8 => "u8",
+        NumKind::U16 => "u16",
+        NumKind::U32 => "u32",
+        NumKind::U64 => "u64",
+        NumKind::U128 => "u128",
+        NumKind::Usize => "usize",
+        NumKind::F32 => "f32",
     }
 }
 
@@ -975,5 +1061,12 @@ fn lower_binop(op: BinOp) -> TokenStream {
         BinOp::Ge => quote! { >= },
         BinOp::And => quote! { && },
         BinOp::Or => quote! { || },
+        BinOp::BitAnd => quote! { & },
+        BinOp::BitOr => quote! { | },
+        BinOp::BitXor => quote! { ^ },
+        BinOp::Shl => quote! { << },
+        BinOp::Shr => quote! { >> },
+        // Pow/FloorDiv/In/NotIn ne passent jamais par lower_binop (value(Binary) les spécial-case, 2.4/2.5).
+        BinOp::Pow | BinOp::FloorDiv | BinOp::In | BinOp::NotIn => quote! { + },
     }
 }

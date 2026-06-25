@@ -101,6 +101,13 @@ fn creads_stmt(s: &Stmt, in_loop: bool, out: &mut Vec<(String, NodeId, bool)>) {
                 arm.body.iter().for_each(|s| creads_stmt(s, in_loop, out));
             }
         }
+        StmtKind::Assert { cond, msg } => {
+            creads(cond, Pos::Borrow, in_loop, out);
+            if let Some(m) = msg {
+                creads(m, Pos::Borrow, in_loop, out);
+            }
+        }
+        StmtKind::Destructure { value, .. } => creads(value, Pos::Value, in_loop, out),
         StmtKind::Break | StmtKind::Continue | StmtKind::Pass | StmtKind::RustBlock(_) => {}
     }
 }
@@ -144,6 +151,33 @@ fn creads(e: &Expr, pos: Pos, in_loop: bool, out: &mut Vec<(String, NodeId, bool
         ExprKind::Try { inner } => creads(inner, Pos::Value, in_loop, out),
         // Closure (20700) : capture par référence → position Borrow (jamais un move de capture).
         ExprKind::Lambda { body, .. } => creads(body, Pos::Borrow, in_loop, out),
+        ExprKind::Tuple(items) => items.iter().for_each(|e| creads(e, Pos::Value, in_loop, out)),
+        ExprKind::FString(parts) => parts.iter().for_each(|p| {
+            if let FStringPart::Expr(e) = p {
+                creads(e, Pos::Borrow, in_loop, out);
+            }
+        }),
+        ExprKind::Comp { body, iter, cond, .. } => {
+            creads(iter, Pos::Value, in_loop, out);
+            creads(body, Pos::Value, in_loop, out);
+            if let Some(c) = cond {
+                creads(c, Pos::Borrow, in_loop, out);
+            }
+        }
+        ExprKind::Ternary { cond, then, els } => {
+            creads(cond, Pos::Borrow, in_loop, out);
+            creads(then, Pos::Value, in_loop, out);
+            creads(els, Pos::Value, in_loop, out);
+        }
+        ExprKind::Slice { base, lo, hi } => {
+            creads(base, Pos::Borrow, in_loop, out);
+            if let Some(l) = lo {
+                creads(l, Pos::Borrow, in_loop, out);
+            }
+            if let Some(h) = hi {
+                creads(h, Pos::Borrow, in_loop, out);
+            }
+        }
         ExprKind::Lit(_) => {}
     }
 }
@@ -207,6 +241,13 @@ fn visit_stmt(s: &Stmt, esc: &mut HashSet<String>) {
                 }
             }
         }
+        StmtKind::Assert { cond, msg } => {
+            visit(cond, Pos::Borrow, esc);
+            if let Some(m) = msg {
+                visit(m, Pos::Borrow, esc);
+            }
+        }
+        StmtKind::Destructure { value, .. } => visit(value, Pos::Value, esc),
         StmtKind::Break | StmtKind::Continue | StmtKind::Pass | StmtKind::RustBlock(_) => {}
     }
 }
@@ -248,6 +289,33 @@ fn visit(e: &Expr, pos: Pos, esc: &mut HashSet<String>) {
         ExprKind::Try { inner } => visit(inner, Pos::Value, esc),
         // Closure (20700) : un param capturé peut s'échapper → position Value (conservateur, sûr).
         ExprKind::Lambda { body, .. } => visit(body, Pos::Value, esc),
+        ExprKind::Tuple(items) => items.iter().for_each(|e| visit(e, Pos::Value, esc)),
+        ExprKind::FString(parts) => parts.iter().for_each(|p| {
+            if let FStringPart::Expr(e) = p {
+                visit(e, Pos::Borrow, esc);
+            }
+        }),
+        ExprKind::Comp { body, iter, cond, .. } => {
+            visit(iter, Pos::Value, esc);
+            visit(body, Pos::Value, esc);
+            if let Some(c) = cond {
+                visit(c, Pos::Borrow, esc);
+            }
+        }
+        ExprKind::Ternary { cond, then, els } => {
+            visit(cond, Pos::Borrow, esc);
+            visit(then, Pos::Value, esc);
+            visit(els, Pos::Value, esc);
+        }
+        ExprKind::Slice { base, lo, hi } => {
+            visit(base, Pos::Borrow, esc);
+            if let Some(l) = lo {
+                visit(l, Pos::Borrow, esc);
+            }
+            if let Some(h) = hi {
+                visit(h, Pos::Borrow, esc);
+            }
+        }
         ExprKind::Lit(_) => {}
     }
 }

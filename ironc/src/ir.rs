@@ -141,6 +141,33 @@ pub enum Type {
     /// Partage explicite (V6, 30300, I5) : `shared[T]` → `Rc<RefCell<T>>`. Le clone est un
     /// `Rc::clone` (partage du pointeur), jamais une copie profonde.
     Shared(Box<Type>),
+    /// Tuple anonyme `(A, B, …)` (V7, 10400).
+    Tuple(Vec<Type>),
+    /// Ensemble `set[T]` → `HashSet<T>` (V7, 20900).
+    Set(Box<Type>),
+    /// Numériques élargis hors `i64`/`f64` (V7, 20800) ; les défauts restent `I64`/`F64`.
+    Num(NumKind),
+    /// Caractère Unicode `char` (V7, 20800).
+    Char,
+    /// Référence faible `Weak` (V7, 30600).
+    Weak(Box<Type>),
+}
+
+/// Variantes numériques élargies (V7, 20800). `i64`/`f64` restent `Type::I64`/`F64` (défauts).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NumKind {
+    I8,
+    I16,
+    I32,
+    I128,
+    Isize,
+    U8,
+    U16,
+    U32,
+    U64,
+    U128,
+    Usize,
+    F32,
 }
 
 // ---------------------------------------------------------------- AST (10200, §4.2)
@@ -209,6 +236,10 @@ pub enum StmtKind {
     RustBlock(String),
     /// `match e:` + bras (V3, 20300).
     Match { scrutinee: Expr, arms: Vec<MatchArm> },
+    /// `assert cond[, msg]` (V7, 10800).
+    Assert { cond: Expr, msg: Option<Expr> },
+    /// Affectation déstructurée `a, b = value` (V7, 10400).
+    Destructure { targets: Vec<String>, value: Expr },
 }
 
 /// Un bras de `match` : motif + garde optionnelle + corps (V3 ; garde V6/20600).
@@ -226,6 +257,8 @@ pub enum Pattern {
     Wild,
     Var(String),
     Lit(Lit),
+    /// Motif tuple `(a, b)` (V7, 10400).
+    Tuple(Vec<Pattern>),
     /// `Some(x)`, `None`, `Shape.Circle(r)` — `path` joint en `::`, `sub` = sous-motifs.
     Variant { path: Vec<String>, sub: Vec<Pattern> },
 }
@@ -259,6 +292,17 @@ pub enum BinOp {
     Ge,
     And,
     Or,
+    /// V7 (10700) : puissance `**`, division entière `//`, bit-à-bit.
+    Pow,
+    FloorDiv,
+    BitAnd,
+    BitOr,
+    BitXor,
+    Shl,
+    Shr,
+    /// V7 (10800) : appartenance `in` / `not in`.
+    In,
+    NotIn,
 }
 
 #[derive(Debug, Clone)]
@@ -277,6 +321,31 @@ pub enum ExprKind {
     /// Closure (V6, 20700) : `lambda x, y: expr`. Corps mono-expression ; types des params
     /// laissés à l'inférence Rust (I2).
     Lambda { params: Vec<String>, body: Box<Expr> },
+    /// Tuple `(a, b, …)` (V7, 10400).
+    Tuple(Vec<Expr>),
+    /// f-string `f"…{e}…"` (V7, 10500).
+    FString(Vec<FStringPart>),
+    /// Compréhension liste/dict/set (V7, 10600). Pour `Dict`, `body` = `Tuple([clé, valeur])`.
+    Comp { kind: CompKind, body: Box<Expr>, var: Pattern, iter: Box<Expr>, cond: Option<Box<Expr>> },
+    /// Ternaire `a if c else b` (V7, 10800).
+    Ternary { cond: Box<Expr>, then: Box<Expr>, els: Box<Expr> },
+    /// Slicing `xs[lo:hi]` (V7, 10800) ; bornes optionnelles.
+    Slice { base: Box<Expr>, lo: Option<Box<Expr>>, hi: Option<Box<Expr>> },
+}
+
+/// Fragment de f-string (V7, 10500) : texte littéral ou sous-expression interpolée.
+#[derive(Debug, Clone)]
+pub enum FStringPart {
+    Lit(String),
+    Expr(Box<Expr>),
+}
+
+/// Sorte de compréhension (V7, 10600).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompKind {
+    List,
+    Dict,
+    Set,
 }
 
 #[derive(Debug, Clone, Default)]

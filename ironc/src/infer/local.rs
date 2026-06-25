@@ -71,6 +71,22 @@ pub(crate) fn stmt(cx: &mut Inf, s: &Stmt, scope: &mut Scope) {
                 }
             }
         }
+        StmtKind::Assert { cond, msg } => {
+            expr(cx, cond, scope);
+            if let Some(m) = msg {
+                expr(cx, m, scope);
+            }
+        }
+        StmtKind::Destructure { targets, value } => {
+            let t = expr(cx, value, scope);
+            for (i, name) in targets.iter().enumerate() {
+                let et = match &t {
+                    Type::Tuple(ts) => ts.get(i).cloned().unwrap_or(Type::Unit),
+                    _ => Type::Unit,
+                };
+                scope.insert(name.clone(), et);
+            }
+        }
         StmtKind::Break | StmtKind::Continue | StmtKind::Pass | StmtKind::RustBlock(_) => {}
     }
 }
@@ -231,6 +247,47 @@ pub(crate) fn expr(cx: &mut Inf, e: &Expr, scope: &Scope) -> Type {
             }
             let bt = expr(cx, body, &mut inner);
             Type::Fn(params.iter().map(|_| Type::Unit).collect(), Box::new(bt))
+        }
+        ExprKind::Tuple(items) => {
+            let ts: Vec<Type> = items.iter().map(|it| expr(cx, it, scope)).collect();
+            Type::Tuple(ts)
+        }
+        ExprKind::FString(parts) => {
+            for p in parts {
+                if let FStringPart::Expr(e) = p {
+                    expr(cx, e, scope);
+                }
+            }
+            Type::Str
+        }
+        ExprKind::Comp { kind, body, iter, cond, .. } => {
+            // 1.1 : type de collection ; liaison fine de `var` raffinée en 2.7.
+            let _ = expr(cx, iter, scope);
+            let bt = expr(cx, body, scope);
+            if let Some(c) = cond {
+                expr(cx, c, scope);
+            }
+            match kind {
+                CompKind::List => Type::List(Box::new(bt)),
+                CompKind::Set => Type::Set(Box::new(bt)),
+                CompKind::Dict => Type::Unit,
+            }
+        }
+        ExprKind::Ternary { cond, then, els } => {
+            expr(cx, cond, scope);
+            let t = expr(cx, then, scope);
+            expr(cx, els, scope);
+            t
+        }
+        ExprKind::Slice { base, lo, hi } => {
+            let b = expr(cx, base, scope);
+            if let Some(l) = lo {
+                expr(cx, l, scope);
+            }
+            if let Some(h) = hi {
+                expr(cx, h, scope);
+            }
+            b
         }
     };
     cx.set(e.id, ty)

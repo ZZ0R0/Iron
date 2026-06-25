@@ -143,6 +143,15 @@ impl Inf<'_> {
                     self.bind_pattern(sp, ft, scope);
                 }
             }
+            Pattern::Tuple(subs) => {
+                for (i, sp) in subs.iter().enumerate() {
+                    let et = match ty {
+                        Type::Tuple(ts) => ts.get(i).cloned().unwrap_or(Type::Unit),
+                        _ => Type::Unit,
+                    };
+                    self.bind_pattern(sp, &et, scope);
+                }
+            }
         }
     }
 }
