@@ -235,6 +235,8 @@ impl<'a> Lexer<'a> {
             "not" => TokenKind::Not,
             "true" => TokenKind::Bool(true),
             "false" => TokenKind::Bool(false),
+            "True" => TokenKind::Bool(true),   // littéraux Python
+            "False" => TokenKind::Bool(false),
             _ => TokenKind::Ident(text.clone()),
         };
         self.push(kind, start);

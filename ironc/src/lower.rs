@@ -403,8 +403,8 @@ impl Cx<'_> {
             StmtKind::Break => quote! { break; },
             StmtKind::Continue => quote! { continue; },
             StmtKind::Return { value } => match value {
-                Some(e) if matches!(&e.kind, ExprKind::Var(n) if n == "none") => {
-                    // `none` (constructeur Option) → toujours `None`, jamais emballé.
+                Some(e) if matches!(&e.kind, ExprKind::Var(n) if n == "none" || n == "None") => {
+                    // `none`/`None` (constructeur Option) → toujours `None`, jamais emballé.
                     quote! { return None; }
                 }
                 Some(e) => {
@@ -559,8 +559,8 @@ impl Cx<'_> {
                 Lit::Char(c) => quote! { #c },
             },
             ExprKind::Var(n) => {
-                if n == "none" {
-                    return quote! { None };
+                if n == "none" || n == "None" {
+                    return quote! { None }; // `None` (Python) ≡ `none`
                 }
                 if n == "self" {
                     return quote! { self };
