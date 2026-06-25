@@ -30,6 +30,18 @@ fn same(a: &TokenKind, b: &TokenKind) -> bool {
     std::mem::discriminant(a) == std::mem::discriminant(b)
 }
 
+/// Opérateur d'une affectation augmentée `op=` (10700) → `BinOp` ; `None` sinon.
+fn aug_op(t: &TokenKind) -> Option<BinOp> {
+    Some(match t {
+        TokenKind::PlusEq => BinOp::Add,
+        TokenKind::MinusEq => BinOp::Sub,
+        TokenKind::StarEq => BinOp::Mul,
+        TokenKind::SlashEq => BinOp::Div,
+        TokenKind::PercentEq => BinOp::Rem,
+        _ => return None,
+    })
+}
+
 impl Parser {
     fn new(toks: Vec<Token>) -> Self {
         Parser { toks, i: 0, next_id: 0, extern_types: Vec::new() }
@@ -712,6 +724,22 @@ impl Parser {
             self.stmt_end()?;
             return Ok(self.node(start, id, StmtKind::Destructure { targets, value }));
         }
+        // affectation augmentée `x op= e` → `x = x op e` (10700).
+        if let Some(op) = aug_op(self.cur()) {
+            self.adv();
+            let rhs = self.expr()?;
+            self.stmt_end()?;
+            let bid = self.fresh();
+            let value =
+                self.node(start, bid, ExprKind::Binary { op, lhs: Box::new(lhs.clone()), rhs: Box::new(rhs) });
+            let kind = match &lhs.kind {
+                ExprKind::Var(_) | ExprKind::Field { .. } | ExprKind::Index { .. } => {
+                    StmtKind::Assign { target: lhs, value }
+                }
+                _ => return Err(self.err("cible d'affectation augmentée invalide")),
+            };
+            return Ok(self.node(start, id, kind));
+        }
         if self.eat(&TokenKind::Assign) {
             let value = self.expr()?;
             self.stmt_end()?;
@@ -918,18 +946,33 @@ impl Parser {
 
     fn mul_expr(&mut self) -> CResult<Expr> {
         let start = self.i;
-        let mut lhs = self.unary_expr()?;
+        let mut lhs = self.pow_expr()?;
         loop {
             let op = match self.cur() {
                 TokenKind::Star => BinOp::Mul,
                 TokenKind::Slash => BinOp::Div,
+                TokenKind::SlashSlash => BinOp::FloorDiv, // division entière plancher (10700)
                 TokenKind::Percent => BinOp::Rem,
                 _ => break,
             };
             self.adv();
             let id = self.fresh();
-            let rhs = self.unary_expr()?;
+            let rhs = self.pow_expr()?;
             lhs = self.node(start, id, ExprKind::Binary { op, lhs: Box::new(lhs), rhs: Box::new(rhs) });
+        }
+        Ok(lhs)
+    }
+
+    /// Puissance `**` (10700) — au-dessus de `* / // %`, gauche-associatif (simplification : `2**3**2`
+    /// = `(2**3)**2` ; le cas courant `x ** 2` est correct).
+    fn pow_expr(&mut self) -> CResult<Expr> {
+        let start = self.i;
+        let mut lhs = self.unary_expr()?;
+        while self.is(&TokenKind::StarStar) {
+            self.adv();
+            let id = self.fresh();
+            let rhs = self.unary_expr()?;
+            lhs = self.node(start, id, ExprKind::Binary { op: BinOp::Pow, lhs: Box::new(lhs), rhs: Box::new(rhs) });
         }
         Ok(lhs)
     }

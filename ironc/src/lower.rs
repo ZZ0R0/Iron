@@ -534,8 +534,22 @@ impl Cx<'_> {
             ExprKind::Binary { op, lhs, rhs } => {
                 let l = self.value(lhs);
                 let r = self.value(rhs);
-                let o = lower_binop(*op);
-                quote! { (#l #o #r) }
+                match op {
+                    // `**` (10700) : flottant → powf ; entier → pow(exposant en u32).
+                    BinOp::Pow => {
+                        if matches!(self.type_of(lhs), Type::F64 | Type::Num(NumKind::F32)) {
+                            quote! { (#l).powf(#r) }
+                        } else {
+                            quote! { (#l).pow((#r) as u32) }
+                        }
+                    }
+                    // `//` (10700) : division entière/plancher (Euclidienne).
+                    BinOp::FloorDiv => quote! { (#l).div_euclid(#r) },
+                    _ => {
+                        let o = lower_binop(*op);
+                        quote! { (#l #o #r) }
+                    }
+                }
             }
             ExprKind::Call { callee, args } => self.call(callee, args),
             ExprKind::Field { base, name } => {
