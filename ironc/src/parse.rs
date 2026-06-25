@@ -173,19 +173,14 @@ impl Parser {
         }
     }
 
-    fn fn_item(&mut self) -> CResult<Item> {
-        let start = self.i;
-        let id = self.fresh();
-        self.expect(&TokenKind::Fn, "`fn`")?;
-        let name = self.ident()?;
-        let generics = self.parse_generics()?;
-        self.expect(&TokenKind::LParen, "`(`")?;
+    /// Liste de params `(p1, p2: T, p3 = défaut, …)` → (params, defaults). `LParen` déjà consommé.
+    /// Type optionnel (20500, sentinelle si absent) ; défaut optionnel `= expr` (surface Python).
+    fn params(&mut self) -> CResult<(Vec<(String, Type)>, Vec<Option<Expr>>)> {
         let mut params = Vec::new();
+        let mut defaults = Vec::new();
         while !self.is(&TokenKind::RParen) {
             let is_inout = self.eat(&TokenKind::Inout);
             let pname = self.ident()?;
-            // Type de param **optionnel** (20500) : absent → sentinelle résolue en pré-passe (i64 si
-            // usage numérique, sinon générique implicite). L'annotation explicite prime.
             let mut pty = if self.eat(&TokenKind::Colon) {
                 self.parse_type()?
             } else {
@@ -194,19 +189,32 @@ impl Parser {
             if is_inout {
                 pty = Type::Ref(Box::new(pty));
             }
+            let default = if self.eat(&TokenKind::Assign) { Some(self.expr()?) } else { None };
             params.push((pname, pty));
+            defaults.push(default);
             if !self.eat(&TokenKind::Comma) {
                 break;
             }
         }
         self.expect(&TokenKind::RParen, "`)`")?;
+        Ok((params, defaults))
+    }
+
+    fn fn_item(&mut self) -> CResult<Item> {
+        let start = self.i;
+        let id = self.fresh();
+        self.expect(&TokenKind::Fn, "`fn`")?;
+        let name = self.ident()?;
+        let generics = self.parse_generics()?;
+        self.expect(&TokenKind::LParen, "`(`")?;
+        let (params, defaults) = self.params()?;
         let ret = if self.eat(&TokenKind::Arrow) {
             self.parse_type()?
         } else {
             Type::Unit
         };
         let body = self.block()?;
-        Ok(self.node(start, id, ItemKind::Fn { name, generics, params, ret, body }))
+        Ok(self.node(start, id, ItemKind::Fn { name, generics, params, ret, body, defaults }))
     }
 
     fn parse_generics(&mut self) -> CResult<Generics> {
@@ -396,21 +404,7 @@ impl Parser {
             self_param = true;
             self.eat(&TokenKind::Comma);
         }
-        let mut params = Vec::new();
-        while !self.is(&TokenKind::RParen) {
-            let is_inout = self.eat(&TokenKind::Inout);
-            let pn = self.ident()?;
-            self.expect(&TokenKind::Colon, "`:`")?;
-            let mut pt = self.parse_type()?;
-            if is_inout {
-                pt = Type::Ref(Box::new(pt));
-            }
-            params.push((pn, pt));
-            if !self.eat(&TokenKind::Comma) {
-                break;
-            }
-        }
-        self.expect(&TokenKind::RParen, "`)`")?;
+        let (params, defaults) = self.params()?; // types optionnels + défauts (surface Python)
         let ret = if self.eat(&TokenKind::Arrow) {
             self.parse_type()?
         } else {
@@ -422,7 +416,7 @@ impl Parser {
             self.stmt_end()?;
             None
         };
-        Ok(Method { name, self_param, params, ret, body })
+        Ok(Method { name, self_param, params, ret, body, defaults })
     }
 
     fn ident(&mut self) -> CResult<String> {

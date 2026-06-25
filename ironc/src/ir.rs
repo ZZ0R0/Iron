@@ -217,6 +217,8 @@ pub enum ItemKind {
         params: Vec<(String, Type)>,
         ret: Type,
         body: Vec<Stmt>,
+        /// Valeurs par défaut par paramètre (surface Python) ; `None` = obligatoire. Même longueur que `params`.
+        defaults: Vec<Option<Expr>>,
     },
     Struct {
         name: String,
@@ -243,6 +245,8 @@ pub struct Method {
     pub params: Vec<(String, Type)>,
     pub ret: Type,
     pub body: Option<Vec<Stmt>>,
+    /// Valeurs par défaut par param (surface Python) ; même longueur que `params`.
+    pub defaults: Vec<Option<Expr>>,
 }
 
 /// Paramètres génériques (V3) : nom + bornes (`[T: Trait + …]`).

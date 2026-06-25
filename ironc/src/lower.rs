@@ -8,7 +8,7 @@
 use crate::ir::*;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 
 pub fn lower(
@@ -34,6 +34,23 @@ pub fn lower(
             _ => None,
         })
         .collect();
+    let mut fn_defaults: HashMap<String, Vec<Option<Expr>>> = HashMap::new();
+    let mut method_defaults: HashMap<(String, String), Vec<Option<Expr>>> = HashMap::new();
+    for it in &ast.items {
+        match &it.kind {
+            ItemKind::Fn { name, defaults, .. } if defaults.iter().any(Option::is_some) => {
+                fn_defaults.insert(name.clone(), defaults.clone());
+            }
+            ItemKind::Impl { type_name, methods, .. } => {
+                for m in methods {
+                    if m.defaults.iter().any(Option::is_some) {
+                        method_defaults.insert((type_name.clone(), m.name.clone()), m.defaults.clone());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
     let mut cx = Cx {
         sm: SourceMap::default(),
         types,
@@ -41,6 +58,8 @@ pub fn lower(
         bindings,
         enums,
         user_fns,
+        fn_defaults,
+        method_defaults,
         own,
         inout_params: HashSet::new(),
         byref_params: HashSet::new(),
@@ -89,6 +108,9 @@ struct Cx<'a> {
     enums: HashSet<String>,
     /// Fns définies par l'utilisateur — priment sur les built-ins homonymes (ex. un `fn add` perso).
     user_fns: HashSet<String>,
+    /// Valeurs par défaut des params (surface Python) : fn → defaults ; (type, méthode) → defaults.
+    fn_defaults: HashMap<String, Vec<Option<Expr>>>,
+    method_defaults: HashMap<(String, String), Vec<Option<Expr>>>,
     own: &'a OwnershipMap,
     inout_params: HashSet<String>,
     /// Params passés en `&T` (ByRef) pour la fn en cours — base non possédée → pas de move-hors-struct.
@@ -151,7 +173,7 @@ impl Cx<'_> {
     fn item(&mut self, it: &Item) -> TokenStream {
         self.flow_wrap = None; // (les méthodes d'impl ne font pas d'inférence flux dans cet incrément)
         match &it.kind {
-            ItemKind::Fn { name, generics, params, ret, body } => {
+            ItemKind::Fn { name, generics, params, ret, body, .. } => {
                 let fid = format_ident!("{}", name);
                 let gens = lower_generics(generics);
                 let ps: Vec<TokenStream> = params
@@ -1006,35 +1028,47 @@ impl Cx<'_> {
                 return quote! { #path( #(#a),* ) };
             }
         }
-        // appel utilisateur : `&x` pour un param `ByRef`, valeur sinon.
+        // appel utilisateur : `&x` ByRef, `&mut x` InOut, valeur sinon ; + args par défaut (surface Python).
         let modes = match &callee.kind {
             ExprKind::Var(name) => self.param_modes.get(name).cloned(),
             _ => None,
         };
+        let pad = self.call_padding(callee, args.len());
         let c = self.place(callee);
-        let a: Vec<TokenStream> = args
-            .iter()
-            .enumerate()
-            .map(|(i, x)| {
-                let mode = modes
-                    .as_ref()
-                    .and_then(|m| m.get(i))
-                    .copied()
-                    .unwrap_or(ParamMode::ByValue);
-                match mode {
-                    ParamMode::ByRef => {
-                        let p = self.place(x);
-                        quote! { &#p }
-                    }
-                    ParamMode::InOut => {
-                        let p = self.place(x);
-                        quote! { &mut #p }
-                    }
-                    ParamMode::ByValue => self.value(x),
+        let mut a: Vec<TokenStream> = Vec::new();
+        for (i, x) in args.iter().chain(pad.iter()).enumerate() {
+            let mode = modes.as_ref().and_then(|m| m.get(i)).copied().unwrap_or(ParamMode::ByValue);
+            let ts = match mode {
+                ParamMode::ByRef => {
+                    let p = self.place(x);
+                    quote! { &#p }
                 }
-            })
-            .collect();
+                ParamMode::InOut => {
+                    let p = self.place(x);
+                    quote! { &mut #p }
+                }
+                ParamMode::ByValue => self.value(x),
+            };
+            a.push(ts);
+        }
         quote! { #c( #(#a),* ) }
+    }
+
+    /// Valeurs par défaut à ajouter pour un appel partiel `f(args)` / `c.m(args)` (surface Python) :
+    /// les défauts des params en trop par rapport aux args fournis.
+    fn call_padding(&self, callee: &Expr, n_args: usize) -> Vec<Expr> {
+        let defaults = match &callee.kind {
+            ExprKind::Var(name) => self.fn_defaults.get(name),
+            ExprKind::Field { base, name } => match self.type_of(base) {
+                Type::Struct(tn) => self.method_defaults.get(&(tn, name.clone())),
+                _ => None,
+            },
+            _ => None,
+        };
+        match defaults {
+            Some(d) if d.len() > n_args => d[n_args..].iter().filter_map(|o| o.clone()).collect(),
+            _ => Vec::new(),
+        }
     }
 }
 

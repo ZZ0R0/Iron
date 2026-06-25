@@ -9,29 +9,116 @@ use crate::ir::*;
 
 pub(crate) fn resolve_param_types(ast: &mut Ast) {
     for it in &mut ast.items {
-        if let ItemKind::Fn { generics, params, ret, body, .. } = &mut it.kind {
-            for idx in 0..params.len() {
-                let (is_sentinel, inout) = sentinel_of(&params[idx].1);
-                if !is_sentinel {
-                    continue;
-                }
-                let pname = params[idx].0.clone();
-                let resolved = if used_numerically(&pname, body) {
-                    Type::I64
-                } else {
-                    let g = fresh_generic(generics);
-                    generics.push((g.clone(), Vec::new()));
-                    Type::Generic(g)
-                };
-                params[idx].1 = if inout { Type::Ref(Box::new(resolved)) } else { resolved };
-            }
-            // Retour non annoté + `return <valeur>` → déduire du premier return.
-            if matches!(ret, Type::Unit) {
-                if let Some(rt) = first_return_type(params, body) {
-                    *ret = rt;
+        match &mut it.kind {
+            ItemKind::Fn { generics, params, ret, body, defaults, .. } => {
+                resolve_fn_params(generics, params, defaults, body);
+                if matches!(ret, Type::Unit) {
+                    if let Some(rt) = first_return_type(params, body) {
+                        *ret = rt;
+                    }
                 }
             }
+            // Méthodes (P.1 : params optionnels) : pas de liste de génériques → défaut littéral / numérique.
+            ItemKind::Impl { methods, .. } | ItemKind::Trait { methods, .. } => {
+                for m in methods.iter_mut() {
+                    resolve_method_params(&mut m.params, &m.defaults, m.body.as_deref());
+                    if matches!(m.ret, Type::Unit) {
+                        if let Some(b) = &m.body {
+                            if let Some(rt) = first_return_type(&m.params, b) {
+                                m.ret = rt;
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
         }
+    }
+}
+
+/// Un param non annoté utilisé en **affichage** (f-string ou `print`) → `str` plutôt qu'un générique
+/// non borné (un `T` libre n'implémente pas `Display`). Heuristique Python-friendly.
+fn used_in_display(name: &str, body: &[Stmt]) -> bool {
+    fn in_expr(name: &str, e: &Expr) -> bool {
+        let direct = |x: &Expr| matches!(&x.kind, ExprKind::Var(n) if n == name);
+        match &e.kind {
+            ExprKind::FString(parts) => {
+                parts.iter().any(|p| matches!(p, FStringPart::Expr(i) if direct(i) || in_expr(name, i)))
+            }
+            ExprKind::Call { callee, args } => {
+                let is_print = matches!(&callee.kind, ExprKind::Var(n) if n == "print");
+                (is_print && args.iter().any(direct)) || args.iter().any(|a| in_expr(name, a))
+            }
+            ExprKind::Binary { lhs, rhs, .. } => in_expr(name, lhs) || in_expr(name, rhs),
+            ExprKind::Unary { expr, .. } => in_expr(name, expr),
+            ExprKind::Field { base, .. } => in_expr(name, base),
+            ExprKind::Index { base, idx } => in_expr(name, base) || in_expr(name, idx),
+            _ => false,
+        }
+    }
+    fn in_stmt(name: &str, s: &Stmt) -> bool {
+        match &s.kind {
+            StmtKind::Let { value, .. } | StmtKind::ExprStmt(value) | StmtKind::Assign { value, .. } => {
+                in_expr(name, value)
+            }
+            StmtKind::Return { value: Some(v) } => in_expr(name, v),
+            StmtKind::If { then, elifs, els, .. } => {
+                used_in_display(name, then)
+                    || elifs.iter().any(|(_, b)| used_in_display(name, b))
+                    || used_in_display(name, els)
+            }
+            StmtKind::While { body, .. } | StmtKind::For { body, .. } => used_in_display(name, body),
+            StmtKind::Match { arms, .. } => arms.iter().any(|a| used_in_display(name, &a.body)),
+            _ => false,
+        }
+    }
+    body.iter().any(|s| in_stmt(name, s))
+}
+
+/// Type d'un défaut littéral (`greeting="Hi"` → str, `by=1` → i64) — surface Python.
+fn default_literal_type(default: Option<&Expr>) -> Option<Type> {
+    match default.map(|e| &e.kind) {
+        Some(ExprKind::Lit(Lit::Int(_))) => Some(Type::I64),
+        Some(ExprKind::Lit(Lit::Float(_))) => Some(Type::F64),
+        Some(ExprKind::Lit(Lit::Str(_))) => Some(Type::Str),
+        Some(ExprKind::Lit(Lit::Bool(_))) => Some(Type::Bool),
+        Some(ExprKind::Lit(Lit::Char(_))) => Some(Type::Char),
+        _ => None,
+    }
+}
+
+fn resolve_fn_params(generics: &mut Generics, params: &mut [(String, Type)], defaults: &[Option<Expr>], body: &[Stmt]) {
+    for idx in 0..params.len() {
+        let (is_sentinel, inout) = sentinel_of(&params[idx].1);
+        if !is_sentinel {
+            continue;
+        }
+        let pname = params[idx].0.clone();
+        let resolved = default_literal_type(defaults.get(idx).and_then(|o| o.as_ref()))
+            .or_else(|| used_numerically(&pname, body).then_some(Type::I64))
+            .or_else(|| used_in_display(&pname, body).then_some(Type::Str))
+            .unwrap_or_else(|| {
+                let g = fresh_generic(generics);
+                generics.push((g.clone(), Vec::new()));
+                Type::Generic(g)
+            });
+        params[idx].1 = if inout { Type::Ref(Box::new(resolved)) } else { resolved };
+    }
+}
+
+fn resolve_method_params(params: &mut [(String, Type)], defaults: &[Option<Expr>], body: Option<&[Stmt]>) {
+    for idx in 0..params.len() {
+        let (is_sentinel, inout) = sentinel_of(&params[idx].1);
+        if !is_sentinel {
+            continue;
+        }
+        let pname = params[idx].0.clone();
+        // pas de génériques sur les méthodes → défaut littéral, sinon usage numérique → i64, sinon Unit (filet rustc).
+        let resolved = default_literal_type(defaults.get(idx).and_then(|o| o.as_ref()))
+            .or_else(|| body.map_or(false, |b| used_numerically(&pname, b)).then_some(Type::I64))
+            .or_else(|| body.map_or(false, |b| used_in_display(&pname, b)).then_some(Type::Str))
+            .unwrap_or(Type::Unit);
+        params[idx].1 = if inout { Type::Ref(Box::new(resolved)) } else { resolved };
     }
 }
 
