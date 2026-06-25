@@ -916,6 +916,14 @@ impl Cx<'_> {
     }
 
     fn call(&mut self, callee: &Expr, args: &[Expr]) -> TokenStream {
+        // modules stdlib namespacés (surface Python, D2) : `io.read_file(...)` → wrappers `std::fs`.
+        if let ExprKind::Field { base, name } = &callee.kind {
+            if let ExprKind::Var(m) = &base.kind {
+                if m == "io" && !self.user_fns.contains("io") {
+                    return self.lower_io(name, args);
+                }
+            }
+        }
         // construction de variante d'enum : `Enum.Variant(args)`
         if let ExprKind::Field { base, name } = &callee.kind {
             if let ExprKind::Var(ename) = &base.kind {
@@ -1120,6 +1128,50 @@ impl Cx<'_> {
             a.push(ts);
         }
         quote! { #c( #(#a),* ) }
+    }
+
+    /// Module stdlib `io` (80300, D2) : wrappers minces sur `std::fs`, faillibles → `Result`/`IronError`.
+    fn lower_io(&mut self, name: &str, args: &[Expr]) -> TokenStream {
+        match name {
+            "read_file" if args.len() == 1 => {
+                let p = self.value(&args[0]);
+                quote! { std::fs::read_to_string(#p).map_err(|e| IronError(format!("{}", e))) }
+            }
+            "write_file" if args.len() == 2 => {
+                let p = self.value(&args[0]);
+                let c = self.value(&args[1]);
+                quote! { std::fs::write(#p, #c).map_err(|e| IronError(format!("{}", e))) }
+            }
+            "read_lines" if args.len() == 1 => {
+                let p = self.value(&args[0]);
+                quote! {
+                    std::fs::read_to_string(#p)
+                        .map(|s| s.lines().map(|l| l.to_string()).collect::<Vec<_>>())
+                        .map_err(|e| IronError(format!("{}", e)))
+                }
+            }
+            "append_file" if args.len() == 2 => {
+                let p = self.value(&args[0]);
+                let c = self.value(&args[1]);
+                quote! {{
+                    use std::io::Write;
+                    std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(#p)
+                        .and_then(|mut f| f.write_all((#c).as_bytes()))
+                        .map_err(|e| IronError(format!("{}", e)))
+                }}
+            }
+            "exists" if args.len() == 1 => {
+                let p = self.value(&args[0]);
+                quote! { std::path::Path::new(&#p).exists() }
+            }
+            other => {
+                let msg = format!("io.{other} : fonction inconnue ou mauvaise arité");
+                quote! { compile_error!(#msg) }
+            }
+        }
     }
 
     /// Valeurs par défaut à ajouter pour un appel partiel `f(args)` / `c.m(args)` (surface Python) :

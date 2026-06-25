@@ -190,6 +190,20 @@ pub(crate) fn expr(cx: &mut Inf, e: &Expr, scope: &Scope) -> Type {
                 },
                 _ => {
                     if let ExprKind::Field { base, name } = &callee.kind {
+                        // module stdlib `io` (80300) : types de retour (faillibles → Result).
+                        if matches!(&base.kind, ExprKind::Var(m) if m == "io") {
+                            let ret = match name.as_str() {
+                                "read_file" => Type::Result(Box::new(Type::Str)),
+                                "write_file" | "append_file" => Type::Result(Box::new(Type::Unit)),
+                                "read_lines" => Type::Result(Box::new(Type::List(Box::new(Type::Str)))),
+                                "exists" => Type::Bool,
+                                _ => Type::Unit,
+                            };
+                            for a in args {
+                                expr(cx, a, scope);
+                            }
+                            return cx.set(e.id, ret);
+                        }
                         let bt = expr(cx, base, scope);
                         // construction de variante d'enum : `Enum.Variant(...)`
                         if let ExprKind::Var(ename) = &base.kind {
