@@ -869,6 +869,17 @@ impl Parser {
         Ok(e)
     }
 
+    /// Queue de compréhension (10600) : `for <pat> in <iter> [if <cond>]` après le corps `body`.
+    fn parse_comp(&mut self, start: usize, body: Expr, kind: CompKind) -> CResult<Expr> {
+        self.expect(&TokenKind::For, "`for`")?;
+        let var = self.parse_pattern()?;
+        self.expect(&TokenKind::In, "`in`")?;
+        let iter = self.or_expr()?; // or_expr : le `if` filtre n'est pas un ternaire
+        let cond = if self.eat(&TokenKind::If) { Some(Box::new(self.or_expr()?)) } else { None };
+        let id = self.fresh();
+        Ok(self.node(start, id, ExprKind::Comp { kind, body: Box::new(body), var, iter: Box::new(iter), cond }))
+    }
+
     /// Parse une expression ; si suivie de `,`, collecte un `Tuple` (retour multiple / RHS déstructuré, 10400).
     fn expr_or_tuple(&mut self) -> CResult<Expr> {
         let start = self.i;
@@ -1189,12 +1200,23 @@ impl Parser {
             }
             TokenKind::LBracket => {
                 self.adv();
-                let mut items = Vec::new();
-                while !self.is(&TokenKind::RBracket) {
-                    items.push(self.expr()?);
-                    if !self.eat(&TokenKind::Comma) {
+                if self.is(&TokenKind::RBracket) {
+                    self.adv();
+                    return Ok(self.node(start, id, ExprKind::ListLit { items: Vec::new() }));
+                }
+                let first = self.expr()?;
+                if self.is(&TokenKind::For) {
+                    // compréhension de liste `[body for x in iter if cond]` (10600)
+                    let comp = self.parse_comp(start, first, CompKind::List)?;
+                    self.expect(&TokenKind::RBracket, "`]`")?;
+                    return Ok(comp);
+                }
+                let mut items = vec![first];
+                while self.eat(&TokenKind::Comma) {
+                    if self.is(&TokenKind::RBracket) {
                         break;
                     }
+                    items.push(self.expr()?);
                 }
                 self.expect(&TokenKind::RBracket, "`]`")?;
                 Ok(self.node(start, id, ExprKind::ListLit { items }))
@@ -1207,8 +1229,16 @@ impl Parser {
                 }
                 let first = self.expr()?;
                 if self.eat(&TokenKind::Colon) {
-                    // dict `{k: v, …}`
                     let v = self.expr()?;
+                    if self.is(&TokenKind::For) {
+                        // compréhension de dict `{k: v for x in xs}` (10600) → body = Tuple([k, v]).
+                        let tid = self.fresh();
+                        let tup = self.node(start, tid, ExprKind::Tuple(vec![first, v]));
+                        let comp = self.parse_comp(start, tup, CompKind::Dict)?;
+                        self.expect(&TokenKind::RBrace, "`}`")?;
+                        return Ok(comp);
+                    }
+                    // dict `{k: v, …}`
                     let mut pairs = vec![(first, v)];
                     while self.eat(&TokenKind::Comma) {
                         if self.is(&TokenKind::RBrace) {
@@ -1221,6 +1251,11 @@ impl Parser {
                     }
                     self.expect(&TokenKind::RBrace, "`}`")?;
                     Ok(self.node(start, id, ExprKind::DictLit { pairs }))
+                } else if self.is(&TokenKind::For) {
+                    // compréhension de set `{e for x in xs}` (10600)
+                    let comp = self.parse_comp(start, first, CompKind::Set)?;
+                    self.expect(&TokenKind::RBrace, "`}`")?;
+                    Ok(comp)
                 } else {
                     // set `{a, b, …}` → désucré en `set([a, b, …])` (20900).
                     let mut items = vec![first];

@@ -160,6 +160,7 @@ impl Inf<'_> {
 pub(crate) fn element_of(t: &Type) -> Type {
     match t {
         Type::List(e) => (**e).clone(),
+        Type::Set(e) => (**e).clone(),
         Type::Dict(k, _) => (**k).clone(), // itère les clés
         _ => Type::Unit,
     }

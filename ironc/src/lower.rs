@@ -694,7 +694,25 @@ impl Cx<'_> {
                 let e = self.value(els);
                 quote! { if #c { #t } else { #e } }
             }
-            ExprKind::Comp { .. } => quote! { Vec::new() }, // stub 1.1 → 2.7
+            ExprKind::Comp { kind, body, var, iter, cond } => {
+                // 2.7 : chaîne d'itérateurs into_iter().map/filter_map(...).collect (10600).
+                let it = self.value(iter);
+                let pat = lower_pattern(var);
+                let body_ts = self.value(body);
+                let mapper = match cond {
+                    Some(c) => {
+                        let cv = self.value(c);
+                        quote! { filter_map(|#pat| if #cv { Some(#body_ts) } else { None }) }
+                    }
+                    None => quote! { map(|#pat| #body_ts) },
+                };
+                let collect = match kind {
+                    CompKind::List => quote! { collect::<Vec<_>>() },
+                    CompKind::Set => quote! { collect::<std::collections::HashSet<_>>() },
+                    CompKind::Dict => quote! { collect::<std::collections::HashMap<_, _>>() },
+                };
+                quote! { (#it).into_iter().#mapper.#collect }
+            }
             ExprKind::Slice { base, lo, hi } => {
                 let b = self.place(base);
                 let lo_ts = match lo {

@@ -276,17 +276,25 @@ pub(crate) fn expr(cx: &mut Inf, e: &Expr, scope: &Scope) -> Type {
             }
             Type::Str
         }
-        ExprKind::Comp { kind, body, iter, cond, .. } => {
-            // 1.1 : type de collection ; liaison fine de `var` raffinée en 2.7.
-            let _ = expr(cx, iter, scope);
-            let bt = expr(cx, body, scope);
+        ExprKind::Comp { kind, body, var, iter, cond } => {
+            // 2.7 : lier la variable de boucle depuis le type d'élément de l'itérable.
+            let it = expr(cx, iter, scope);
+            let elem = super::element_of(&it);
+            let mut inner = scope.clone();
+            cx.bind_pattern(var, &elem, &mut inner);
+            let bt = expr(cx, body, &inner);
             if let Some(c) = cond {
-                expr(cx, c, scope);
+                expr(cx, c, &inner);
             }
             match kind {
                 CompKind::List => Type::List(Box::new(bt)),
                 CompKind::Set => Type::Set(Box::new(bt)),
-                CompKind::Dict => Type::Unit,
+                CompKind::Dict => match bt {
+                    Type::Tuple(ts) if ts.len() == 2 => {
+                        Type::Dict(Box::new(ts[0].clone()), Box::new(ts[1].clone()))
+                    }
+                    _ => Type::Dict(Box::new(Type::Unit), Box::new(Type::Unit)),
+                },
             }
         }
         ExprKind::Ternary { cond, then, els } => {
