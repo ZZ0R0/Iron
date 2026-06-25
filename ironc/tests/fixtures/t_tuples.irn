@@ -1,0 +1,18 @@
+# [V7/2.1] Tuples : littéral, destructuring, retour multiple, index .0, motif tuple.
+
+fn divmod(x: i64, y: i64) -> (i64, i64):
+    return x / y, x % y
+
+fn main():
+    a, b = divmod(17, 5)
+    print(a)
+    print(b)
+    t = (1, 2, 3)
+    print(t.0)
+    print(t.2)
+    p = (10, 20)
+    match p:
+        (0, y):
+            print(y)
+        (x, y):
+            print(x + y)

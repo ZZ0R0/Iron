@@ -368,6 +368,18 @@ impl Parser {
     }
 
     fn parse_type(&mut self) -> CResult<Type> {
+        // type tuple `(A, B, …)` (10400)
+        if self.eat(&TokenKind::LParen) {
+            let mut ts = Vec::new();
+            while !self.is(&TokenKind::RParen) {
+                ts.push(self.parse_type()?);
+                if !self.eat(&TokenKind::Comma) {
+                    break;
+                }
+            }
+            self.expect(&TokenKind::RParen, "`)`")?;
+            return Ok(Type::Tuple(ts));
+        }
         let name = self.ident()?;
         match name.as_str() {
             "i64" => Ok(Type::I64),
@@ -528,7 +540,7 @@ impl Parser {
         {
             None
         } else {
-            Some(self.expr()?)
+            Some(self.expr_or_tuple()?) // `return a, b` → Tuple (10400)
         };
         self.stmt_end()?;
         Ok(self.node(start, id, StmtKind::Return { value }))
@@ -640,6 +652,19 @@ impl Parser {
                     Ok(Pattern::Var(name))
                 }
             }
+            TokenKind::LParen => {
+                // motif tuple `(a, b)` (10400)
+                self.adv();
+                let mut subs = Vec::new();
+                while !self.is(&TokenKind::RParen) {
+                    subs.push(self.parse_pattern()?);
+                    if !self.eat(&TokenKind::Comma) {
+                        break;
+                    }
+                }
+                self.expect(&TokenKind::RParen, "`)`")?;
+                Ok(Pattern::Tuple(subs))
+            }
             other => Err(self.err(format!("motif attendu, trouvé {other:?}"))),
         }
     }
@@ -662,6 +687,24 @@ impl Parser {
         let start = self.i;
         let id = self.fresh();
         let lhs = self.expr()?;
+        // Déstructuring `a, b = …` (10400) : cible = liste d'identifiants.
+        if self.is(&TokenKind::Comma) {
+            let mut targets = match &lhs.kind {
+                ExprKind::Var(n) => vec![n.clone()],
+                _ => return Err(self.err("cible de déstructuration : identifiant attendu")),
+            };
+            while self.eat(&TokenKind::Comma) {
+                let t = self.expr()?;
+                match t.kind {
+                    ExprKind::Var(n) => targets.push(n),
+                    _ => return Err(self.err("cible de déstructuration : identifiant attendu")),
+                }
+            }
+            self.expect(&TokenKind::Assign, "`=`")?;
+            let value = self.expr_or_tuple()?;
+            self.stmt_end()?;
+            return Ok(self.node(start, id, StmtKind::Destructure { targets, value }));
+        }
         if self.eat(&TokenKind::Assign) {
             let value = self.expr()?;
             self.stmt_end()?;
@@ -683,6 +726,24 @@ impl Parser {
 
     fn expr(&mut self) -> CResult<Expr> {
         self.or_expr()
+    }
+
+    /// Parse une expression ; si suivie de `,`, collecte un `Tuple` (retour multiple / RHS déstructuré, 10400).
+    fn expr_or_tuple(&mut self) -> CResult<Expr> {
+        let start = self.i;
+        let first = self.expr()?;
+        if !self.is(&TokenKind::Comma) {
+            return Ok(first);
+        }
+        let id = self.fresh();
+        let mut items = vec![first];
+        while self.eat(&TokenKind::Comma) {
+            if self.is(&TokenKind::Newline) || self.is(&TokenKind::Semicolon) || self.is(&TokenKind::RParen) {
+                break;
+            }
+            items.push(self.expr()?);
+        }
+        Ok(self.node(start, id, ExprKind::Tuple(items)))
     }
 
     fn or_expr(&mut self) -> CResult<Expr> {
@@ -855,7 +916,15 @@ impl Parser {
                 }
                 TokenKind::Dot => {
                     self.adv();
-                    let name = self.ident()?;
+                    // `t.0` (index de tuple, 10400) ou `s.field`.
+                    let name = match self.cur() {
+                        TokenKind::Int(n) => {
+                            let s = n.to_string();
+                            self.adv();
+                            s
+                        }
+                        _ => self.ident()?,
+                    };
                     let id = self.fresh();
                     e = self.node(start, id, ExprKind::Field { base: Box::new(e), name });
                 }
@@ -912,9 +981,24 @@ impl Parser {
             }
             TokenKind::LParen => {
                 self.adv();
-                let e = self.expr()?;
+                if self.eat(&TokenKind::RParen) {
+                    return Ok(self.node(start, id, ExprKind::Tuple(vec![])));
+                }
+                let first = self.expr()?;
+                if self.is(&TokenKind::Comma) {
+                    // tuple `(a, b, …)` ou tuple-1 `(a,)` (10400).
+                    let mut items = vec![first];
+                    while self.eat(&TokenKind::Comma) {
+                        if self.is(&TokenKind::RParen) {
+                            break;
+                        }
+                        items.push(self.expr()?);
+                    }
+                    self.expect(&TokenKind::RParen, "`)`")?;
+                    return Ok(self.node(start, id, ExprKind::Tuple(items)));
+                }
                 self.expect(&TokenKind::RParen, "`)`")?;
-                Ok(e)
+                Ok(first)
             }
             TokenKind::LBracket => {
                 self.adv();

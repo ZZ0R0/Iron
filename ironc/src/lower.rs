@@ -450,6 +450,12 @@ impl Cx<'_> {
                 quote! { #id }
             }
             ExprKind::Field { base, name } => {
+                // index de tuple `t.0` (10400) → `syn::Index`.
+                if let Ok(n) = name.parse::<usize>() {
+                    let b = self.place(base);
+                    let idx = syn::Index::from(n);
+                    return quote! { #b.#idx };
+                }
                 let f = format_ident!("{}", name);
                 // place de champ à travers un shared[Struct] (30300) → borrow() (lecture empruntée).
                 if matches!(self.type_of(base), Type::Shared(_)) {
@@ -539,6 +545,17 @@ impl Cx<'_> {
                         let vid = format_ident!("{}", name);
                         return quote! { #eid::#vid };
                     }
+                }
+                // index de tuple `t.0` (10400) → `syn::Index` (un ident ne peut pas être un chiffre).
+                if let Ok(n) = name.parse::<usize>() {
+                    let b = self.place(base);
+                    let idx = syn::Index::from(n);
+                    return if is_copy(&self.type_of(e)) {
+                        quote! { #b.#idx }
+                    } else {
+                        self.audit.push(e.span);
+                        quote! { #b.#idx.clone() }
+                    };
                 }
                 let f = format_ident!("{}", name);
                 // lecture de champ à travers un shared[Struct] (30300) → borrow().
