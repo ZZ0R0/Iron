@@ -1,0 +1,9 @@
+# Vitrine V9.1 — module utilitaire, importé par `import mathx` (modules multi-fichiers Iron, 70200).
+
+# Générique utilisateur (4.1, 21400) : identité typée (borne `Clone` par défaut).
+def pick_first[T](a: T, b: T) -> T:
+    return a
+
+# Closure stockée/retournée (4.3, 21600) : fabrique d'additionneurs (capture `move`).
+def adder(n: i64) -> fn(i64) -> i64:
+    return lambda x: x + n

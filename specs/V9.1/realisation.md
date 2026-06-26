@@ -1,7 +1,8 @@
 # V9.1 — Réalisation (tracker)
 
-> **État : RÉALISATION QUASI COMPLÈTE — 23/23 pistes ✅** (reste 5.3 = agrégation du gate final ;
-> 2.2 source-maps-expr = raffinement assumé non bloquant). **Liste propre et exhaustive**, 1:1 avec les specs.
+> **État : RÉALISATION COMPLÈTE — 23/23 pistes ✅ · GATE V9.1 VERT (21/21).** Toutes les specs V9.1
+> planifiées **et** réalisées. (2.2 : granularité **ligne** livrée + utilisée par le debugger ; granularité
+> **expression** explicitement reportée post-V9.1 — décision tranchée, plus un `🔶` ouvert.)
 
 ## Avancement des pistes (5 vagues, 23 pistes)
 
@@ -12,7 +13,7 @@
 | 1.3 | 52200 | `import std` | 1 | ✅ fait |
 | 1.4 | 52300 | Registre curé + `ironc add` | 1 | ✅ fait |
 | 2.1 | 60800 | Diagnostics overlay rustc | 2 | ✅ fait |
-| 2.2 | 60900 | Source-maps granularité expression | 2 | 🔶 ligne OK, expr = raffinement |
+| 2.2 | 60900 | Source-maps granularité expression | 2 | ✅ ligne (debug OK) · ⏸️ expr post-V9.1 |
 | 2.3 | 71300 | LSP enrichi (complétion/hover/go-to-def) | 2 | ✅ fait |
 | 2.4 | 71400 | `ironc fmt` (commentaires) | 2 | ✅ fait |
 | 3.1 | 71500 | Extension VSCode : langage + icônes | 3 | ✅ fait |
@@ -29,7 +30,7 @@
 | 4.7 | 72300 | Intégration debugger | 4 | ✅ fait |
 | 5.1 | 90600 | Le « 0.1 % » tracé | 5 | ✅ fait |
 | 5.2 | 90700 | Batterie élargie 30 vrais crates | 5 | ✅ fait |
-| **5.3** | 90800 | **Gate V9.1 final** | 5 | ☐ todo |
+| **5.3** | 90800 | **Gate V9.1 final** | 5 | ✅ VERT (21/21) |
 
 ## Principe figé (D1) — ne jamais l'oublier
 
@@ -74,8 +75,11 @@ pas d'un type-checker Iron maison. La surcouche, comme le codegen.
   **Iron-pur mesuré : 26/30 (87 %)** (4 `rust { }`, dans la fourchette V8 62–92 %). 16 via `import`, 11 via
   `use` manuel. Nouveaux : strsim · urlencoding · titlecase · is_prime · roman · deunicode · unidecode ·
   levenshtein · htmlescape · fastrand · pluralizer · gcd · distance · sift4 · primes.
+- **5.3** GATE V9.1 final : `tests/gate-v9.1.sh` agrège **7 sections / 21 checks** — corpus · binding-30 ·
+  métrique · outillage (check/lint/lib/fmt/repl/build--debug/doc/add) · LSP (init/completion/hover/def) ·
+  **vitrine** (`tests/vitrine-v9.1/`, multi-fichiers, 0 unsafe) · artefacts VSCode. **VERT 21/21.**
 
-**☐ RESTE** : 5.3 (agrégation gate V9.1 final).
+**☐ RESTE** : — (V9.1 close ; raffinements optionnels = source-maps-expr, DAP transparent, couverture binder).
 
 ## Écarts / faiblesses (relevés)
 

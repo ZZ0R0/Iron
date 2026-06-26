@@ -1,0 +1,50 @@
+# Vitrine V9.1 — l'expérience développeur d'un coup : ZÉRO lib Iron, tout par `import`.
+# Modules Iron (mathx) + crate Rust (strsim) + std (fs), génériques, erreurs typées, closures, concurrence.
+
+import mathx
+import strsim
+import std
+
+# Erreur typée (4.2, 21500) : `Result[T, E]` avec E = enum Iron, propagé par `raise`/`?`/`unwrap_or`.
+enum CfgError:
+    Empty
+    TooLong
+
+def validate(name: str) -> Result[str, CfgError]:
+    if len(name) == 0:
+        raise CfgError.Empty
+    if len(name) > 16:
+        raise CfgError.TooLong
+    return ok(name)
+
+# Concurrence native (V9, 30700) : deux sommes en parallèle sur deux threads.
+def range_sum(lo: i64, hi: i64) -> i64:
+    total = 0
+    for i in range(lo, hi + 1):
+        total = total + i
+    return total
+
+def parallel_total(n: i64) -> i64:
+    mid = n / 2
+    h1 = thread.spawn(lambda: range_sum(1, mid))
+    h2 = thread.spawn(lambda: range_sum(mid + 1, n))
+    return h1.join() + h2.join()
+
+def main():
+    # générique + closure stockée
+    add10 = adder(10)
+    print(add10(pick_first(5, 99)))                          # 15
+
+    # erreurs typées (récupération sans crash)
+    print(validate("iron").unwrap_or("ERR"))                 # iron
+    print(validate("").unwrap_or("ERR"))                     # ERR
+
+    # crate réel (strsim) — distance d'édition, aucune lib Iron
+    print(levenshtein("kitten", "sitting"))                  # 3
+
+    # concurrence
+    print(parallel_total(100))                               # 5050
+
+    # import std : round-trip fichier (fs), sortie déterministe
+    write_file("/tmp/iron_vitrine.txt", "vitrine-ok")
+    print(read_file("/tmp/iron_vitrine.txt").unwrap_or("?")) # vitrine-ok
