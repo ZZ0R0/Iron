@@ -268,5 +268,12 @@ fn line_col(src: &str, byte: u32) -> (u32, u32) {
 
 fn out_dir_for(input: &Path) -> PathBuf {
     let stem = input.file_stem().and_then(|s| s.to_str()).unwrap_or("out");
-    std::env::temp_dir().join("ironc-out").join(stem)
+    // Hash du chemin **complet** → projets parallèles distincts (sinon tous les `main.irn` collisionnent).
+    let full = std::fs::canonicalize(input).unwrap_or_else(|_| input.to_path_buf());
+    let mut h: u64 = 1469598103934665603; // FNV-1a
+    for b in full.to_string_lossy().bytes() {
+        h ^= b as u64;
+        h = h.wrapping_mul(1099511628211);
+    }
+    std::env::temp_dir().join("ironc-out").join(format!("{stem}_{h:016x}"))
 }

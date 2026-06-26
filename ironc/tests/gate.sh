@@ -17,7 +17,7 @@ for f in tests/fixtures/*.irn; do
   stem=$(basename "$f" .irn)
   is_negative "$stem" && continue
   if cargo run --quiet -- run "$f" >/dev/null 2>&1; then pass=$((pass+1)); else fail=$((fail+1)); failed="$failed $stem"; fi
-  m=/tmp/ironc-out/$stem/src/main.rs
+  m=$(ls /tmp/ironc-out/${stem}_*/src/main.rs 2>/dev/null | head -1)
   [ -f "$m" ] && clones=$((clones + $(grep -o '\.clone()' "$m" | wc -l)))
   [ -f "$m" ] && unsafe=$((unsafe + $(grep -E '\bunsafe\b' "$m" | grep -vc 'forbid')))
 done
