@@ -1,0 +1,13 @@
+use "ureq.iri"
+
+def status(url: str) -> i64:
+    code = 0
+    rust {
+        if let Ok(resp) = ureq::get(url).call() {
+            code = resp.status() as i64;
+        }
+    }
+    return code
+
+def main():
+    print(status("http://example.com"))

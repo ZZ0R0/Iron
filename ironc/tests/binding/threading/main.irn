@@ -1,0 +1,13 @@
+def parallel_sum(n: i64) -> i64:
+    total = 0
+    rust {
+        let mid = n / 2;
+        let h1 = std::thread::spawn(move || (1..=mid).sum::<i64>());
+        let h2 = std::thread::spawn(move || (mid + 1..=n).sum::<i64>());
+        total = h1.join().unwrap() + h2.join().unwrap();
+    }
+    return total
+
+def main():
+    print(parallel_sum(100))
+    print(parallel_sum(10))

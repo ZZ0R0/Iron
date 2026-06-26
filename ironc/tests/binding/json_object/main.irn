@@ -1,0 +1,11 @@
+use "serde.iri"
+
+def sum_values(json: str) -> Result[i64]:
+    m = parse_map(json)?
+    total = 0
+    for k in m.keys():
+        total = total + m[k]
+    return ok(total)
+
+def main():
+    print(sum_values("{\"a\": 10, \"b\": 20, \"c\": 30}").unwrap_or(0))

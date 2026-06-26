@@ -1,0 +1,14 @@
+use "regex.iri"
+
+def count_matching(pat: str, lines: list[str]) -> Result[i64]:
+    r = Regex.new(pat)?
+    n = 0
+    for line in lines:
+        if r.is_match(line):
+            n = n + 1
+    return ok(n)
+
+def main():
+    lines = ["abc", "a1b", "xyz", "9", "hello2"]
+    print(count_matching("[0-9]", lines).unwrap_or(0))
+    print(count_matching("^[a-z]+$", lines).unwrap_or(0))

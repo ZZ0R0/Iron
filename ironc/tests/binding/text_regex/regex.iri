@@ -1,0 +1,4 @@
+crate regex = "1.12.4"
+extern type Regex = "regex::Regex":
+    fn new(pattern: str) -> Result[Regex] = "regex::Regex::new"
+    fn is_match(self, text: str) -> bool = "is_match"

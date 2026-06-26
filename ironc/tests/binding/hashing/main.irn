@@ -1,0 +1,13 @@
+use "sha2.iri"
+
+def sha256_hex(s: str) -> str:
+    digest = ""
+    rust {
+        use sha2::Digest;
+        let h = sha2::Sha256::digest(s.as_bytes());
+        digest = format!("{:x}", h);
+    }
+    return digest
+
+def main():
+    print(sha256_hex("hello"))

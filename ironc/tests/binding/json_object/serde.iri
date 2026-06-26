@@ -1,0 +1,2 @@
+crate serde_json = "1"
+extern fn parse_map(s: str) -> Result[dict[str, i64]] = "serde_json::from_str::<std::collections::HashMap<String, i64>>"
