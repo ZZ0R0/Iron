@@ -70,6 +70,8 @@ pub fn lower(
         inout_params: HashSet::new(),
         byref_params: HashSet::new(),
         flow_wrap: None,
+        try_break: None,
+        try_counter: 0,
         audit: Vec::new(),
     };
     let items: Vec<TokenStream> = ast.items.iter().map(|it| cx.item(it)).collect();
@@ -127,6 +129,10 @@ struct Cx<'a> {
     byref_params: HashSet<String>,
     /// Emballage du retour pour la fn en cours de lowering (None hors fn flux-Option/Result).
     flow_wrap: Option<FlowWrap>,
+    /// Id du bloc `try` en cours (V9, 40300) : un `?` y devient `match { Ok=>v, Err=>{…; break 'label} }`
+    /// au lieu de `?` — les assignations du `try` touchent les locaux hoistés (pas de capture non-init).
+    try_break: Option<u32>,
+    try_counter: u32,
     audit: Vec<Span>,
 }
 
@@ -328,7 +334,8 @@ impl Cx<'_> {
                 } else {
                     quote! {}
                 };
-                quote! { #test_attr fn #fid #gens ( #(#ps),* ) #ret_ts { #(#decls)* #(#stmts)* #tail } }
+                // `pub` : items réutilisables si exportés en crate (`ironc lib`, 51800) ; inoffensif en binaire.
+                quote! { #test_attr pub fn #fid #gens ( #(#ps),* ) #ret_ts { #(#decls)* #(#stmts)* #tail } }
             }
             ItemKind::Struct { name, generics, fields } => {
                 let sid = format_ident!("{}", name);
@@ -344,7 +351,7 @@ impl Cx<'_> {
                 let attrs = self.item_attrs_ts(it.id, &["Debug", "Clone"]);
                 quote! {
                     #attrs
-                    struct #sid #gens { #(#fs),* }
+                    pub struct #sid #gens { #(pub #fs),* }
                 }
             }
             ItemKind::Enum { name, generics, variants } => {
@@ -365,7 +372,7 @@ impl Cx<'_> {
                 let attrs = self.item_attrs_ts(it.id, &["Debug", "Clone"]);
                 quote! {
                     #attrs
-                    enum #eid #gens { #(#vs),* }
+                    pub enum #eid #gens { #(#vs),* }
                 }
             }
             ItemKind::Trait { name, methods } => {
@@ -584,19 +591,29 @@ impl Cx<'_> {
             // `try: … except [e]: …` (surface Python) : IIFE renvoyant Result, capture les `?`/raise.
             // Les locaux du corps sont hoistés (fn-level) → le closure les assigne par &mut.
             StmtKind::TryExcept { body, err_name, handler } => {
+                // V9 (40300) : bloc labellisé + `?` réécrit en break — les assignations du `try` touchent
+                // les locaux hoistés directement (plus de capture non-initialisée par une IIFE-closure).
+                let id = self.try_counter;
+                self.try_counter += 1;
+                let prev = self.try_break;
+                self.try_break = Some(id);
                 let body_ts: Vec<TokenStream> = body.iter().map(|s| self.stmt(s)).collect();
+                self.try_break = prev;
                 let handler_ts: Vec<TokenStream> = handler.iter().map(|s| self.stmt(s)).collect();
-                let err_arm = match err_name {
+                let lbl = syn::Lifetime::new(&format!("'__try{id}"), proc_macro2::Span::call_site());
+                let err_bind = match err_name {
                     Some(e) => {
-                        let id = format_ident!("{}", e);
-                        quote! { Err(__err) => { let #id = __err.0; #(#handler_ts)* } }
+                        let eid = format_ident!("{}", e);
+                        quote! { let #eid = __err.0; }
                     }
-                    None => quote! { Err(_) => { #(#handler_ts)* } },
+                    None => quote! {},
                 };
                 quote! {
-                    match (|| -> Result<(), IronError> { #(#body_ts)* Ok(()) })() {
-                        Ok(()) => {}
-                        #err_arm
+                    let mut __try_err: Option<IronError> = None;
+                    #lbl: { #(#body_ts)* }
+                    if let Some(__err) = __try_err {
+                        #err_bind
+                        #(#handler_ts)*
                     }
                 }
             }
@@ -895,7 +912,13 @@ impl Cx<'_> {
             }
             ExprKind::Try { inner } => {
                 let x = self.value(inner);
-                quote! { (#x?) }
+                match self.try_break {
+                    Some(id) => {
+                        let lbl = syn::Lifetime::new(&format!("'__try{id}"), proc_macro2::Span::call_site());
+                        quote! { match #x { Ok(__v) => __v, Err(__e) => { __try_err = Some(__e); break #lbl; } } }
+                    }
+                    None => quote! { (#x?) },
+                }
             }
             ExprKind::Lambda { params, body } => {
                 // Closure Rust (20700) : types des params inférés par rustc (I2).
@@ -1316,7 +1339,10 @@ impl Cx<'_> {
         let ty = self.type_of(x);
         let v = self.value(x);
         match ty {
-            Type::Str | Type::List(_) | Type::Dict(_, _) | Type::Set(_) => quote! { &#v },
+            // `str`/collections/struct/extern → `&` (les API Rust prennent surtout des emprunts ; coerce par Deref).
+            Type::Str | Type::List(_) | Type::Dict(_, _) | Type::Set(_) | Type::Struct(_) | Type::Extern(_) => {
+                quote! { &#v }
+            }
             _ => v,
         }
     }
@@ -1375,12 +1401,16 @@ impl Cx<'_> {
         };
         for idiom in &ef.idioms {
             match idiom {
-                // getter (D4) : retour emprunté → valeur possédée. `.cloned()` pour Option, `.clone()` sinon.
+                // getter (D4, 51700) : retour emprunté → valeur possédée, **typé** :
+                // `&str`→`.to_string()`, `&T`→`.clone()`, `Option<&str>`→`.map(to_string)`, `Option<&T>`→`.cloned()`.
                 Idiom::Clone => {
-                    call = if matches!(ef.ret, Type::Option(_)) {
-                        quote! { #call.cloned() }
-                    } else {
-                        quote! { #call.clone() }
+                    call = match &ef.ret {
+                        Type::Str => quote! { (#call).to_string() },
+                        Type::Option(inner) if matches!(**inner, Type::Str) => {
+                            quote! { (#call).map(|__s| __s.to_string()) }
+                        }
+                        Type::Option(_) => quote! { (#call).cloned() },
+                        _ => quote! { (#call).clone() },
                     };
                     self.audit.push(base.span); // warning perf I4 (--audit)
                 }

@@ -88,6 +88,19 @@ fn param_is_called(name: &str, body: &[Stmt]) -> bool {
             ExprKind::Unary { expr, .. } => in_expr(name, expr),
             ExprKind::Field { base, .. } => in_expr(name, base),
             ExprKind::Index { base, idx } => in_expr(name, base) || in_expr(name, idx),
+            // V9 (21300) : recurse dans compréhension/ternaire/tuple/liste/slice (HOF `[f(x) for x in xs]`).
+            ExprKind::Comp { body, iter, cond, .. } => {
+                in_expr(name, body) || in_expr(name, iter) || cond.as_ref().map_or(false, |c| in_expr(name, c))
+            }
+            ExprKind::Ternary { cond, then, els } => {
+                in_expr(name, cond) || in_expr(name, then) || in_expr(name, els)
+            }
+            ExprKind::Tuple(xs) | ExprKind::ListLit { items: xs } => xs.iter().any(|x| in_expr(name, x)),
+            ExprKind::Slice { base, lo, hi } => {
+                in_expr(name, base)
+                    || lo.as_ref().map_or(false, |e| in_expr(name, e))
+                    || hi.as_ref().map_or(false, |e| in_expr(name, e))
+            }
             _ => false,
         }
     }

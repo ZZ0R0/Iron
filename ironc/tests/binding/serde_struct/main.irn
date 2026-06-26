@@ -1,0 +1,16 @@
+use "serde.iri"
+
+@derive(serde::Serialize, serde::Deserialize)
+class Point:
+    x: i64
+    y: i64
+
+def roundtrip(a: i64, b: i64) -> Result[i64]:
+    p = Point(x=a, y=b)
+    s = to_json(p)?
+    q = from_json(s)?
+    return q.x + q.y
+
+def main():
+    print(roundtrip(3, 4).unwrap_or(0))
+    print(roundtrip(10, 20).unwrap_or(0))

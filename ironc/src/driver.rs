@@ -15,7 +15,7 @@ pub struct Compiled {
     pub source_map: SourceMap,
     pub mappings: Vec<sourcemap::Mapping>,
     pub audit: Vec<Span>,
-    pub crates: Vec<(String, String)>,
+    pub crates: Vec<(String, String, Vec<String>)>,
 }
 
 impl Compiled {
@@ -119,15 +119,62 @@ fn load_bindings(imports: &[String], base_dir: &Path) -> CResult<Bindings> {
 }
 
 /// Écrit un projet cargo autonome `{Cargo.toml, src/main.rs}` dans `out_dir`.
-pub fn emit_project(out_dir: &Path, rust_src: &str, crates: &[(String, String)]) -> std::io::Result<()> {
+fn deps_toml(crates: &[(String, String, Vec<String>)]) -> String {
+    crates
+        .iter()
+        .map(|(n, v, feats)| {
+            if feats.is_empty() {
+                format!("{n} = \"{v}\"\n")
+            } else {
+                let fs = feats.iter().map(|f| format!("\"{f}\"")).collect::<Vec<_>>().join(", ");
+                format!("{n} = {{ version = \"{v}\", features = [{fs}] }}\n")
+            }
+        })
+        .collect()
+}
+
+pub fn emit_project(out_dir: &Path, rust_src: &str, crates: &[(String, String, Vec<String>)]) -> std::io::Result<()> {
     std::fs::create_dir_all(out_dir.join("src"))?;
-    let deps: String = crates.iter().map(|(n, v)| format!("{n} = \"{v}\"\n")).collect();
+    let deps = deps_toml(crates);
     // `[workspace]` vide → projet généré **autonome** (jamais membre d'un workspace parent).
     let cargo = format!(
         "[workspace]\n\n[package]\nname = \"iron_out\"\nversion = \"0.0.0\"\nedition = \"2021\"\n\n[dependencies]\n{deps}"
     );
     std::fs::write(out_dir.join("Cargo.toml"), cargo)?;
     std::fs::write(out_dir.join("src").join("main.rs"), rust_src)?;
+    Ok(())
+}
+
+/// `ironc lib` (V9, 51800) : émet un crate Rust `{Cargo.toml [lib], src/lib.rs}` réutilisable depuis Rust.
+pub fn emit_lib(out_dir: &Path, rust_src: &str, crates: &[(String, String, Vec<String>)]) -> std::io::Result<()> {
+    std::fs::create_dir_all(out_dir.join("src"))?;
+    let deps = deps_toml(crates);
+    let cargo = format!(
+        "[workspace]\n\n[package]\nname = \"iron_lib\"\nversion = \"0.0.0\"\nedition = \"2021\"\n\n[lib]\npath = \"src/lib.rs\"\n\n[dependencies]\n{deps}"
+    );
+    std::fs::write(out_dir.join("Cargo.toml"), cargo)?;
+    std::fs::write(out_dir.join("src").join("lib.rs"), rust_src)?;
+    Ok(())
+}
+
+/// Exporte un module Iron en crate Rust (inverse de l'interop, 51800) ; compile pour vérifier.
+pub fn lib(input: &Path) -> CResult<()> {
+    let src = std::fs::read_to_string(input)
+        .map_err(|e| CompileError::msg(format!("lecture {} : {e}", input.display())))?;
+    let base_dir = input.parent().unwrap_or(Path::new("."));
+    let compiled = compile(&src, 0, base_dir)?;
+    let out_dir = out_dir_for(input);
+    emit_lib(&out_dir, &compiled.rust_src, &compiled.crates)
+        .map_err(|e| CompileError::msg(format!("émission lib : {e}")))?;
+    let output = Command::new("cargo")
+        .args(["build"])
+        .current_dir(&out_dir)
+        .output()
+        .map_err(|e| CompileError::msg(format!("cargo introuvable : {e}")))?;
+    if !output.status.success() {
+        return Err(CompileError::msg(remontee(&String::from_utf8_lossy(&output.stderr), &compiled, &src, input)));
+    }
+    println!("crate Rust émis (réutilisable) : {}", out_dir.display());
     Ok(())
 }
 

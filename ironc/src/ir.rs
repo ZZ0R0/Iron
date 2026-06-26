@@ -485,7 +485,8 @@ pub struct Bindings {
     pub types: HashMap<String, String>,
     /// Types externes à API (`extern type Name = "path":` + bloc de méthodes/ctors, V8 50900).
     pub etypes: HashMap<String, ExternType>,
-    pub crates: Vec<(String, String)>,
+    /// Dépendances Cargo (V9, 70800/51900) : `(nom, version, features)` → `name = { version, features }`.
+    pub crates: Vec<(String, String, Vec<String>)>,
     /// Namespacing (V8, 51500) : nom de module → noms d'items qu'il regroupe.
     pub mods: HashMap<String, Vec<String>>,
 }

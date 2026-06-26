@@ -1,0 +1,5 @@
+crate serde = "1" features [derive]
+crate serde_json = "1"
+
+extern fn to_json(p: Point) -> Result[str] = "serde_json::to_string::<Point>"
+extern fn from_json(s: str) -> Result[Point] = "serde_json::from_str::<Point>"

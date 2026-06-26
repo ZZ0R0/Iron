@@ -114,7 +114,20 @@ impl P {
                 let name = self.ident()?;
                 self.expect(&TokenKind::Assign, "`=`")?;
                 let ver = self.string()?;
-                b.crates.push((name, ver));
+                // features optionnelles (V9, 51900) : `crate serde = "1" features [derive]`.
+                let mut feats = Vec::new();
+                if self.kw("features") {
+                    self.adv();
+                    self.expect(&TokenKind::LBracket, "`[`")?;
+                    while !self.is(&TokenKind::RBracket) {
+                        feats.push(self.ident()?);
+                        if !self.eat(&TokenKind::Comma) {
+                            break;
+                        }
+                    }
+                    self.expect(&TokenKind::RBracket, "`]`")?;
+                }
+                b.crates.push((name, ver, feats));
             } else {
                 return Err(self.err("`extern` ou `crate` attendu"));
             }
