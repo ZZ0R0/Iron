@@ -1,0 +1,34 @@
+# [V9.1] Inférence locale élargie : ces fonctions tournent SANS annotation (surface Python).
+# Gèle : retour f-string/littéral/concat/comparaison/struct/liste/index · param via comparaison & range ·
+# retour d'une variable locale (accumulateur).
+
+# retour f-string → str ; param `name` via f-string → str
+def greet(name):
+    return f"hi {name}"
+
+# concat → str ; param `s` via `+ "…"` → str
+def shout(s):
+    return s + "!"
+
+# comparaison → bool ; param `age` via `age >= 18` → i64
+def adult(age):
+    return age >= 18
+
+# accumulateur : `total` local i64, `lo`/`hi` via range/arith → retour i64 inféré
+def range_sum(lo, hi):
+    total = 0
+    for i in range(lo, hi + 1):
+        total = total + i
+    return total
+
+# index d'une liste : `first` = xs[0] → élément ; retour inféré
+def head(xs: list[i64]):
+    first = xs[0]
+    return first
+
+def main():
+    print(greet("Iron"))
+    print(shout("ok"))
+    print(adult(20))
+    print(range_sum(1, 100))
+    print(head([7, 8, 9]))

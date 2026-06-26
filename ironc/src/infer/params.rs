@@ -49,6 +49,13 @@ fn used_in_display(name: &str, body: &[Stmt]) -> bool {
                 let is_print = matches!(&callee.kind, ExprKind::Var(n) if n == "print");
                 (is_print && args.iter().any(direct)) || args.iter().any(|a| in_expr(name, a))
             }
+            // `name + "…"` (ou `f"…" + name`) = **concaténation** → `name` est une chaîne.
+            ExprKind::Binary { op: BinOp::Add, lhs, rhs }
+                if (matches!(&lhs.kind, ExprKind::Var(n) if n == name) && is_str_lit(rhs))
+                    || (matches!(&rhs.kind, ExprKind::Var(n) if n == name) && is_str_lit(lhs)) =>
+            {
+                true
+            }
             ExprKind::Binary { lhs, rhs, .. } => in_expr(name, lhs) || in_expr(name, rhs),
             ExprKind::Unary { expr, .. } => in_expr(name, expr),
             ExprKind::Field { base, .. } => in_expr(name, base),
@@ -236,11 +243,25 @@ fn expr_num(name: &str, e: &Expr) -> bool {
     match &e.kind {
         ExprKind::Binary { op, lhs, rhs } => {
             let arith = matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Rem);
+            let cmp = matches!(op, BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge | BinOp::Eq | BinOp::Ne);
             let direct = |x: &Expr| matches!(&x.kind, ExprKind::Var(n) if n == name);
-            (arith && (direct(lhs) || direct(rhs))) || expr_num(name, lhs) || expr_num(name, rhs)
+            let num_lit = |x: &Expr| matches!(&x.kind, ExprKind::Lit(Lit::Int(_)) | ExprKind::Lit(Lit::Float(_)));
+            // `name + "…"` est une concaténation, PAS un usage numérique → ne pas forcer `i64`.
+            let str_concat = matches!(op, BinOp::Add) && (is_str_lit(lhs) || is_str_lit(rhs));
+            // `name < 18`, `name == 0`… (comparé à un littéral numérique) → `name` est numérique.
+            let cmp_num = cmp && ((direct(lhs) && num_lit(rhs)) || (direct(rhs) && num_lit(lhs)));
+            (arith && !str_concat && (direct(lhs) || direct(rhs)))
+                || cmp_num
+                || expr_num(name, lhs)
+                || expr_num(name, rhs)
         }
         ExprKind::Unary { expr, .. } => expr_num(name, expr),
-        ExprKind::Call { args, .. } => args.iter().any(|a| expr_num(name, a)),
+        ExprKind::Call { callee, args } => {
+            // `range(name, …)` / `range(…, name)` → `name` est numérique (borne d'itération).
+            let is_range = matches!(&callee.kind, ExprKind::Var(n) if n == "range");
+            let direct = |x: &Expr| matches!(&x.kind, ExprKind::Var(n) if n == name);
+            (is_range && args.iter().any(direct)) || args.iter().any(|a| expr_num(name, a))
+        }
         ExprKind::Index { base, idx } => expr_num(name, base) || expr_num(name, idx),
         ExprKind::Field { base, .. } => expr_num(name, base),
         ExprKind::ListLit { items } => items.iter().any(|x| expr_num(name, x)),
@@ -251,12 +272,30 @@ fn expr_num(name: &str, e: &Expr) -> bool {
 // ---- inférence légère du type de retour ----
 
 fn first_return_type(params: &[(String, Type)], body: &[Stmt]) -> Option<Type> {
+    // Types « connus » = params + variables locales typables (pattern accumulateur `total = 0; … return total`).
+    let known = collect_local_types(params, body);
     for s in body {
-        if let Some(t) = stmt_ret(params, s) {
+        if let Some(t) = stmt_ret(&known, s) {
             return Some(t);
         }
     }
     None
+}
+
+/// Params + locaux dont le type est déductible de leur **initialisation** (`Let`), pour que `return <local>`
+/// s'infère. Passe avant unique sur les `Let` top-level (couvre l'accumulateur ; les cas tordus → rustc).
+fn collect_local_types(params: &[(String, Type)], body: &[Stmt]) -> Vec<(String, Type)> {
+    let mut known = params.to_vec();
+    for s in body {
+        if let StmtKind::Let { name, value } = &s.kind {
+            if !known.iter().any(|(p, _)| p == name) {
+                if let Some(t) = ret_expr_type(&known, value) {
+                    known.push((name.clone(), t));
+                }
+            }
+        }
+    }
+    known
 }
 
 fn stmt_ret(params: &[(String, Type)], s: &Stmt) -> Option<Type> {
@@ -275,9 +314,57 @@ fn stmt_ret(params: &[(String, Type)], s: &Stmt) -> Option<Type> {
 fn ret_expr_type(params: &[(String, Type)], e: &Expr) -> Option<Type> {
     match &e.kind {
         ExprKind::Var(n) => params.iter().find(|(p, _)| p == n).map(|(_, t)| t.clone()),
+        // Littéraux + f-strings : type immédiat (sinon `return f"…"` laissait le retour à `Unit` → mismatch).
+        ExprKind::FString(_) | ExprKind::Lit(Lit::Str(_)) => Some(Type::Str),
+        ExprKind::Lit(Lit::Int(_)) => Some(Type::I64),
+        ExprKind::Lit(Lit::Float(_)) => Some(Type::F64),
+        ExprKind::Lit(Lit::Bool(_)) => Some(Type::Bool),
+        ExprKind::Lit(Lit::Char(_)) => Some(Type::Char),
+        // `return Contact(...)` → le type de la struct/classe construite.
+        ExprKind::StructLit { name, .. } => Some(Type::Struct(name.clone())),
+        // `return [x, …]` → `list[<type du 1er élément typable>]` (sert au générique `[x, x]` → `list[T]`).
+        ExprKind::ListLit { items } => {
+            items.iter().find_map(|e| ret_expr_type(params, e)).map(|t| Type::List(Box::new(t)))
+        }
+        // `xs[i]` → type d'élément (`list[T]` → `T`, `dict[K, V]` → `V`, `str` → `str`). Sert à
+        // `best = names[0]` puis `return best`.
+        ExprKind::Index { base, .. } => match ret_expr_type(params, base) {
+            Some(Type::List(t)) => Some(*t),
+            Some(Type::Dict(_, v)) => Some(*v),
+            Some(Type::Str) => Some(Type::Str),
+            _ => None,
+        },
+        // `+` avec une chaîne d'un côté = concaténation → `str` ; sinon arith → `i64`.
+        ExprKind::Binary { op: BinOp::Add, lhs, rhs } if is_str_operand(params, lhs) || is_str_operand(params, rhs) => {
+            Some(Type::Str)
+        }
+        // Comparaisons / connecteurs logiques → `bool` (`return self.age >= 18`).
+        ExprKind::Binary { op, .. }
+            if matches!(
+                op,
+                BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge | BinOp::And | BinOp::Or | BinOp::In | BinOp::NotIn
+            ) =>
+        {
+            Some(Type::Bool)
+        }
         ExprKind::Binary { op, .. } if matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Rem) => {
             Some(Type::I64)
         }
         _ => None,
     }
+}
+
+/// Un opérande est-il « de type chaîne » (littéral, f-string, ou param déjà typé `str`) ? Sert à
+/// distinguer la **concaténation** `+` de l'addition numérique pour l'inférence (surface Python).
+fn is_str_operand(params: &[(String, Type)], e: &Expr) -> bool {
+    match &e.kind {
+        ExprKind::Lit(Lit::Str(_)) | ExprKind::FString(_) => true,
+        ExprKind::Var(n) => params.iter().any(|(p, t)| p == n && matches!(t, Type::Str)),
+        _ => false,
+    }
+}
+
+/// Littéral chaîne ou f-string (sans table de params) — pour disambiguer `+` concat vs numérique.
+fn is_str_lit(e: &Expr) -> bool {
+    matches!(&e.kind, ExprKind::Lit(Lit::Str(_)) | ExprKind::FString(_))
 }
