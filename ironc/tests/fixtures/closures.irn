@@ -1,0 +1,6 @@
+def multiplier(k: i64) -> fn(i64) -> i64:
+    return lambda x: x * k
+
+def main():
+    triple = multiplier(3)
+    print(triple(5))

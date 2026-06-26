@@ -957,10 +957,11 @@ impl Cx<'_> {
                 quote! { (#v).await }
             }
             ExprKind::Lambda { params, body } => {
-                // Closure Rust (20700) : types des params inférés par rustc (I2).
+                // Closure Rust (20700) : types des params inférés par rustc (I2). `move` (V9.1, 21600) →
+                // capture par valeur : nécessaire pour une closure **retournée**/**stockée**, sûr pour map/filter.
                 let ps: Vec<proc_macro2::Ident> = params.iter().map(|p| format_ident!("{}", p)).collect();
                 let b = self.value(body);
-                quote! { | #(#ps),* | #b }
+                quote! { move | #(#ps),* | #b }
             }
             // V7 — tuple/f-string/ternaire : lowering réel ; comp/slice : raffinés en 2.7/2.5.
             ExprKind::Tuple(items) => {

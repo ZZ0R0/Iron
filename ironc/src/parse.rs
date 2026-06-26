@@ -453,6 +453,21 @@ impl Parser {
     }
 
     fn parse_type(&mut self) -> CResult<Type> {
+        // type fonction `fn(A, …) -> R` (closures de 1ʳᵉ classe, V9.1, 21600).
+        if self.is(&TokenKind::Fn) {
+            self.adv();
+            self.expect(&TokenKind::LParen, "`(`")?;
+            let mut ps = Vec::new();
+            while !self.is(&TokenKind::RParen) {
+                ps.push(self.parse_type()?);
+                if !self.eat(&TokenKind::Comma) {
+                    break;
+                }
+            }
+            self.expect(&TokenKind::RParen, "`)`")?;
+            let ret = if self.eat(&TokenKind::Arrow) { self.parse_type()? } else { Type::Unit };
+            return Ok(Type::Fn(ps, Box::new(ret)));
+        }
         // type tuple `(A, B, …)` (10400)
         if self.eat(&TokenKind::LParen) {
             let mut ts = Vec::new();

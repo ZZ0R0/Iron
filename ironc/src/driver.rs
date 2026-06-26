@@ -242,6 +242,39 @@ pub fn doc(input: &Path) -> CResult<()> {
     Ok(())
 }
 
+/// `ironc remove <crate>` (V9.1, 72100) : retire le crate d'`ironc.toml` + supprime `<crate>.iri`.
+pub fn remove(crate_name: &str) -> CResult<()> {
+    let _ = std::fs::remove_file(format!("{crate_name}.iri"));
+    if let Ok(toml) = std::fs::read_to_string("ironc.toml") {
+        let filtered: Vec<&str> = toml
+            .lines()
+            .filter(|l| !l.trim_start().starts_with(&format!("{crate_name} =")))
+            .collect();
+        let _ = std::fs::write("ironc.toml", filtered.join("\n"));
+    }
+    println!("`{crate_name}` retiré (ironc.toml + {crate_name}.iri).");
+    Ok(())
+}
+
+/// `ironc update` (V9.1, 72100) : re-binde tous les `.iri` curés du projet (versions à jour, invalide le cache).
+pub fn update() -> CResult<()> {
+    let mut n = 0;
+    if let Ok(entries) = std::fs::read_dir(".") {
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.extension().and_then(|s| s.to_str()) == Some("iri") {
+                if let Some(stem) = p.file_stem().and_then(|s| s.to_str()) {
+                    if add(stem).is_ok() {
+                        n += 1;
+                    }
+                }
+            }
+        }
+    }
+    println!("{n} binding(s) mis à jour.");
+    Ok(())
+}
+
 /// `ironc check` (V9.1, 60800) : diagnostics haute-fidélité par **overlay rustc** (la surcouche). Transpile
 /// → `cargo check` → remonte les erreurs rustc en `Span` Iron. Erreurs Iron (lex/parse/inférence) attrapées
 /// d'abord par `compile` ; erreurs profondes (types/traits/borrow) par rustc. Zéro faux-positif.

@@ -12,6 +12,10 @@ fn main() {
     if positional.first().map(|s| s.as_str()) == Some("lsp") {
         exit(if lsp::lsp().is_ok() { 0 } else { 1 });
     }
+    // `ironc update` : re-binde tous les `.iri` du projet (sans fichier).
+    if positional.first().map(|s| s.as_str()) == Some("update") {
+        exit(if driver::update().is_ok() { 0 } else { 1 });
+    }
     if positional.len() < 2 {
         eprintln!("usage: ironc <build|run|test|bind|new> [--audit] <fichier.irn | nom>");
         exit(2);
@@ -23,6 +27,7 @@ fn main() {
         "test" => driver::test(input),
         "new" => driver::new_project(positional[1].as_str()),
         "add" => driver::add(positional[1].as_str()),
+        "remove" => driver::remove(positional[1].as_str()),
         "check" => driver::check(input),
         "doc" => driver::doc(input),
         "lib" => driver::lib(input),
