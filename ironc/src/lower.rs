@@ -245,7 +245,13 @@ impl Cx<'_> {
                 } else {
                     quote! {}
                 };
-                quote! { fn #fid #gens ( #(#ps),* ) #ret_ts { #(#decls)* #(#stmts)* #tail } }
+                // `def test_*()` → `#[test]` (ironc test) ; ignoré au build/run normal (cfg(test)).
+                let test_attr = if name.starts_with("test_") {
+                    quote! { #[test] }
+                } else {
+                    quote! {}
+                };
+                quote! { #test_attr fn #fid #gens ( #(#ps),* ) #ret_ts { #(#decls)* #(#stmts)* #tail } }
             }
             ItemKind::Struct { name, generics, fields } => {
                 let sid = format_ident!("{}", name);

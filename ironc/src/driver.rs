@@ -169,6 +169,41 @@ pub fn run(input: &Path, audit: bool) -> CResult<()> {
     Ok(())
 }
 
+/// `ironc test <fichier>` : compile + lance `cargo test` (les `def test_*()` deviennent des `#[test]`).
+pub fn test(input: &Path) -> CResult<()> {
+    let out_dir = build(input, false)?;
+    let status = Command::new("cargo")
+        .args(["test"])
+        .current_dir(&out_dir)
+        .status()
+        .map_err(|e| CompileError::msg(format!("cargo test : {e}")))?;
+    if !status.success() {
+        return Err(CompileError::msg("des tests ont échoué"));
+    }
+    Ok(())
+}
+
+/// `ironc new <nom>` : scaffolding d'un projet Iron (manifeste + src/main.irn + .gitignore).
+pub fn new_project(name: &str) -> CResult<()> {
+    let dir = Path::new(name);
+    if dir.exists() {
+        return Err(CompileError::msg(format!("le dossier `{name}` existe déjà")));
+    }
+    let w = |p: PathBuf, c: &str| {
+        std::fs::write(&p, c).map_err(|e| CompileError::msg(format!("écriture {} : {e}", p.display())))
+    };
+    std::fs::create_dir_all(dir.join("src"))
+        .map_err(|e| CompileError::msg(format!("création {name}/src : {e}")))?;
+    w(dir.join("src/main.irn"), "def main():\n    print(\"hello from Iron\")\n")?;
+    w(
+        dir.join("ironc.toml"),
+        &format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[iron]\nentry = \"src/main.irn\"\n"),
+    )?;
+    w(dir.join(".gitignore"), "/target\n/ironc-out\n")?;
+    println!("Projet `{name}` créé.  cd {name} && ironc run src/main.irn");
+    Ok(())
+}
+
 /// Remonte une erreur du Rust généré vers la source Iron (I8/I2).
 fn remontee(stderr: &str, compiled: &Compiled, src: &str, path: &Path) -> String {
     if let Some(rust_line) = find_rust_error_line(stderr) {
