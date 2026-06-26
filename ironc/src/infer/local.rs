@@ -36,8 +36,23 @@ pub(crate) fn stmt(cx: &mut Inf, s: &Stmt, scope: &mut Scope) {
             scope.insert(name.clone(), t);
         }
         StmtKind::Assign { target, value } => {
+            let vt = expr(cx, value, scope);
             expr(cx, target, scope);
-            expr(cx, value, scope);
+            // Raffine un conteneur (souvent vide → Unit) depuis `d[k] = v` / `xs[i] = v` : indispensable
+            // pour le pattern Python `counts = {}` puis `counts[w] = n` (sinon clé/valeur restent Unit).
+            if let ExprKind::Index { base, idx } = &target.kind {
+                if let ExprKind::Var(name) = &base.kind {
+                    let kt = cx.tm.get(&idx.id).cloned().unwrap_or(Type::Unit);
+                    let refined = match scope.get(name) {
+                        Some(Type::Dict(_, _)) => Some(Type::Dict(Box::new(kt), Box::new(vt.clone()))),
+                        Some(Type::List(_)) => Some(Type::List(Box::new(vt.clone()))),
+                        _ => None,
+                    };
+                    if let Some(r) = refined {
+                        scope.insert(name.clone(), r);
+                    }
+                }
+            }
         }
         StmtKind::If { cond, then, elifs, els } => {
             expr(cx, cond, scope);
