@@ -413,6 +413,7 @@ pub(crate) fn expr(cx: &mut Inf, e: &Expr, scope: &Scope) -> Type {
             match t {
                 Type::Option(x) => *x,
                 Type::Result(x) => *x,
+                Type::ResultE(x, _) => *x, // `?` sur `Result[T, E]` (21500) → `T`
                 other => other,
             }
         }

@@ -1,0 +1,35 @@
+# [V9.1/21500] Erreurs typées `Result[T, E]` : E = enum Iron, `raise`/`?`/`try-except e` propagent E.
+
+enum DbError:
+    NotFound
+    Timeout
+
+def lookup(id: i64) -> Result[str, DbError]:
+    if id < 0:
+        raise DbError.NotFound
+    if id == 0:
+        raise DbError.Timeout
+    return ok("row")
+
+# `?` propage `DbError` (pas `IronError`) ; le retour est `Result[str, DbError]`.
+def use_it(id: i64) -> Result[str, DbError]:
+    r = lookup(id)?
+    return ok(r)
+
+# `try/except e:` lie `e: DbError` ; le handler `match`e dessus. Fn à retour ordinaire (récupération).
+def describe(id: i64) -> str:
+    try:
+        v = use_it(id)?
+        return "ok"
+    except e:
+        match e:
+            DbError.NotFound:
+                return "absent"
+            DbError.Timeout:
+                return "timeout"
+
+def main():
+    print(use_it(5).unwrap_or("ERR"))
+    print(describe(5))
+    print(describe(-1))
+    print(describe(0))

@@ -146,6 +146,7 @@ fn ty(t: &Type) -> String {
         Type::Extern(p) => p.clone(),
         Type::Option(x) => format!("Option[{}]", ty(x)),
         Type::Result(x) => format!("Result[{}]", ty(x)),
+        Type::ResultE(x, e) => format!("Result[{}, {}]", ty(x), ty(e)),
         Type::List(x) => format!("list[{}]", ty(x)),
         Type::Set(x) => format!("set[{}]", ty(x)),
         Type::Shared(x) => format!("shared[{}]", ty(x)),

@@ -347,8 +347,14 @@ impl P {
             "Result" => {
                 self.expect(&TokenKind::LBracket, "`[`")?;
                 let t = self.parse_type()?;
-                self.expect(&TokenKind::RBracket, "`]`")?;
-                Ok(Type::Result(Box::new(t)))
+                if self.eat(&TokenKind::Comma) {
+                    let e = self.parse_type()?;
+                    self.expect(&TokenKind::RBracket, "`]`")?;
+                    Ok(Type::ResultE(Box::new(t), Box::new(e)))
+                } else {
+                    self.expect(&TokenKind::RBracket, "`]`")?;
+                    Ok(Type::Result(Box::new(t)))
+                }
             }
             // tuple `(A, B, …)` — non géré ici si la grammaire `.iri` n'ouvre pas par `(` ; les tuples
             // arrivent via la projection bind. Nom inconnu → type externe (résolu après coup).
@@ -372,6 +378,10 @@ fn resolve_extern(t: &mut Type, types: &std::collections::HashMap<String, String
             }
         }
         Type::List(e) | Type::Option(e) | Type::Result(e) | Type::Set(e) => resolve_extern(e, types),
+        Type::ResultE(t, e) => {
+            resolve_extern(t, types);
+            resolve_extern(e, types);
+        }
         Type::Dict(k, v) => {
             resolve_extern(k, types);
             resolve_extern(v, types);

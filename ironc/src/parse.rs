@@ -523,8 +523,15 @@ impl Parser {
             "Result" => {
                 self.expect(&TokenKind::LBracket, "`[`")?;
                 let t = self.parse_type()?;
-                self.expect(&TokenKind::RBracket, "`]`")?;
-                Ok(Type::Result(Box::new(t)))
+                // `Result[T, E]` (V9.1, 21500) : erreur typée. `Result[T]` reste `Result<T, IronError>`.
+                if self.eat(&TokenKind::Comma) {
+                    let e = self.parse_type()?;
+                    self.expect(&TokenKind::RBracket, "`]`")?;
+                    Ok(Type::ResultE(Box::new(t), Box::new(e)))
+                } else {
+                    self.expect(&TokenKind::RBracket, "`]`")?;
+                    Ok(Type::Result(Box::new(t)))
+                }
             }
             _ => {
                 // char + zoo numérique élargi (20800)

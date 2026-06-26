@@ -70,6 +70,7 @@ pub fn lower(
         inout_params: HashSet::new(),
         byref_params: HashSet::new(),
         flow_wrap: None,
+        cur_err: None,
         try_break: None,
         try_counter: 0,
         audit: Vec::new(),
@@ -129,6 +130,9 @@ struct Cx<'a> {
     byref_params: HashSet<String>,
     /// Emballage du retour pour la fn en cours de lowering (None hors fn flux-Option/Result).
     flow_wrap: Option<FlowWrap>,
+    /// Type d'erreur `E` de la fonction courante (V9.1, 21500) : `Some(E)` si `Result[T, E]` explicite,
+    /// `None` = défaut `IronError`. Gouverne `raise`/`err(...)`/`try`-`?` (typage de la propagation).
+    cur_err: Option<Type>,
     /// Id du bloc `try` en cours (V9, 40300) : un `?` y devient `match { Ok=>v, Err=>{…; break 'label} }`
     /// au lieu de `?` — les assignations du `try` touchent les locaux hoistés (pas de capture non-init).
     try_break: Option<u32>,
@@ -230,6 +234,7 @@ fn is_debug_type(t: &Type) -> bool {
             | Type::Struct(_)
             | Type::Option(_)
             | Type::Result(_)
+            | Type::ResultE(..)
     )
 }
 
@@ -240,6 +245,55 @@ fn mode_of(pm: &ParamModes, fn_name: &str, i: usize) -> ParamMode {
 impl Cx<'_> {
     fn type_of(&self, e: &Expr) -> Type {
         self.types.get(&e.id).cloned().unwrap_or(Type::Unit)
+    }
+
+    /// Erreur typée capturée par un `try` (21500) : type `E` du premier `?` du corps dont l'expression est
+    /// un `Result[_, E]` typé ; `None` = `IronError` (défaut). Indépendant du retour de la fn englobante —
+    /// un `try/except` qui récupère et renvoie une valeur ordinaire doit quand même typer son `e: E`.
+    fn caught_err_ty(&self, stmts: &[Stmt]) -> Option<Type> {
+        for s in stmts {
+            let found = match &s.kind {
+                StmtKind::Let { value, .. } | StmtKind::ExprStmt(value) | StmtKind::Yield(value) => self.q_err(value),
+                StmtKind::Assign { target, value } => self.q_err(target).or_else(|| self.q_err(value)),
+                StmtKind::Return { value } => value.as_ref().and_then(|v| self.q_err(v)),
+                StmtKind::If { cond, then, elifs, els } => self
+                    .q_err(cond)
+                    .or_else(|| self.caught_err_ty(then))
+                    .or_else(|| elifs.iter().find_map(|(c, b)| self.q_err(c).or_else(|| self.caught_err_ty(b))))
+                    .or_else(|| self.caught_err_ty(els)),
+                StmtKind::While { cond, body } => self.q_err(cond).or_else(|| self.caught_err_ty(body)),
+                StmtKind::For { iter, body, .. } => self.q_err(iter).or_else(|| self.caught_err_ty(body)),
+                StmtKind::Match { scrutinee, arms } => {
+                    self.q_err(scrutinee).or_else(|| arms.iter().find_map(|a| self.caught_err_ty(&a.body)))
+                }
+                _ => None,
+            };
+            if found.is_some() {
+                return found;
+            }
+        }
+        None
+    }
+
+    /// `E` typé d'un `?` (`Try`) dans une expression, en profondeur ; `None` si aucun `?` typé.
+    fn q_err(&self, e: &Expr) -> Option<Type> {
+        match &e.kind {
+            ExprKind::Try { inner } => {
+                if let Type::ResultE(_, et) = self.type_of(inner) {
+                    return Some(*et);
+                }
+                self.q_err(inner)
+            }
+            ExprKind::Unary { expr, .. } => self.q_err(expr),
+            ExprKind::Binary { lhs, rhs, .. } => self.q_err(lhs).or_else(|| self.q_err(rhs)),
+            ExprKind::Call { callee, args } => self.q_err(callee).or_else(|| args.iter().find_map(|a| self.q_err(a))),
+            ExprKind::Field { base, .. } => self.q_err(base),
+            ExprKind::Index { base, idx } => self.q_err(base).or_else(|| self.q_err(idx)),
+            ExprKind::StructLit { fields, .. } => fields.iter().find_map(|(_, v)| self.q_err(v)),
+            ExprKind::ListLit { items } => items.iter().find_map(|i| self.q_err(i)),
+            ExprKind::DictLit { pairs } => pairs.iter().find_map(|(k, v)| self.q_err(k).or_else(|| self.q_err(v))),
+            _ => None,
+        }
     }
 
     /// Attributs d'un item (V9, 51900) : fusionne les `@derive(...)` user avec les derives auto, émet les
@@ -309,7 +363,12 @@ impl Cx<'_> {
                 // Option/Result), ce qui supprime le `ok(...)`/`some(...)` manuel.
                 self.flow_wrap = match &effective {
                     Type::Option(_) => Some(FlowWrap::Some_),
-                    Type::Result(_) => Some(FlowWrap::Ok_),
+                    Type::Result(_) | Type::ResultE(..) => Some(FlowWrap::Ok_),
+                    _ => None,
+                };
+                // Erreur typée (21500) : `E` de la fn courante pour `raise`/`err`/`try` ; `None` = IronError.
+                self.cur_err = match &effective {
+                    Type::ResultE(_, e) => Some((**e).clone()),
                     _ => None,
                 };
                 let mut locals: Vec<(String, Type)> = Vec::new();
@@ -566,7 +625,7 @@ impl Cx<'_> {
                     // (`return ok(x)`/`return compile(p)?` ... → laissés tels quels ; `return bool` → `Ok(bool)`).
                     match self.flow_wrap {
                         Some(FlowWrap::Some_) if !matches!(et, Type::Option(_)) => quote! { return Some(#ev); },
-                        Some(FlowWrap::Ok_) if !matches!(et, Type::Result(_)) => quote! { return Ok(#ev); },
+                        Some(FlowWrap::Ok_) if !matches!(et, Type::Result(_) | Type::ResultE(..)) => quote! { return Ok(#ev); },
                         _ => quote! { return #ev; },
                     }
                 }
@@ -632,25 +691,51 @@ impl Cx<'_> {
                 self.try_break = prev;
                 let handler_ts: Vec<TokenStream> = handler.iter().map(|s| self.stmt(s)).collect();
                 let lbl = syn::Lifetime::new(&format!("'__try{id}"), proc_macro2::Span::call_site());
+                // Erreur typée (21500) : le réceptacle `__try_err` porte le `E` **capturé par le corps** (le
+                // `?` typé), sinon `IronError`. Le `except e:` lie `e = __err` (valeur `E` entière) en typé,
+                // ou `__err.0` (le message) pour `IronError` (rétro-compat).
+                let caught = self.caught_err_ty(body);
+                let errty = match &caught {
+                    Some(e) => lower_type(e),
+                    None => quote! { IronError },
+                };
                 let err_bind = match err_name {
                     Some(e) => {
                         let eid = format_ident!("{}", e);
-                        quote! { let #eid = __err.0; }
+                        if caught.is_some() {
+                            quote! { let #eid = __err; }
+                        } else {
+                            quote! { let #eid = __err.0; }
+                        }
                     }
                     None => quote! {},
                 };
+                // Totalité (V9.1) : si le corps **diverge sur le chemin de succès** (return/raise sur tous
+                // les chemins), le post-bloc n'est atteint **que** via le `break` du `?` ⇒ `__try_err` est
+                // forcément `Some`. On rend alors le `if let` total (`else unreachable!`) pour qu'une fn qui
+                // renvoie une valeur (try/except au tail) compile — sinon `rustc` voit une chute non typée.
+                let total = crate::infer::flow::definitely_returns(body);
+                let else_arm = if total {
+                    quote! { else { unreachable!("le corps du `try` retourne sur le chemin sans erreur") } }
+                } else {
+                    quote! {}
+                };
                 quote! {
-                    let mut __try_err: Option<IronError> = None;
+                    let mut __try_err: Option<#errty> = None;
                     #lbl: { #(#body_ts)* }
                     if let Some(__err) = __try_err {
                         #err_bind
                         #(#handler_ts)*
-                    }
+                    } #else_arm
                 }
             }
             StmtKind::Raise { value } => {
                 let v = self.value(value);
-                if matches!(self.type_of(value), Type::Str) {
+                // Erreur typée (21500) : `raise e` dans une fn `Result[T, E]` → `Err(e.into())` (identité si
+                // `e: E`, conversion si `e: E1` avec `E1: Into<E>` — filet rustc). Défaut = `IronError` (texte).
+                if self.cur_err.is_some() {
+                    quote! { return Err((#v).into()); }
+                } else if matches!(self.type_of(value), Type::Str) {
                     quote! { return Err(IronError(#v)); }
                 } else {
                     quote! { return Err(IronError(format!("{}", #v))); }
@@ -946,7 +1031,8 @@ impl Cx<'_> {
                 match self.try_break {
                     Some(id) => {
                         let lbl = syn::Lifetime::new(&format!("'__try{id}"), proc_macro2::Span::call_site());
-                        quote! { match #x { Ok(__v) => __v, Err(__e) => { __try_err = Some(__e); break #lbl; } } }
+                        // `.into()` : identité pour `IronError`, conversion `E1→E2` en erreur typée (21500).
+                        quote! { match #x { Ok(__v) => __v, Err(__e) => { __try_err = Some(__e.into()); break #lbl; } } }
                     }
                     None => quote! { (#x?) },
                 }
@@ -1148,7 +1234,12 @@ impl Cx<'_> {
                 }
                 "err" if args.len() == 1 => {
                     let a = self.value(&args[0]);
-                    return quote! { Err(IronError(#a)) };
+                    // Erreur typée (21500) : `err(e)` dans `Result[T, E]` → `Err(e.into())` ; défaut `IronError`.
+                    return if self.cur_err.is_some() {
+                        quote! { Err((#a).into()) }
+                    } else {
+                        quote! { Err(IronError(#a)) }
+                    };
                 }
                 // stdlib V4 (80100) — wrappers fins sur std (I5)
                 "str" if args.len() == 1 => {
@@ -1743,6 +1834,12 @@ fn lower_type(t: &Type) -> TokenStream {
         Type::Result(t) => {
             let i = lower_type(t);
             quote! { Result<#i, IronError> }
+        }
+        // Erreur typée (21500) : `Result[T, E]` → `Result<T, E>`.
+        Type::ResultE(t, e) => {
+            let ti = lower_type(t);
+            let ei = lower_type(e);
+            quote! { Result<#ti, #ei> }
         }
         Type::List(t) => {
             let i = lower_type(t);

@@ -139,6 +139,9 @@ pub enum Type {
     Result(Box<Type>),
     List(Box<Type>),
     Dict(Box<Type>, Box<Type>),
+    /// `Result[T, E]` à **erreur typée** (V9.1, 21500) : `E` concret (enum Iron, type externe…).
+    /// `Result[T]` (sans `E`) reste `Type::Result(T)` = `Result<T, IronError>` (rétro-compat, D5).
+    ResultE(Box<Type>, Box<Type>),
     /// Type Rust opaque (interop 50200) — stocke le chemin Rust.
     Extern(String),
     /// Enum utilisateur (V3, 20300).

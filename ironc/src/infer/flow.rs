@@ -9,8 +9,8 @@ use crate::ir::*;
 
 /// Type de retour effectif (I11).
 pub(crate) fn effective_ret(declared: &Type, body: &[Stmt]) -> Type {
-    // Annotation explicite Option/Result : prime.
-    if matches!(declared, Type::Option(_) | Type::Result(_)) {
+    // Annotation explicite Option/Result (y compris `Result[T, E]` typé, 21500) : prime.
+    if matches!(declared, Type::Option(_) | Type::Result(_) | Type::ResultE(..)) {
         return declared.clone();
     }
     // Sans type concret annoté, pas d'inférence (T inconnu) — `rustc` filet.

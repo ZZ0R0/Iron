@@ -126,7 +126,9 @@ impl Inf<'_> {
             [v] => match (v.as_str(), scrut) {
                 ("Some", Type::Option(t)) => vec![(**t).clone()],
                 ("Ok", Type::Result(t)) => vec![(**t).clone()],
+                ("Ok", Type::ResultE(t, _)) => vec![(**t).clone()], // `Result[T, E]` (21500) : `Ok(x)` lie `T`
                 ("Err", Type::Result(_)) => vec![Type::Str],
+                ("Err", Type::ResultE(_, e)) => vec![(**e).clone()], // `Err(e)` lie `E`
                 _ => Vec::new(),
             },
             [en, var] => self

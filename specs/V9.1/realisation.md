@@ -21,7 +21,7 @@
 | 3.4 | 71800 | Gestionnaire d'imports VSCode | 3 | ✅ fait |
 | 3.5 | 71900 | Build/run intégrés VSCode | 3 | ✅ fait |
 | 4.1 | 21400 | Génériques utilisateur complets | 4 | ✅ fait |
-| 4.2 | 21500 | Erreurs typées `Result[T, E]` | 4 | ☐ todo |
+| 4.2 | 21500 | Erreurs typées `Result[T, E]` | 4 | ✅ fait |
 | 4.3 | 21600 | Closures avancées | 4 | ✅ fait |
 | 4.4 | 72000 | `ironc repl` | 4 | ✅ fait |
 | 4.5 | 72100 | Gestion de paquets | 4 | ✅ fait |
@@ -61,10 +61,13 @@ pas d'un type-checker Iron maison. La surcouche, comme le codegen.
   trou de langage — **suites inline** (`def f(): return x`, `if c: y`) — désormais supportées dans `block()`.
 - **4.5** paquets : `ironc add` (rustdoc→`.iri`) · `remove` · `update` (re-bind) — chaîne e2e prouvée (itoa).
 - **4.6** `ironc doc` (overlay rustdoc → HTML).
+- **4.2** erreurs typées `Result[T, E]` : variante additive `Type::ResultE(T,E)` (zéro régression sur les 21
+  sites `Result(T)`). `Result[T]` reste `Result<T, IronError>`. `raise`/`err` → `Err(e.into())` (typé) ;
+  `?` propage `E` ; `try/except e:` lie `e: E` (type capturé **du corps**, pas de la fn englobante) et le
+  handler `match`e dessus. Mismatch → erreur rustc remontée (filet). Fixture `typed_errors.irn`.
 - **2.2** source-maps : la ligne marche déjà (granularité expression = raffinement non fait).
 
-**☐ RESTE** : 4.2 erreurs typées `Result[T,E]` (D5, lourd) · 4.7 debugger ·
-Vague 5 (5.1 doc 0.1% · 5.2 batterie-30 · 5.3 gate).
+**☐ RESTE** : 4.7 debugger · Vague 5 (5.1 doc 0.1% · 5.2 batterie-30 · 5.3 gate).
 
 ## Écarts / faiblesses (relevés)
 
@@ -75,6 +78,12 @@ Vague 5 (5.1 doc 0.1% · 5.2 batterie-30 · 5.3 gate).
 - Le REPL étant ligne-à-ligne, les blocs multi-lignes ne s'y saisissent pas ; on a donc ajouté les **suites
   inline** au parser (`def f(): return x`). Limite assumée V0 : **une** instruction inline (pas de `a; b`
   chaîné). Couvre def/méthodes/if/while/for (tout passe par `block()`).
+- 4.2 a révélé un bug **préexistant** : un `try/except` au *tail* d'une fn renvoyant une valeur ne compilait
+  pas (E0317, chute non typée vue par rustc) — y compris en `IronError`. Corrigé généralement : quand le
+  corps du `try` diverge sur le chemin de succès (`definitely_returns`), le `if let` reçoit `else
+  unreachable!()` ⇒ totalité prouvée. Bénéficie aussi au cas `IronError`.
+- Extern `Result[T, E]` (binding `.iri`) hors-scope V0 : les fns externes restent `Result[T]`→`IronError`
+  (le mapping `.map_err(IronError)` ne s'applique qu'à `Result(_)`). Erreurs typées = fns Iron pour l'instant.
 
 ## Hors V9.1 (le « 0.1 % », spec 90600)
 
