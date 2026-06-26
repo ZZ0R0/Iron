@@ -339,6 +339,80 @@ pub fn add(crate_name: &str) -> CResult<()> {
     Ok(())
 }
 
+/// `ironc build --debug <file>` (V9.1, 72300) : build debug (DWARF rustc conservé) **+** export de la
+/// source-map I8 dans `sourcemap.json` (ligne Rust → ligne Iron) **+** un `launch.json` CodeLLDB. C'est
+/// l'application directe de I8 : le debugger est le consommateur ultime des source-maps. Le mapping fin
+/// `.irn`-breakpoint → `.rs`-line est dérivable de `sourcemap.json` par un adaptateur DAP (post-v0).
+pub fn build_debug(input: &Path) -> CResult<PathBuf> {
+    let src = std::fs::read_to_string(input)
+        .map_err(|e| CompileError::msg(format!("lecture {} : {e}", input.display())))?;
+    let base_dir = input.parent().unwrap_or(Path::new("."));
+    let compiled = compile(&src, 0, base_dir)?;
+    let out_dir = out_dir_for(input);
+    emit_project(&out_dir, &compiled.rust_src, &compiled.crates)
+        .map_err(|e| CompileError::msg(format!("émission projet : {e}")))?;
+    let output = Command::new("cargo")
+        .args(["build"]) // cargo build = profil debug ⇒ DWARF présent (pas de strip)
+        .current_dir(&out_dir)
+        .output()
+        .map_err(|e| CompileError::msg(format!("cargo introuvable : {e}")))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(CompileError::msg(remontee(&stderr, &compiled, &src, input)));
+    }
+    write_debug_artifacts(input, &src, &out_dir, &compiled)?;
+    let bin = out_dir.join("target/debug/iron_out");
+    println!("build debug : {}", bin.display());
+    println!("source-map  : {}", out_dir.join("sourcemap.json").display());
+    println!("launch.json : {} (CodeLLDB ; copier dans .vscode/)", out_dir.join("launch.json").display());
+    Ok(out_dir)
+}
+
+/// Écrit `sourcemap.json` (map ligne Rust → ligne Iron, fichier principal) + `launch.json` (CodeLLDB).
+fn write_debug_artifacts(input: &Path, src: &str, out_dir: &Path, compiled: &Compiled) -> CResult<()> {
+    // Map ligne Rust → ligne Iron (1-based) pour le fichier principal (FileId 0). Modules multi-fichiers
+    // omis au v0 (à indexer par FileId quand le besoin émerge — noté hors-périmètre 72300).
+    let mut pairs: Vec<serde_json::Value> = Vec::new();
+    for m in &compiled.mappings {
+        if m.iron.file == 0 {
+            let (line, _) = line_col(src, m.iron.start);
+            pairs.push(serde_json::json!({ "rust": m.rust_line, "iron": line }));
+        }
+    }
+    let abs = std::fs::canonicalize(input).unwrap_or_else(|_| input.to_path_buf());
+    let bin = out_dir.join("target/debug/iron_out");
+    let rs = out_dir.join("src/main.rs");
+    let map = serde_json::json!({
+        "iron_source": abs.to_string_lossy(),
+        "rust_source": rs.to_string_lossy(),
+        "binary": bin.to_string_lossy(),
+        "note": "I8 source-map : ligne `.rs` → ligne `.irn` (fichier principal). Un adaptateur DAP pose un \
+                 breakpoint Iron en cherchant la 1ʳᵉ ligne Rust dont `iron` == la ligne demandée.",
+        "mappings": pairs
+    });
+    std::fs::write(out_dir.join("sourcemap.json"), serde_json::to_string_pretty(&map).unwrap_or_default())
+        .map_err(|e| CompileError::msg(format!("écriture sourcemap.json : {e}")))?;
+    // launch.json CodeLLDB : débogue le binaire (DWARF complet sur le `.rs` généré). Les lignes Iron se
+    // relisent via `sourcemap.json` (I8). Écrit dans out_dir pour ne PAS écraser un `.vscode/` utilisateur.
+    let stem = input.file_stem().and_then(|s| s.to_str()).unwrap_or("iron");
+    let launch = serde_json::json!({
+        "version": "0.2.0",
+        "configurations": [{
+            "type": "lldb",
+            "request": "launch",
+            "name": format!("Iron: debug {stem}"),
+            "program": bin.to_string_lossy(),
+            "args": [],
+            "cwd": out_dir.to_string_lossy(),
+            "sourceLanguages": ["rust"],
+            "//": "Breakpoints sur le `.rs` généré (DWARF). Lignes Iron ↔ Rust via sourcemap.json (I8)."
+        }]
+    });
+    std::fs::write(out_dir.join("launch.json"), serde_json::to_string_pretty(&launch).unwrap_or_default())
+        .map_err(|e| CompileError::msg(format!("écriture launch.json : {e}")))?;
+    Ok(())
+}
+
 /// `ironc fmt <file>` (V9.1, 71400) : formate la source **en place** en préservant les commentaires.
 /// Valide d'abord que le fichier lexe (indentation cohérente) — on ne reformate jamais un fichier cassé.
 pub fn fmt(input: &Path) -> CResult<()> {

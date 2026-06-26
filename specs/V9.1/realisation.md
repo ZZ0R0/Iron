@@ -26,7 +26,7 @@
 | 4.4 | 72000 | `ironc repl` | 4 | ✅ fait |
 | 4.5 | 72100 | Gestion de paquets | 4 | ✅ fait |
 | 4.6 | 72200 | `ironc doc` | 4 | ✅ fait |
-| 4.7 | 72300 | Intégration debugger | 4 | ☐ todo |
+| 4.7 | 72300 | Intégration debugger | 4 | ✅ fait |
 | 5.1 | 90600 | Le « 0.1 % » tracé | 5 | ☐ todo |
 | 5.2 | 90700 | Batterie élargie 30 vrais crates | 5 | ☐ todo |
 | **5.3** | 90800 | **Gate V9.1 final** | 5 | ☐ todo |
@@ -65,9 +65,12 @@ pas d'un type-checker Iron maison. La surcouche, comme le codegen.
   sites `Result(T)`). `Result[T]` reste `Result<T, IronError>`. `raise`/`err` → `Err(e.into())` (typé) ;
   `?` propage `E` ; `try/except e:` lie `e: E` (type capturé **du corps**, pas de la fn englobante) et le
   handler `match`e dessus. Mismatch → erreur rustc remontée (filet). Fixture `typed_errors.irn`.
+- **4.7** debugger : `ironc build --debug` → binaire DWARF + `sourcemap.json` (ligne `.rs` → ligne `.irn`,
+  I8) + `launch.json` CodeLLDB + commande VSCode `Iron: Build (debug)`. Flux prouvé bout-en-bout (gdb pose
+  un breakpoint sur le `.rs`, la map retraduit l'arrêt en ligne Iron). Middleware DAP transparent = post-v0.
 - **2.2** source-maps : la ligne marche déjà (granularité expression = raffinement non fait).
 
-**☐ RESTE** : 4.7 debugger · Vague 5 (5.1 doc 0.1% · 5.2 batterie-30 · 5.3 gate).
+**☐ RESTE** : Vague 5 (5.1 doc 0.1% · 5.2 batterie-30 · 5.3 gate).
 
 ## Écarts / faiblesses (relevés)
 

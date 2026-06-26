@@ -53,6 +53,8 @@ export function activate(context: vscode.ExtensionContext) {
   reg("iron.run", () => { const t = term(); t.show(); t.sendText(`${ironcPath()} run "${file()}"`); });
   reg("iron.test", () => term().sendText(`${ironcPath()} test "${file()}"`));
   reg("iron.format", () => term().sendText(`${ironcPath()} fmt "${file()}"`));
+  // Build debug + source-map I8 + launch.json CodeLLDB (72300) : déboguer en lignes Iron via le `.rs` généré.
+  reg("iron.debug", () => { const t = term(); t.show(); t.sendText(`${ironcPath()} build --debug "${file()}"`); });
 
   // --- CodeLens « ▶ Run » au-dessus de `def main()` (71900) ---
   context.subscriptions.push(

@@ -26,7 +26,8 @@
       { "command": "iron.build", "title": "Iron: Build" },
       { "command": "iron.run", "title": "Iron: Run" },
       { "command": "iron.test", "title": "Iron: Test" },
-      { "command": "iron.format", "title": "Iron: Format" }
+      { "command": "iron.format", "title": "Iron: Format" },
+      { "command": "iron.debug", "title": "Iron: Build (debug + source-map)" }
     ],
     "configuration": {
       "title": "Iron",

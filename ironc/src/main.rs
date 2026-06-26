@@ -7,6 +7,7 @@ use std::process::exit;
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let audit = args.iter().any(|a| a == "--audit");
+    let debug = args.iter().any(|a| a == "--debug");
     let positional: Vec<&String> = args.iter().filter(|a| !a.starts_with("--")).collect();
     // `ironc lsp` : serveur de langage (stdio, sans fichier).
     if positional.first().map(|s| s.as_str()) == Some("lsp") {
@@ -25,6 +26,7 @@ fn main() {
     }
     let input = Path::new(positional[1].as_str());
     let res = match positional[0].as_str() {
+        "build" if debug => driver::build_debug(input).map(|_| ()), // build + source-map I8 + launch.json (72300)
         "build" => driver::build(input, audit).map(|_| ()),
         "run" => driver::run(input, audit),
         "test" => driver::test(input),
