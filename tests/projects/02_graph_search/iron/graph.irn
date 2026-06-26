@@ -1,0 +1,37 @@
+class Graph:
+    adj: dict[i64, list[i64]]
+    def add_node(self, u: i64):
+        if not self.adj.contains(u):
+            self.adj[u] = []
+    def add_edge(self, u: i64, v: i64):
+        self.add_node(u)
+        self.add_node(v)
+        if not self.adj[u].contains(v):
+            cu = self.adj[u]
+            cu.append(v)
+            self.adj[u] = cu
+        if not self.adj[v].contains(u):
+            cv = self.adj[v]
+            cv.append(u)
+            self.adj[v] = cv
+    def neighbors(self, u: i64) -> list[i64]:
+        return sorted(self.adj[u])
+    def nodes(self) -> list[i64]:
+        return sorted(self.adj.keys())
+    def node_count(self) -> i64:
+        return len(self.adj.keys())
+    def edge_count(self) -> i64:
+        total = 0
+        for u in sorted(self.adj.keys()):
+            total = total + len(self.adj[u])
+        return total // 2
+    def degree(self, u: i64) -> i64:
+        return len(self.adj[u])
+    def has_edge(self, u: i64, v: i64) -> bool:
+        if not self.adj.contains(u):
+            return False
+        found = False
+        for w in self.adj[u]:
+            if w == v:
+                found = True
+        return found

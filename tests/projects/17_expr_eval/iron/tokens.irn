@@ -1,0 +1,96 @@
+# Tokenizer + token model for the expression evaluator.
+#
+# A source expression is a space-separated string of tokens, e.g.
+# "3 + 4 * ( 2 - 1 )". Each piece is either an operator/parenthesis or a
+# non-negative integer literal. To keep the data flowing through the parser
+# and evaluator purely numeric (no strings in lists), every token is encoded
+# as a (kind, value) pair of integers:
+#
+#   kind == 0 (KIND_NUM): value is the integer literal.
+#   kind == 1 (KIND_OP):  value is an operator code.
+#
+# Operator codes: 0 '+', 1 '-', 2 '*', 3 '/', 4 '(', 5 ')'.
+
+def op_code(sym: str) -> i64:
+    if sym == "+":
+        return 0
+    if sym == "-":
+        return 1
+    if sym == "*":
+        return 2
+    if sym == "/":
+        return 3
+    if sym == "(":
+        return 4
+    return 5
+
+def op_symbol(code: i64) -> str:
+    if code == 0:
+        return "+"
+    if code == 1:
+        return "-"
+    if code == 2:
+        return "*"
+    if code == 3:
+        return "/"
+    if code == 4:
+        return "("
+    return ")"
+
+def is_operator_symbol(sym: str) -> bool:
+    if sym == "+":
+        return True
+    if sym == "-":
+        return True
+    if sym == "*":
+        return True
+    if sym == "/":
+        return True
+    if sym == "(":
+        return True
+    if sym == ")":
+        return True
+    return False
+
+def precedence(code: i64) -> i64:
+    if code == 2:
+        return 2
+    if code == 3:
+        return 2
+    if code == 0:
+        return 1
+    if code == 1:
+        return 1
+    return 0
+
+def tokenize(expr: str) -> list[(i64, i64)]:
+    raw = expr.split(" ")
+    toks = []
+    for piece in raw:
+        cleaned = piece.strip()
+        if len(cleaned) == 0:
+            continue
+        if is_operator_symbol(cleaned):
+            toks.append((1, op_code(cleaned)))
+        else:
+            toks.append((0, int(cleaned)))
+    return toks
+
+def count_operators(toks: list[(i64, i64)]) -> i64:
+    c = 0
+    for t in toks:
+        if t.0 == 1:
+            code = t.1
+            if code != 4:
+                if code != 5:
+                    c = c + 1
+    return c
+
+def render_tokens(toks: list[(i64, i64)]) -> str:
+    parts = []
+    for t in toks:
+        if t.0 == 0:
+            parts.append(str(t.1))
+        else:
+            parts.append(op_symbol(t.1))
+    return join(parts, " ")

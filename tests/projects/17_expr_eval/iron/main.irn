@@ -1,0 +1,65 @@
+# Driver for the infix expression evaluator.
+#
+# Pipeline per expression: tokenize -> shunting-yard (to RPN) -> stack eval.
+# For each expression we print the infix form, its RPN form and the integer
+# result, then a few aggregate statistics over the whole batch. Every printed
+# value is an integer or an explicit string, so the output is deterministic and
+# byte-identical between the Python oracle and the Iron/Rust build.
+
+import tokens
+import parser
+import eval
+
+def expressions() -> list[str]:
+    xs = []
+    xs.append("3 + 4 * 2")
+    xs.append("( 3 + 4 ) * 2")
+    xs.append("10 - 2 - 3")
+    xs.append("100 / 5 / 2")
+    xs.append("2 * 3 + 4 * 5")
+    xs.append("( 1 + 2 ) * ( 3 + 4 )")
+    xs.append("12 / 4 + 1")
+    xs.append("7 + 6 * 5 / ( 4 - 1 )")
+    xs.append("8 - ( 5 - 2 )")
+    xs.append("( ( 1 + 2 ) * 3 + 4 ) * 2")
+    xs.append("9 * 9 - 9 / 9")
+    xs.append("1 + 2 + 3 + 4 + 5 + 6")
+    return xs
+
+def main():
+    xs = expressions()
+    print(f"count={len(xs)}")
+    total = 0
+    biggest = 0
+    most_ops = 0
+    deepest = 0
+    for i, expr in enumerate(xs):
+        toks = tokenize(expr)
+        rpn = to_rpn(toks)
+        value = eval_rpn(rpn)
+        rpn_text = render_tokens(rpn)
+        ops = count_operators(toks)
+        depth = max_stack_depth(toks)
+        print(f"[{i}] {expr}")
+        print(f"    rpn= {rpn_text}")
+        print(f"    val= {value} ops= {ops} depth= {depth}")
+        total = total + value
+        if value > biggest:
+            biggest = value
+        if ops > most_ops:
+            most_ops = ops
+        if depth > deepest:
+            deepest = depth
+    print(f"sum_of_values={total}")
+    print(f"max_value={biggest}")
+    print(f"max_operators={most_ops}")
+    print(f"max_depth={deepest}")
+    even = 0
+    odd = 0
+    for expr in xs:
+        v = eval_rpn(to_rpn(tokenize(expr)))
+        if v % 2 == 0:
+            even = even + 1
+        else:
+            odd = odd + 1
+    print(f"even_results={even} odd_results={odd}")

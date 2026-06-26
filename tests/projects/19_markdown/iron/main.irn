@@ -1,0 +1,70 @@
+# Driver for the mini-Markdown to HTML converter. Builds a sample document,
+# parses it into blocks, renders the blocks to HTML lines and prints them,
+# followed by an integer statistics summary.
+
+import parser
+import render
+
+def build_document() -> str:
+    lines = []
+    lines.append("# Iron Markdown")
+    lines.append("")
+    lines.append("A **tiny** converter written for testing.")
+    lines.append("It turns plain text into HTML.")
+    lines.append("")
+    lines.append("## Features")
+    lines.append("")
+    lines.append("- Headings with **levels**")
+    lines.append("- Unordered `lists`")
+    lines.append("- Inline **bold** and `code`")
+    lines.append("")
+    lines.append("### Notes & Caveats")
+    lines.append("")
+    lines.append("Use <angle> brackets carefully.")
+    lines.append("")
+    lines.append("###### Deep heading")
+    lines.append("")
+    lines.append("- one")
+    lines.append("- two")
+    lines.append("- three")
+    return join(lines, "\n")
+
+def banner(title: str):
+    print("== " + title + " ==")
+
+def main():
+    text = build_document()
+    lines = split_lines(text)
+    blocks = parse_blocks(lines)
+
+    banner("HTML")
+    html = render_blocks(blocks)
+    for line in html:
+        print(line)
+
+    banner("STATS")
+    print("lines " + str(len(lines)))
+    print("blocks " + str(len(blocks)))
+    print("headings " + str(count_kind(blocks, "heading")))
+    print("lists " + str(count_kind(blocks, "list")))
+    print("paras " + str(count_kind(blocks, "para")))
+    print("items " + str(count_list_items(blocks)))
+    print("htmllines " + str(len(html)))
+
+    banner("INLINE")
+    samples = ["**a** and **b**", "no markup here", "**bold** `code` mix", "edge ** unbalanced"]
+    for s in samples:
+        rendered = render_inline(s)
+        spans = count_bold_spans(s)
+        print(rendered + " | " + str(spans))
+
+    banner("ESCAPE")
+    print(escape_html("a < b && c > d"))
+
+    banner("LEVELS")
+    probes = ["# one", "## two", "###### six", "######## clamp", "not a heading"]
+    for p in probes:
+        flag = "yes"
+        if not is_heading(p):
+            flag = "no"
+        print(str(heading_level(p)) + " " + flag)

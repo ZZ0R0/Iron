@@ -1,0 +1,199 @@
+import node
+
+class LinkedList:
+    head: Option[shared[Node]]
+    size: i64
+
+    def push_front(self, v: i64):
+        self.head = some(ref(Node(value=v, next=self.head)))
+        self.size = self.size + 1
+
+    def push_back(self, v: i64):
+        newn = ref(Node(value=v, next=none))
+        match self.head:
+            Some(h):
+                cur = h
+                going = True
+                while going:
+                    nxt = cur.next
+                    match nxt:
+                        Some(nx):
+                            cur = nx
+                        None:
+                            cur.next = some(newn)
+                            going = False
+            None:
+                self.head = some(newn)
+        self.size = self.size + 1
+
+    def pop_front(self) -> i64:
+        result = -1
+        match self.head:
+            Some(node):
+                result = node.value
+                self.head = node.next
+                self.size = self.size - 1
+            None:
+                pass
+        return result
+
+    def length(self) -> i64:
+        n = 0
+        cur = self.head
+        going = True
+        while going:
+            match cur:
+                Some(node):
+                    n = n + 1
+                    cur = node.next
+                None:
+                    going = False
+        return n
+
+    def total(self) -> i64:
+        s = 0
+        cur = self.head
+        going = True
+        while going:
+            match cur:
+                Some(node):
+                    s = s + node.value
+                    cur = node.next
+                None:
+                    going = False
+        return s
+
+    def to_list(self) -> list[i64]:
+        out = []
+        cur = self.head
+        going = True
+        while going:
+            match cur:
+                Some(node):
+                    out.append(node.value)
+                    cur = node.next
+                None:
+                    going = False
+        return out
+
+    def contains(self, target: i64) -> bool:
+        found = False
+        cur = self.head
+        going = True
+        while going:
+            match cur:
+                Some(node):
+                    if node.value == target:
+                        found = True
+                        going = False
+                    else:
+                        cur = node.next
+                None:
+                    going = False
+        return found
+
+    def index_of(self, target: i64) -> i64:
+        idx = 0
+        found = -1
+        cur = self.head
+        going = True
+        while going:
+            match cur:
+                Some(node):
+                    if node.value == target:
+                        found = idx
+                        going = False
+                    else:
+                        idx = idx + 1
+                        cur = node.next
+                None:
+                    going = False
+        return found
+
+    def get_at(self, pos: i64) -> i64:
+        idx = 0
+        result = -1
+        cur = self.head
+        going = True
+        while going:
+            match cur:
+                Some(node):
+                    if idx == pos:
+                        result = node.value
+                        going = False
+                    else:
+                        idx = idx + 1
+                        cur = node.next
+                None:
+                    going = False
+        return result
+
+    def max_value(self) -> i64:
+        best = -1000000
+        cur = self.head
+        going = True
+        while going:
+            match cur:
+                Some(node):
+                    if node.value > best:
+                        best = node.value
+                    cur = node.next
+                None:
+                    going = False
+        return best
+
+    def min_value(self) -> i64:
+        best = 1000000
+        cur = self.head
+        going = True
+        while going:
+            match cur:
+                Some(node):
+                    if node.value < best:
+                        best = node.value
+                    cur = node.next
+                None:
+                    going = False
+        return best
+
+    def count_value(self, target: i64) -> i64:
+        c = 0
+        cur = self.head
+        going = True
+        while going:
+            match cur:
+                Some(node):
+                    if node.value == target:
+                        c = c + 1
+                    cur = node.next
+                None:
+                    going = False
+        return c
+
+    def reverse(self):
+        prev = none
+        cur = self.head
+        going = True
+        while going:
+            match cur:
+                Some(node):
+                    nxt = node.next
+                    node.next = prev
+                    prev = some(node)
+                    cur = nxt
+                None:
+                    going = False
+        self.head = prev
+
+    def remove_value(self, target: i64) -> i64:
+        removed = 0
+        kept = LinkedList(head=none, size=0)
+        vals = self.to_list()
+        for v in vals:
+            if v == target:
+                removed = removed + 1
+            else:
+                kept.push_back(v)
+        self.head = kept.head
+        self.size = kept.size
+        return removed

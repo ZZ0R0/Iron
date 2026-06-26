@@ -1,0 +1,87 @@
+from date import Date, is_leap, days_in_month, days_in_year, day_of_year, is_valid
+from calc import zeller, weekday_name, is_weekend, day_diff, add_days, count_weekends, count_leaps
+
+
+def yn(b):
+    if b:
+        return "yes"
+    return "no"
+
+
+def main():
+    leaps = []
+    for y in [1900, 1996, 2000, 2001, 2024, 2100]:
+        leaps.append(is_leap(y))
+    parts = []
+    for b in leaps:
+        parts.append(yn(b))
+    print(",".join(parts))
+
+    lengths = []
+    for m in range(1, 13):
+        lengths.append(days_in_month(2024, m))
+    print(lengths)
+    print(days_in_year(2024))
+    print(days_in_year(2023))
+
+    print(day_of_year(2024, 3, 1))
+    print(day_of_year(2023, 3, 1))
+    print(day_of_year(2024, 12, 31))
+
+    names = []
+    for d in [1, 2, 3, 4, 5, 6, 7]:
+        names.append(weekday_name(2024, 1, d))
+    print(",".join(names))
+
+    idx = []
+    for y in [2000, 2024, 2025, 2026]:
+        idx.append(zeller(y, 1, 1))
+    print(idx)
+
+    wk = []
+    for d in [10, 11, 12, 13]:
+        wk.append(yn(is_weekend(2024, 1, d)))
+    print(",".join(wk))
+
+    print(day_diff(2024, 1, 1, 2024, 12, 31))
+    print(day_diff(2000, 1, 1, 2024, 1, 1))
+    print(day_diff(2024, 2, 28, 2024, 3, 1))
+    print(day_diff(2023, 2, 28, 2023, 3, 1))
+
+    r = add_days(2024, 1, 1, 100)
+    print(r.label())
+    r = add_days(2024, 12, 31, 1)
+    print(r.label())
+    r = add_days(2024, 3, 1, -1)
+    print(r.label())
+    r = add_days(2020, 1, 1, 1000)
+    print(r.label())
+
+    valids = []
+    for t in [29, 30, 31]:
+        valids.append(yn(is_valid(2024, 2, t)))
+    print(",".join(valids))
+    valids = []
+    for t in [29, 30, 31]:
+        valids.append(yn(is_valid(2023, 2, t)))
+    print(",".join(valids))
+
+    we = []
+    we_total = 0
+    for m in range(1, 13):
+        c = count_weekends(2024, m)
+        we.append(c)
+        we_total = we_total + c
+    print(we)
+    print(we_total)
+
+    print(count_leaps(1900, 2000))
+    print(count_leaps(2000, 2100))
+
+    base = Date(year=2024, month=6, day=15)
+    print(base.ordinal())
+    print(base.label())
+    print(weekday_name(base.year, base.month, base.day))
+
+
+main()

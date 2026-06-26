@@ -1,0 +1,6 @@
+class Node:
+    value: i64
+    next: Option[shared[Node]]
+
+def make_node(value: i64) -> shared[Node]:
+    return ref(Node(value=value, next=none))

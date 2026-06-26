@@ -1,0 +1,89 @@
+# Gradebook analytics over a roster (list of Student): mentions, ranking,
+# distribution, per-course statistics, class-wide aggregates, honor roll.
+
+import student
+
+def mention(avg: i64) -> str:
+    if avg >= 90:
+        return "A"
+    elif avg >= 80:
+        return "B"
+    elif avg >= 70:
+        return "C"
+    elif avg >= 60:
+        return "D"
+    else:
+        return "F"
+
+def ranking(roster: list[Student]) -> list[(i64, str)]:
+    pairs = []
+    for s in roster:
+        pairs.append((-s.average(), s.name))
+    pairs.sort()
+    return pairs
+
+def distribution(roster: list[Student]) -> dict[str, i64]:
+    counts = {}
+    counts["A"] = 0
+    counts["B"] = 0
+    counts["C"] = 0
+    counts["D"] = 0
+    counts["F"] = 0
+    for s in roster:
+        m = mention(s.average())
+        counts[m] = counts[m] + 1
+    return counts
+
+def course_sums(roster: list[Student]) -> dict[str, i64]:
+    sums = {}
+    for s in roster:
+        i = 0
+        while i < len(s.courses):
+            c = s.courses[i]
+            g = s.grades[i]
+            if sums.contains(c):
+                sums[c] = sums[c] + g
+            else:
+                sums[c] = g
+            i = i + 1
+    return sums
+
+def course_counts(roster: list[Student]) -> dict[str, i64]:
+    cnts = {}
+    for s in roster:
+        i = 0
+        while i < len(s.courses):
+            c = s.courses[i]
+            if cnts.contains(c):
+                cnts[c] = cnts[c] + 1
+            else:
+                cnts[c] = 1
+            i = i + 1
+    return cnts
+
+def course_high(roster: list[Student], course: str) -> i64:
+    high = -1
+    for s in roster:
+        g = s.grade_in(course)
+        if g > high:
+            high = g
+    return high
+
+def class_total(roster: list[Student]) -> i64:
+    t = 0
+    for s in roster:
+        t = t + s.average()
+    return t
+
+def class_average(roster: list[Student]) -> i64:
+    n = len(roster)
+    if n == 0:
+        return 0
+    return class_total(roster) // n
+
+def honor_count(roster: list[Student]) -> i64:
+    c = 0
+    for s in roster:
+        if s.average() >= 90:
+            c = c + 1
+    return c

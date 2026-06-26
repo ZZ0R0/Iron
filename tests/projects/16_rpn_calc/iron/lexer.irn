@@ -1,0 +1,32 @@
+# Lexer for the RPN calculator: turns a raw string into a list of token
+# strings and classifies them (operators, stack commands, names/numbers).
+
+def tokenize(expr: str) -> list[str]:
+    raw = expr.split(" ")
+    toks = []
+    for piece in raw:
+        cleaned = piece.strip()
+        if len(cleaned) > 0:
+            toks.append(cleaned)
+    return toks
+
+def is_binary_op(t: str) -> bool:
+    ops = ["+", "-", "*", "/", "%", "^"]
+    return t in ops
+
+def is_unary_op(t: str) -> bool:
+    ops = ["neg", "abs"]
+    return t in ops
+
+def is_command(t: str) -> bool:
+    cmds = ["dup", "drop", "swap", "over", "sum", "clr"]
+    return t in cmds
+
+def is_reserved(t: str) -> bool:
+    if is_binary_op(t):
+        return True
+    if is_unary_op(t):
+        return True
+    if is_command(t):
+        return True
+    return False

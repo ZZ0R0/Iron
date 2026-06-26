@@ -1,0 +1,36 @@
+# Evaluate a postfix (RPN) token list with an integer stack machine.
+#
+# Numbers are pushed; an operator pops its two operands (right operand on top),
+# applies the operation and pushes the result. Division is floor division on
+# non-negative operands, which matches Rust integer division on the inputs the
+# driver uses. The final stack top is the value of the expression.
+#
+# Operator codes: 0 '+', 1 '-', 2 '*', 3 '/'.
+
+def apply_op(code: i64, a: i64, b: i64) -> i64:
+    if code == 0:
+        return a + b
+    if code == 1:
+        return a - b
+    if code == 2:
+        return a * b
+    if code == 3:
+        return a // b
+    return 0
+
+def eval_rpn(rpn: list[(i64, i64)]) -> i64:
+    stack = []
+    for t in rpn:
+        kind = t.0
+        val = t.1
+        if kind == 0:
+            stack.append(val)
+        else:
+            n = len(stack)
+            b = stack[n - 1]
+            a = stack[n - 2]
+            stack.pop()
+            stack.pop()
+            stack.append(apply_op(val, a, b))
+    n = len(stack)
+    return stack[n - 1]

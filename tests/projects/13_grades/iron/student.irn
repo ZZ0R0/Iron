@@ -1,0 +1,46 @@
+# Student model: a name plus parallel lists of course names and integer grades.
+
+class Student:
+    name: str
+    courses: list[str]
+    grades: list[i64]
+
+    def count(self) -> i64:
+        return len(self.grades)
+
+    def total(self) -> i64:
+        t = 0
+        for g in self.grades:
+            t = t + g
+        return t
+
+    def average(self) -> i64:
+        n = len(self.grades)
+        if n == 0:
+            return 0
+        return self.total() // n
+
+    def best(self) -> i64:
+        if len(self.grades) == 0:
+            return 0
+        return max(self.grades)
+
+    def worst(self) -> i64:
+        if len(self.grades) == 0:
+            return 0
+        return min(self.grades)
+
+    def passed(self, threshold: i64) -> i64:
+        c = 0
+        for g in self.grades:
+            if g >= threshold:
+                c = c + 1
+        return c
+
+    def grade_in(self, course: str) -> i64:
+        i = 0
+        while i < len(self.courses):
+            if self.courses[i] == course:
+                return self.grades[i]
+            i = i + 1
+        return -1

@@ -1,0 +1,67 @@
+# CSV parsing layer: split raw text into rows and fields, then build typed
+# Record objects (dept, name, age, salary). A "table" is just a list[Record].
+
+class Record:
+    dept: str
+    name: str
+    age: i64
+    salary: i64
+
+
+def field_of(r: Record, key: str) -> str:
+    if key == "dept":
+        return r.dept
+    if key == "name":
+        return r.name
+    return ""
+
+
+def number_of(r: Record, key: str) -> i64:
+    if key == "age":
+        return r.age
+    if key == "salary":
+        return r.salary
+    return 0
+
+
+def split_line(line: str, sep: str) -> list[str]:
+    fields = []
+    for raw in line.split(sep):
+        fields.append(raw.strip())
+    return fields
+
+
+def split_rows(text: str) -> list[str]:
+    rows = []
+    for line in text.split("\n"):
+        cleaned = line.strip()
+        if len(cleaned) > 0:
+            rows.append(cleaned)
+    return rows
+
+
+def parse_table(text: str, sep: str) -> list[Record]:
+    rows = split_rows(text)
+    records = []
+    i = 0
+    for row in rows:
+        if i == 0:
+            i = i + 1
+            continue
+        cells = split_line(row, sep)
+        if len(cells) < 4:
+            continue
+        dept = cells[0]
+        name = cells[1]
+        age = int(cells[2])
+        salary = int(cells[3])
+        records.append(Record(dept=dept, name=name, age=age, salary=salary))
+        i = i + 1
+    return records
+
+
+def header_of(text: str, sep: str) -> list[str]:
+    rows = split_rows(text)
+    if len(rows) == 0:
+        return []
+    return split_line(rows[0], sep)

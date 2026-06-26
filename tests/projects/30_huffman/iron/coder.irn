@@ -1,0 +1,77 @@
+# Frequency analysis and the numeric reporting around a Huffman tree.
+# Characters are mapped to integer symbol ids in sorted character order, so the
+# whole pipeline (ids, tree, code lengths) is deterministic and prints as plain
+# integers / explicit strings only.
+
+
+def char_at(text: str, i: i64) -> str:
+    return text[i:i + 1]
+
+
+def distinct_sorted_chars(text: str) -> list[str]:
+    seen = {}
+    for i in range(len(text)):
+        c = char_at(text, i)
+        if not seen.contains(c):
+            seen[c] = 1
+    chars = []
+    for k in sorted(seen.keys()):
+        chars.append(k)
+    return chars
+
+
+def frequencies(text: str, chars: list[str]) -> list[i64]:
+    counts = []
+    for j in range(len(chars)):
+        counts.append(0)
+    index = {}
+    for j in range(len(chars)):
+        index[chars[j]] = j
+    for i in range(len(text)):
+        c = char_at(text, i)
+        j = index[c]
+        counts[j] = counts[j] + 1
+    return counts
+
+
+def total_symbols(counts: list[i64]) -> i64:
+    total = 0
+    for c in counts:
+        total = total + c
+    return total
+
+
+def original_bits(counts: list[i64], width: i64) -> i64:
+    return total_symbols(counts) * width
+
+
+def fixed_width(n: i64) -> i64:
+    if n <= 1:
+        return 1
+    bits = 0
+    span = 1
+    while span < n:
+        span = span * 2
+        bits = bits + 1
+    return bits
+
+
+def compressed_bits(counts: list[i64], lengths: dict[i64, i64]) -> i64:
+    total = 0
+    for j in range(len(counts)):
+        total = total + counts[j] * lengths[j]
+    return total
+
+
+def weighted_path_length(freq: list[i64], sym: list[i64], count: i64) -> i64:
+    total = 0
+    for i in range(count):
+        if sym[i] == -1:
+            total = total + freq[i]
+    return total
+
+
+def saving_permille(original: i64, compressed: i64) -> i64:
+    if original == 0:
+        return 0
+    return (original - compressed) * 1000 // original

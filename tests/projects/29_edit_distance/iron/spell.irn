@@ -1,0 +1,84 @@
+# A tiny spell checker: given a dictionary of known words, find the closest
+# entry to a query using Levenshtein distance. Ties are broken alphabetically
+# so the chosen suggestion is fully deterministic.
+
+import distance
+
+
+class Dictionary:
+    words: list[str]
+
+    def size(self) -> i64:
+        return len(self.words)
+
+    def is_known(self, word: str) -> bool:
+        for w in self.words:
+            if w == word:
+                return True
+        return False
+
+    def min_distance(self, word: str) -> i64:
+        best = -1
+        for w in self.words:
+            d = levenshtein(word, w)
+            if best < 0 or d < best:
+                best = d
+        return best
+
+    def best_match(self, word: str) -> str:
+        best_word = ""
+        best_dist = -1
+        for w in self.words:
+            d = levenshtein(word, w)
+            take = False
+            if best_dist < 0:
+                take = True
+            elif d < best_dist:
+                take = True
+            elif d == best_dist and w < best_word:
+                take = True
+            if take:
+                best_dist = d
+                best_word = w
+        return best_word
+
+    def ranked(self, word: str) -> list[(i64, str)]:
+        pairs = []
+        for w in self.words:
+            d = levenshtein(word, w)
+            pairs.append((d, w))
+        pairs.sort()
+        return pairs
+
+    def suggest(self, word: str, k: i64) -> list[str]:
+        pairs = self.ranked(word)
+        out = []
+        i = 0
+        for p in pairs:
+            if i >= k:
+                break
+            out.append(p.1)
+            i = i + 1
+        return out
+
+    def within(self, word: str, radius: i64) -> i64:
+        count = 0
+        for w in self.words:
+            if levenshtein(word, w) <= radius:
+                count = count + 1
+        return count
+
+
+def make_dictionary(words: list[str]) -> Dictionary:
+    d = Dictionary(words=words)
+    return d
+
+
+def correct_text(d: Dictionary, tokens: list[str]) -> list[str]:
+    out = []
+    for tok in tokens:
+        if d.is_known(tok):
+            out.append(tok)
+        else:
+            out.append(d.best_match(tok))
+    return out

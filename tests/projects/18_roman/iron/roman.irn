@@ -1,0 +1,55 @@
+# Bidirectional Roman numeral conversion.
+# Encoding uses the standard subtractive-notation table.
+# Decoding counts non-overlapping tokens via replace/len so that no
+# character indexing is required (keeps the mirror straightforward).
+
+def count_token(s: str, tok: str) -> i64:
+    after = s.replace(tok, "")
+    removed = len(s) - len(after)
+    return removed // len(tok)
+
+def to_roman(n: i64) -> str:
+    values = [1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1]
+    symbols = ["M", "CM", "D", "CD", "C", "XC", "L", "XL", "X", "IX", "V", "IV", "I"]
+    result = ""
+    i = 0
+    while i < len(values):
+        v = values[i]
+        sym = symbols[i]
+        while n >= v:
+            result = result + sym
+            n = n - v
+        i = i + 1
+    return result
+
+def from_roman(s: str) -> i64:
+    sub_values = [900, 400, 90, 40, 9, 4]
+    sub_symbols = ["CM", "CD", "XC", "XL", "IX", "IV"]
+    one_values = [1000, 500, 100, 50, 10, 5, 1]
+    one_symbols = ["M", "D", "C", "L", "X", "V", "I"]
+    total = 0
+    work = s
+    i = 0
+    while i < len(sub_symbols):
+        tok = sub_symbols[i]
+        c = count_token(work, tok)
+        total = total + c * sub_values[i]
+        work = work.replace(tok, "")
+        i = i + 1
+    i = 0
+    while i < len(one_symbols):
+        tok = one_symbols[i]
+        c = count_token(work, tok)
+        total = total + c * one_values[i]
+        work = work.replace(tok, "")
+        i = i + 1
+    return total
+
+def only_valid_chars(s: str) -> bool:
+    one_symbols = ["M", "D", "C", "L", "X", "V", "I"]
+    work = s
+    i = 0
+    while i < len(one_symbols):
+        work = work.replace(one_symbols[i], "")
+        i = i + 1
+    return len(work) == 0

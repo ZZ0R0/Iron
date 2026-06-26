@@ -1,0 +1,108 @@
+def bfs(gr: Graph, start: i64) -> list[i64]:
+    order = []
+    visited = {}
+    visited[start] = True
+    queue = [start]
+    head = 0
+    while head < len(queue):
+        u = queue[head]
+        head = head + 1
+        order.append(u)
+        for v in gr.neighbors(u):
+            if not visited.contains(v):
+                visited[v] = True
+                queue.append(v)
+    return order
+
+def dfs(gr: Graph, start: i64) -> list[i64]:
+    order = []
+    visited = {}
+    stack = [start]
+    while len(stack) > 0:
+        top = len(stack) - 1
+        u = stack[top]
+        stack.pop()
+        if not visited.contains(u):
+            visited[u] = True
+            order.append(u)
+            nb = gr.neighbors(u)
+            nb.reverse()
+            for v in nb:
+                if not visited.contains(v):
+                    stack.append(v)
+    return order
+
+def components(gr: Graph) -> list[list[i64]]:
+    visited = {}
+    comps = []
+    for s in gr.nodes():
+        if not visited.contains(s):
+            comp = []
+            queue = [s]
+            head = 0
+            visited[s] = True
+            while head < len(queue):
+                u = queue[head]
+                head = head + 1
+                comp.append(u)
+                for v in gr.neighbors(u):
+                    if not visited.contains(v):
+                        visited[v] = True
+                        queue.append(v)
+            comps.append(sorted(comp))
+    return comps
+
+def bfs_distances(gr: Graph, start: i64) -> dict[i64, i64]:
+    dist = {}
+    dist[start] = 0
+    queue = [start]
+    head = 0
+    while head < len(queue):
+        u = queue[head]
+        head = head + 1
+        du = dist[u]
+        for v in gr.neighbors(u):
+            if not dist.contains(v):
+                dist[v] = du + 1
+                queue.append(v)
+    return dist
+
+def shortest_path(gr: Graph, src: i64, dst: i64) -> list[i64]:
+    parent = {}
+    parent[src] = -1
+    queue = [src]
+    head = 0
+    while head < len(queue):
+        u = queue[head]
+        head = head + 1
+        for v in gr.neighbors(u):
+            if not parent.contains(v):
+                parent[v] = u
+                queue.append(v)
+    path = []
+    if parent.contains(dst):
+        cur = dst
+        while cur != -1:
+            path.append(cur)
+            cur = parent[cur]
+        path.reverse()
+    return path
+
+def is_reachable(gr: Graph, src: i64, dst: i64) -> bool:
+    dist = bfs_distances(gr, src)
+    return dist.contains(dst)
+
+def is_connected(gr: Graph) -> bool:
+    ns = gr.nodes()
+    if len(ns) == 0:
+        return True
+    dist = bfs_distances(gr, ns[0])
+    return len(dist.keys()) == len(ns)
+
+def eccentricity(gr: Graph, start: i64) -> i64:
+    dist = bfs_distances(gr, start)
+    ecc = 0
+    for k in sorted(dist.keys()):
+        if dist[k] > ecc:
+            ecc = dist[k]
+    return ecc

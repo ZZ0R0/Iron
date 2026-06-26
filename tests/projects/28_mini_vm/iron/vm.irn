@@ -1,0 +1,127 @@
+# The stack virtual machine: an operand stack, an integer register file and an
+# instruction pointer. `run` executes a program until it hits HALT (or runs off
+# the end) and records every value produced by an EMIT instruction. Sample
+# programs use only non-negative arithmetic, so // and % match Python exactly.
+
+import op
+
+class Stack:
+    data: list[i64]
+    def push(self, v: i64):
+        self.data.append(v)
+    def pop(self) -> i64:
+        n = len(self.data)
+        top = self.data[n - 1]
+        self.data.pop()
+        return top
+    def peek(self) -> i64:
+        n = len(self.data)
+        return self.data[n - 1]
+    def size(self) -> i64:
+        return len(self.data)
+
+def new_stack() -> Stack:
+    return Stack(data=[])
+
+class VM:
+    stack: Stack
+    regs: dict[i64, i64]
+    output: list[i64]
+    steps: i64
+    def get_reg(self, r: i64) -> i64:
+        if r in self.regs:
+            return self.regs[r]
+        return 0
+    def set_reg(self, r: i64, v: i64):
+        self.regs[r] = v
+    def run(self, prog: list[Op]) -> i64:
+        ip = 0
+        n = len(prog)
+        running = True
+        while running:
+            if ip >= n:
+                running = False
+            else:
+                instr = prog[ip]
+                ip = ip + 1
+                self.steps = self.steps + 1
+                match instr:
+                    Op.Push(v):
+                        self.stack.push(v)
+                    Op.Load(r):
+                        rv = self.get_reg(r)
+                        self.stack.push(rv)
+                    Op.Store(r):
+                        sv = self.stack.pop()
+                        self.set_reg(r, sv)
+                    Op.Add:
+                        b = self.stack.pop()
+                        a = self.stack.pop()
+                        self.stack.push(a + b)
+                    Op.Sub:
+                        b = self.stack.pop()
+                        a = self.stack.pop()
+                        self.stack.push(a - b)
+                    Op.Mul:
+                        b = self.stack.pop()
+                        a = self.stack.pop()
+                        self.stack.push(a * b)
+                    Op.Div:
+                        b = self.stack.pop()
+                        a = self.stack.pop()
+                        self.stack.push(a // b)
+                    Op.Mod:
+                        b = self.stack.pop()
+                        a = self.stack.pop()
+                        self.stack.push(a % b)
+                    Op.Neg:
+                        a = self.stack.pop()
+                        self.stack.push(-a)
+                    Op.Dup:
+                        a = self.stack.peek()
+                        self.stack.push(a)
+                    Op.Swap:
+                        b = self.stack.pop()
+                        a = self.stack.pop()
+                        self.stack.push(b)
+                        self.stack.push(a)
+                    Op.Drop:
+                        self.stack.pop()
+                    Op.Cmpeq:
+                        b = self.stack.pop()
+                        a = self.stack.pop()
+                        if a == b:
+                            self.stack.push(1)
+                        else:
+                            self.stack.push(0)
+                    Op.Cmplt:
+                        b = self.stack.pop()
+                        a = self.stack.pop()
+                        if a < b:
+                            self.stack.push(1)
+                        else:
+                            self.stack.push(0)
+                    Op.Jmp(t):
+                        ip = t
+                    Op.Jz(t):
+                        c = self.stack.pop()
+                        if c == 0:
+                            ip = t
+                    Op.Jnz(t):
+                        c = self.stack.pop()
+                        if c != 0:
+                            ip = t
+                    Op.Emit:
+                        ev = self.stack.pop()
+                        self.output.append(ev)
+                    Op.Halt:
+                        running = False
+        return self.steps
+
+def new_vm() -> VM:
+    return VM(stack=new_stack(), regs={}, output=[], steps=0)
+
+def execute(prog: list[Op]) -> VM:
+    m = new_vm()
+    m.run(prog)
+    return m

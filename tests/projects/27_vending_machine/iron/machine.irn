@@ -1,0 +1,121 @@
+# The vending machine itself: a small finite state machine.
+# Products live in three parallel lists (id, price in cents, stock).
+
+import state
+
+class Machine:
+    state: State
+    balance: i64
+    selected: i64
+    vended: i64
+    rejected: i64
+    revenue: i64
+    ids: list[i64]
+    prices: list[i64]
+    stock: list[i64]
+
+    def add_product(self, pid: i64, price: i64, qty: i64):
+        self.ids.append(pid)
+        self.prices.append(price)
+        self.stock.append(qty)
+
+    def slot_of(self, pid: i64) -> i64:
+        for i in range(len(self.ids)):
+            if self.ids[i] == pid:
+                return i
+        return -1
+
+    def price_of(self, pid: i64) -> i64:
+        i = self.slot_of(pid)
+        if i < 0:
+            return -1
+        return self.prices[i]
+
+    def stock_of(self, pid: i64) -> i64:
+        i = self.slot_of(pid)
+        if i < 0:
+            return -1
+        return self.stock[i]
+
+    def insert(self, coin: i64) -> i64:
+        if is_valid_coin(coin) == 0:
+            self.rejected = self.rejected + 1
+            return 0
+        self.balance = self.balance + coin
+        match self.state:
+            State.Idle:
+                self.state = State.Collecting
+            State.Collecting:
+                pass
+            State.Dispensing:
+                pass
+            State.Refunding:
+                pass
+        return 1
+
+    # Status: 2 = dispensed, 1 = need more money, 0 = out of stock / bad id.
+    def select(self, pid: i64) -> i64:
+        i = self.slot_of(pid)
+        if i < 0:
+            return 0
+        if self.stock[i] <= 0:
+            return 0
+        if self.balance < self.prices[i]:
+            self.selected = pid
+            return 1
+        self.selected = pid
+        self.state = State.Dispensing
+        return 2
+
+    # Deduct price, drop stock, bank revenue, return change in cents.
+    def dispense(self) -> i64:
+        i = self.slot_of(self.selected)
+        price = self.prices[i]
+        self.stock[i] = self.stock[i] - 1
+        self.revenue = self.revenue + price
+        change = self.balance - price
+        self.balance = 0
+        self.vended = self.vended + 1
+        self.selected = -1
+        self.state = State.Idle
+        return change
+
+    def cancel(self) -> i64:
+        refund = self.balance
+        self.balance = 0
+        self.selected = -1
+        self.state = State.Idle
+        return refund
+
+    def total_stock(self) -> i64:
+        s = 0
+        for q in self.stock:
+            s = s + q
+        return s
+
+    def show_state(self):
+        print(f"state={state_name(self.state)} balance={self.balance}")
+
+    # Drive a full purchase: feed coins, then select, dispense if possible.
+    def buy(self, pid: i64, inserted: list[i64]):
+        print(f"-- buy product {pid} --")
+        for c in inserted:
+            ok = self.insert(c)
+            tag = "ok"
+            if ok != 1:
+                tag = "rejected"
+            print(f"insert {c}: {tag} -> state={state_name(self.state)} balance={self.balance}")
+        status = self.select(pid)
+        if status == 2:
+            change = self.dispense()
+            coinsout = make_change(change)
+            print(f"select {pid}: dispensed change={change} coins={coinsout}")
+            print(f"  state={state_name(self.state)} balance={self.balance}")
+        elif status == 1:
+            need = self.price_of(pid) - self.balance
+            print(f"select {pid}: need {need} more, state={state_name(self.state)}")
+        else:
+            print(f"select {pid}: unavailable, state={state_name(self.state)}")
+
+def new_machine() -> Machine:
+    return Machine(state=State.Idle, balance=0, selected=-1, vended=0, rejected=0, revenue=0, ids=[], prices=[], stock=[])

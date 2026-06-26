@@ -1,0 +1,73 @@
+import date
+
+
+def weekdays() -> list[str]:
+    return ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+
+def zeller(year: i64, month: i64, day: i64) -> i64:
+    y = year
+    m = month
+    if m < 3:
+        m = m + 12
+        y = y - 1
+    k = y % 100
+    j = y // 100
+    h = (day + (13 * (m + 1)) // 5 + k + k // 4 + j // 4 + 5 * j) % 7
+    return (h + 5) % 7
+
+
+def weekday_name(year: i64, month: i64, day: i64) -> str:
+    names = weekdays()
+    return names[zeller(year, month, day)]
+
+
+def is_weekend(year: i64, month: i64, day: i64) -> bool:
+    w = zeller(year, month, day)
+    return w >= 5
+
+
+def day_diff(y1: i64, m1: i64, d1: i64, y2: i64, m2: i64, d2: i64) -> i64:
+    a = Date(year=y1, month=m1, day=d1)
+    b = Date(year=y2, month=m2, day=d2)
+    return b.ordinal() - a.ordinal()
+
+
+def add_days(year: i64, month: i64, day: i64, n: i64) -> Date:
+    y = year
+    m = month
+    d = day + n
+    while d > days_in_month(y, m):
+        d = d - days_in_month(y, m)
+        m = m + 1
+        if m > 12:
+            m = 1
+            y = y + 1
+    while d < 1:
+        m = m - 1
+        if m < 1:
+            m = 12
+            y = y - 1
+        d = d + days_in_month(y, m)
+    return Date(year=y, month=m, day=d)
+
+
+def count_weekends(year: i64, month: i64) -> i64:
+    total = 0
+    d = 1
+    n = days_in_month(year, month)
+    while d <= n:
+        if is_weekend(year, month, d):
+            total = total + 1
+        d = d + 1
+    return total
+
+
+def count_leaps(y1: i64, y2: i64) -> i64:
+    total = 0
+    y = y1
+    while y <= y2:
+        if is_leap(y):
+            total = total + 1
+        y = y + 1
+    return total

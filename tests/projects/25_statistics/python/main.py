@@ -1,0 +1,84 @@
+from stats import (
+    total,
+    count,
+    minimum,
+    maximum,
+    value_range,
+    mean_x100,
+    median_x100,
+    variance_x100,
+    stdev_x100,
+    modes,
+    max_frequency,
+    percentile,
+    sorted_copy,
+)
+from summary import (
+    quartile1,
+    quartile3,
+    iqr,
+    five_number,
+    outlier_count,
+    within_one_stdev,
+    coefficient_of_variation_x100,
+)
+
+
+def describe(name, xs):
+    print(f"== {name} ==")
+    print(f"n={count(xs)}")
+    print(f"sum={total(xs)}")
+    print(f"min={minimum(xs)} max={maximum(xs)} range={value_range(xs)}")
+    print(f"mean_x100={mean_x100(xs)}")
+    print(f"median_x100={median_x100(xs)}")
+    print(f"variance_x100={variance_x100(xs)}")
+    print(f"stdev_x100={stdev_x100(xs)}")
+    print(f"mode_freq={max_frequency(xs)}")
+    print(f"modes={modes(xs)}")
+    print(f"sorted={sorted_copy(xs)}")
+
+
+def describe_summary(name, xs):
+    print(f"-- summary {name} --")
+    print(f"q1={quartile1(xs)} q3={quartile3(xs)} iqr={iqr(xs)}")
+    fns = five_number(xs)
+    print(f"five_lo={fns[0]} five_q1={fns[1]} five_med={fns[2]} five_q3={fns[3]} five_hi={fns[4]}")
+    print(f"p10={percentile(xs, 10)} p50={percentile(xs, 50)} p90={percentile(xs, 90)}")
+    print(f"outliers={outlier_count(xs)}")
+    print(f"within1sd={within_one_stdev(xs)}")
+    print(f"cv_x100={coefficient_of_variation_x100(xs)}")
+
+
+def main():
+    grades = [72, 85, 90, 90, 64, 78, 85, 91, 90, 55, 88, 73]
+    temps = [12, 15, 14, 20, 18, 22, 19, 17, 16, 21, 13, 25, 24, 11]
+    sales = [100, 100, 100, 250, 250, 400, 100, 175, 175, 175, 500, 5]
+    tiny = [7, 7, 7, 7, 7]
+    pair = [10, 40]
+
+    describe("grades", grades)
+    describe_summary("grades", grades)
+    describe("temps", temps)
+    describe_summary("temps", temps)
+    describe("sales", sales)
+    describe_summary("sales", sales)
+    describe("tiny", tiny)
+    describe_summary("tiny", tiny)
+    describe("pair", pair)
+    describe_summary("pair", pair)
+
+    print("== combined ==")
+    pool = []
+    for g in grades:
+        pool.append(g)
+    for t in temps:
+        pool.append(t)
+    print(f"pool_n={count(pool)}")
+    print(f"pool_mean_x100={mean_x100(pool)}")
+    print(f"pool_median_x100={median_x100(pool)}")
+    print(f"pool_stdev_x100={stdev_x100(pool)}")
+    print(f"pool_p25={percentile(pool, 25)}")
+    print(f"pool_p75={percentile(pool, 75)}")
+
+
+main()

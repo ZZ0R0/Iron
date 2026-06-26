@@ -1,0 +1,75 @@
+from graph import Graph
+from search import bfs, dfs, components, bfs_distances
+from search import shortest_path, is_reachable, is_connected, eccentricity
+
+def build_main_graph():
+    g = Graph(adj={})
+    edges = [
+        (0, 1), (0, 2), (1, 2), (1, 3),
+        (2, 4), (3, 4), (3, 5), (4, 6),
+        (5, 6), (7, 8), (8, 9), (7, 9),
+        (10, 11),
+    ]
+    for e in edges:
+        g.add_edge(e[0], e[1])
+    return g
+
+def build_path_graph(n):
+    g = Graph(adj={})
+    i = 0
+    while i < n - 1:
+        g.add_edge(i, i + 1)
+        i = i + 1
+    return g
+
+def main():
+    g = build_main_graph()
+    print("nodes")
+    print(g.node_count())
+    print("edges")
+    print(g.edge_count())
+    print("nodelist")
+    print(g.nodes())
+    print("degrees")
+    for u in g.nodes():
+        print(f"{u}={g.degree(u)}")
+    print("bfs0")
+    print(bfs(g, 0))
+    print("dfs0")
+    print(dfs(g, 0))
+    print("bfs7")
+    print(bfs(g, 7))
+    print("components")
+    comps = components(g)
+    print(len(comps))
+    for c in comps:
+        print(c)
+    print("dist0")
+    d0 = bfs_distances(g, 0)
+    for k in sorted(d0.keys()):
+        print(f"{k}={d0[k]}")
+    print("path06")
+    print(shortest_path(g, 0, 6))
+    print("path09")
+    print(shortest_path(g, 0, 9))
+    print("path010")
+    print(shortest_path(g, 0, 10))
+    print("reach")
+    print(f"0to6={1 if is_reachable(g, 0, 6) else 0}")
+    print(f"0to9={1 if is_reachable(g, 0, 9) else 0}")
+    print(f"0to11={1 if is_reachable(g, 0, 11) else 0}")
+    print("connected")
+    print(f"{1 if is_connected(g) else 0}")
+    print("ecc")
+    for s in [0, 3, 6]:
+        print(f"{s}={eccentricity(g, s)}")
+    print("pathgraph")
+    pg = build_path_graph(8)
+    print(bfs(pg, 0))
+    print(dfs(pg, 0))
+    print(shortest_path(pg, 0, 7))
+    print(f"len={len(shortest_path(pg, 0, 7)) - 1}")
+    print(f"ecc0={eccentricity(pg, 0)}")
+    print(f"conn={1 if is_connected(pg) else 0}")
+
+main()

@@ -1,0 +1,70 @@
+import tree
+import coder
+
+
+def yes_no(b: bool) -> str:
+    if b:
+        return "yes"
+    return "no"
+
+
+def analyze(label: str, text: str):
+    print("== " + label + " ==")
+    print("textlen " + str(len(text)))
+
+    chars = distinct_sorted_chars(text)
+    print("distinct " + str(len(chars)))
+
+    counts = frequencies(text, chars)
+    total = total_symbols(counts)
+    print("total " + str(total))
+
+    syms = []
+    for j in range(len(chars)):
+        syms.append(j)
+
+    t = new_tree()
+    t.build(syms, counts)
+    print("nodes " + str(len(t.sym)))
+    print("internal " + str(t.internal_count()))
+
+    lengths = t.code_lengths()
+
+    print("CODES")
+    for j in range(len(chars)):
+        c = chars[j]
+        shown = c
+        if c == " ":
+            shown = "_"
+        print(shown + " " + str(counts[j]) + " " + str(lengths[j]))
+
+    width = fixed_width(len(chars))
+    orig = original_bits(counts, width)
+    comp = compressed_bits(counts, lengths)
+    check = weighted_path_length(t.freq, t.sym, len(t.sym))
+
+    print("width " + str(width))
+    print("origbits " + str(orig))
+    print("huffbits " + str(comp))
+    print("pathcheck " + str(check))
+    print("match " + yes_no(comp == check))
+    print("savepermille " + str(saving_permille(orig, comp)))
+
+    longest = 0
+    for j in range(len(chars)):
+        if lengths[j] > longest:
+            longest = lengths[j]
+    print("maxcode " + str(longest))
+
+
+def main():
+    samples = []
+    samples.append(("ABRA", "abracadabra"))
+    samples.append(("MISS", "mississippi"))
+    samples.append(("ROSE", "a rose is a rose is a rose"))
+    samples.append(("GEESE", "the geese see the cheese"))
+    samples.append(("SOLO", "zzzz"))
+    samples.append(("PAIR", "abab"))
+
+    for pair in samples:
+        analyze(pair.0, pair.1)

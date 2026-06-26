@@ -1,0 +1,123 @@
+def bubble_sort(xs: list[i64]) -> (list[i64], i64):
+    a = []
+    for x in xs:
+        a.append(x)
+    comparisons = 0
+    n = len(a)
+    i = 0
+    while i < n:
+        j = 0
+        while j < n - i - 1:
+            comparisons = comparisons + 1
+            if a[j] > a[j + 1]:
+                t = a[j]
+                a[j] = a[j + 1]
+                a[j + 1] = t
+            j = j + 1
+        i = i + 1
+    return a, comparisons
+
+def insertion_sort(xs: list[i64]) -> (list[i64], i64):
+    a = []
+    for x in xs:
+        a.append(x)
+    comparisons = 0
+    i = 1
+    n = len(a)
+    while i < n:
+        key = a[i]
+        j = i - 1
+        while j >= 0:
+            comparisons = comparisons + 1
+            if a[j] > key:
+                a[j + 1] = a[j]
+                j = j - 1
+            else:
+                break
+        a[j + 1] = key
+        i = i + 1
+    return a, comparisons
+
+def merge_count(left: list[i64], right: list[i64]) -> (list[i64], i64):
+    merged = []
+    comparisons = 0
+    i = 0
+    j = 0
+    nl = len(left)
+    nr = len(right)
+    while i < nl and j < nr:
+        comparisons = comparisons + 1
+        if left[i] <= right[j]:
+            merged.append(left[i])
+            i = i + 1
+        else:
+            merged.append(right[j])
+            j = j + 1
+    while i < nl:
+        merged.append(left[i])
+        i = i + 1
+    while j < nr:
+        merged.append(right[j])
+        j = j + 1
+    return merged, comparisons
+
+def merge_sort(xs: list[i64]) -> (list[i64], i64):
+    n = len(xs)
+    if n <= 1:
+        out = []
+        for x in xs:
+            out.append(x)
+        return out, 0
+    mid = n // 2
+    left_in = xs[0:mid]
+    right_in = xs[mid:n]
+    left, cl = merge_sort(left_in)
+    right, cr = merge_sort(right_in)
+    merged, cm = merge_count(left, right)
+    total = cl + cr + cm
+    return merged, total
+
+def partition(a: list[i64], lo: i64, hi: i64) -> (list[i64], i64, i64):
+    arr = []
+    for x in a:
+        arr.append(x)
+    pivot = arr[hi]
+    comparisons = 0
+    i = lo - 1
+    j = lo
+    while j < hi:
+        comparisons = comparisons + 1
+        if arr[j] <= pivot:
+            i = i + 1
+            t = arr[i]
+            arr[i] = arr[j]
+            arr[j] = t
+        j = j + 1
+    t = arr[i + 1]
+    arr[i + 1] = arr[hi]
+    arr[hi] = t
+    return arr, i + 1, comparisons
+
+def quick_recurse(a: list[i64], lo: i64, hi: i64) -> (list[i64], i64):
+    if lo >= hi:
+        return a, 0
+    a, p, c = partition(a, lo, hi)
+    a, cleft = quick_recurse(a, lo, p - 1)
+    a, cright = quick_recurse(a, p + 1, hi)
+    return a, c + cleft + cright
+
+def quick_sort(xs: list[i64]) -> (list[i64], i64):
+    a = []
+    for x in xs:
+        a.append(x)
+    a, total = quick_recurse(a, 0, len(a) - 1)
+    return a, total
+
+def is_sorted(xs: list[i64]) -> bool:
+    i = 1
+    n = len(xs)
+    while i < n:
+        if xs[i - 1] > xs[i]:
+            return False
+        i = i + 1
+    return True

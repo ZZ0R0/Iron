@@ -1,0 +1,31 @@
+# LOAN_PERIOD = 14, FINE_PER_DAY = 25 (inlined: Iron has no module-level const)
+
+class Book:
+    id: i64
+    title: str
+    total: i64
+    available: i64
+    borrow_count: i64
+
+class Member:
+    id: i64
+    name: str
+    active: i64
+    borrowed_total: i64
+    fines: i64
+
+class Loan:
+    book_id: i64
+    member_id: i64
+    checkout_day: i64
+    due_day: i64
+    returned_day: i64
+
+def fine_for(loan: Loan, current_day: i64) -> i64:
+    end = loan.returned_day
+    if end < 0:
+        end = current_day
+    over = end - loan.due_day
+    if over <= 0:
+        return 0
+    return over * 25

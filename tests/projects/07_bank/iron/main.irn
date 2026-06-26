@@ -1,0 +1,46 @@
+import bank
+import account
+
+
+def print_statement(b: Bank, aid: i64):
+    acc = b.accounts[aid]
+    print(f"-- statement acct {acc.id} ({acc.owner}) --")
+    n = acc.history_len()
+    for i in range(n):
+        k = acc.kinds[i]
+        amt = acc.amounts[i]
+        print(f"  {kind_name(k)} {amt}")
+    print(f"  balance {acc.balance}")
+
+
+def main():
+    b = Bank(name="Iron Bank", accounts=[], next_id=0, log=[])
+    alice = b.open_account("alice", 10000)
+    bob = b.open_account("bob", 5000)
+    carol = b.open_account("carol", 0)
+
+    print(f"opened {b.count()} accounts")
+
+    b.deposit(carol, 7500)
+    b.withdraw(alice, 2500)
+    r = b.withdraw(bob, 999999)
+    print(f"overdraw bob ok={r}")
+
+    t1 = b.transfer(alice, bob, 3000)
+    t2 = b.transfer(bob, carol, 1000)
+    t3 = b.transfer(carol, alice, 500000)
+    print(f"transfers {t1} {t2} {t3}")
+
+    gained = b.apply_interest_all(250)
+    print(f"interest paid {gained}")
+
+    print(f"alice balance {b.balance_of(alice)}")
+    print(f"bob balance {b.balance_of(bob)}")
+    print(f"carol balance {b.balance_of(carol)}")
+    print(f"total assets {b.total_assets()}")
+    print(f"richest acct {b.richest()}")
+    print(f"ops logged {b.ops_logged()}")
+    print(f"successful ops {b.successful_ops()}")
+
+    for aid in range(b.count()):
+        print_statement(b, aid)

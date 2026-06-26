@@ -1,0 +1,101 @@
+# Query layer over a list[Record]: filtering, group-by on a string key, and
+# integer aggregates (count, sum, average, min, max). Results come back as
+# dicts keyed by the group label so callers can sort and print deterministically.
+
+import parse
+
+
+def filter_salary_min(records: list[Record], threshold: i64) -> list[Record]:
+    out = []
+    for r in records:
+        if r.salary >= threshold:
+            out.append(r)
+    return out
+
+
+def filter_age_below(records: list[Record], threshold: i64) -> list[Record]:
+    out = []
+    for r in records:
+        if r.age < threshold:
+            out.append(r)
+    return out
+
+
+def filter_dept(records: list[Record], dept: str) -> list[Record]:
+    out = []
+    for r in records:
+        if r.dept == dept:
+            out.append(r)
+    return out
+
+
+def count_by(records: list[Record], key: str) -> dict[str, i64]:
+    counts = {}
+    for r in records:
+        g = field_of(r, key)
+        if counts.contains(g):
+            counts[g] = counts[g] + 1
+        else:
+            counts[g] = 1
+    return counts
+
+
+def sum_by(records: list[Record], key: str, value_key: str) -> dict[str, i64]:
+    sums = {}
+    for r in records:
+        g = field_of(r, key)
+        v = number_of(r, value_key)
+        if sums.contains(g):
+            sums[g] = sums[g] + v
+        else:
+            sums[g] = v
+    return sums
+
+
+def avg_by(records: list[Record], key: str, value_key: str) -> dict[str, i64]:
+    sums = sum_by(records, key, value_key)
+    counts = count_by(records, key)
+    avgs = {}
+    for g in sums.keys():
+        avgs[g] = sums[g] // counts[g]
+    return avgs
+
+
+def max_by(records: list[Record], key: str, value_key: str) -> dict[str, i64]:
+    best = {}
+    for r in records:
+        g = field_of(r, key)
+        v = number_of(r, value_key)
+        if best.contains(g):
+            if v > best[g]:
+                best[g] = v
+        else:
+            best[g] = v
+    return best
+
+
+def min_by(records: list[Record], key: str, value_key: str) -> dict[str, i64]:
+    best = {}
+    for r in records:
+        g = field_of(r, key)
+        v = number_of(r, value_key)
+        if best.contains(g):
+            if v < best[g]:
+                best[g] = v
+        else:
+            best[g] = v
+    return best
+
+
+def total_salary(records: list[Record]) -> i64:
+    t = 0
+    for r in records:
+        t = t + r.salary
+    return t
+
+
+def overall_average_salary(records: list[Record]) -> i64:
+    n = len(records)
+    if n == 0:
+        return 0
+    return total_salary(records) // n

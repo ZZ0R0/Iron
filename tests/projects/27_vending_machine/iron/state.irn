@@ -1,0 +1,59 @@
+# State machine vocabulary for the vending machine.
+# States and events are real Iron enums driven by `match`.
+
+enum State:
+    Idle
+    Collecting
+    Dispensing
+    Refunding
+
+enum Event:
+    Insert
+    Select
+    Cancel
+    Tick
+
+def state_name(s: State) -> str:
+    match s:
+        State.Idle:
+            return "IDLE"
+        State.Collecting:
+            return "COLLECTING"
+        State.Dispensing:
+            return "DISPENSING"
+        State.Refunding:
+            return "REFUNDING"
+
+def event_name(e: Event) -> str:
+    match e:
+        Event.Insert:
+            return "INSERT"
+        Event.Select:
+            return "SELECT"
+        Event.Cancel:
+            return "CANCEL"
+        Event.Tick:
+            return "TICK"
+
+# Coin denominations (cents), largest first.
+def coins() -> list[i64]:
+    return [200, 100, 50, 25, 10, 5]
+
+def is_valid_coin(c: i64) -> i64:
+    for d in coins():
+        if d == c:
+            return 1
+    return 0
+
+# Greedy change: coin values summing to `amount`, largest first.
+def make_change(amount: i64) -> list[i64]:
+    out = []
+    remaining = amount
+    for d in coins():
+        while remaining >= d:
+            out.append(d)
+            remaining = remaining - d
+    return out
+
+def change_count(amount: i64) -> i64:
+    return len(make_change(amount))

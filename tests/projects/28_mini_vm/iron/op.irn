@@ -1,0 +1,122 @@
+# Opcode definitions for the stack VM. An instruction is an `Op` enum value;
+# PUSH / LOAD / STORE / JMP / JZ / JNZ carry an integer operand, the rest carry
+# nothing. Constructors mirror the Python helpers so `main` reads identically.
+
+enum Op:
+    Push(i64)
+    Load(i64)
+    Store(i64)
+    Add
+    Sub
+    Mul
+    Div
+    Mod
+    Neg
+    Dup
+    Swap
+    Drop
+    Cmpeq
+    Cmplt
+    Jmp(i64)
+    Jz(i64)
+    Jnz(i64)
+    Emit
+    Halt
+
+def push(v: i64) -> Op:
+    return Op.Push(v)
+
+def load(r: i64) -> Op:
+    return Op.Load(r)
+
+def store(r: i64) -> Op:
+    return Op.Store(r)
+
+def add() -> Op:
+    return Op.Add
+
+def sub() -> Op:
+    return Op.Sub
+
+def mul() -> Op:
+    return Op.Mul
+
+def div() -> Op:
+    return Op.Div
+
+def modulo() -> Op:
+    return Op.Mod
+
+def neg() -> Op:
+    return Op.Neg
+
+def dup() -> Op:
+    return Op.Dup
+
+def swap() -> Op:
+    return Op.Swap
+
+def drop() -> Op:
+    return Op.Drop
+
+def cmpeq() -> Op:
+    return Op.Cmpeq
+
+def cmplt() -> Op:
+    return Op.Cmplt
+
+def jmp(t: i64) -> Op:
+    return Op.Jmp(t)
+
+def jz(t: i64) -> Op:
+    return Op.Jz(t)
+
+def jnz(t: i64) -> Op:
+    return Op.Jnz(t)
+
+def emit() -> Op:
+    return Op.Emit
+
+def halt() -> Op:
+    return Op.Halt
+
+def mnemonic(op: Op) -> str:
+    match op:
+        Op.Push(v):
+            return "PUSH " + str(v)
+        Op.Load(r):
+            return "LOAD " + str(r)
+        Op.Store(r):
+            return "STORE " + str(r)
+        Op.Add:
+            return "ADD"
+        Op.Sub:
+            return "SUB"
+        Op.Mul:
+            return "MUL"
+        Op.Div:
+            return "DIV"
+        Op.Mod:
+            return "MOD"
+        Op.Neg:
+            return "NEG"
+        Op.Dup:
+            return "DUP"
+        Op.Swap:
+            return "SWAP"
+        Op.Drop:
+            return "DROP"
+        Op.Cmpeq:
+            return "CMPEQ"
+        Op.Cmplt:
+            return "CMPLT"
+        Op.Jmp(t):
+            return "JMP " + str(t)
+        Op.Jz(t):
+            return "JZ " + str(t)
+        Op.Jnz(t):
+            return "JNZ " + str(t)
+        Op.Emit:
+            return "EMIT"
+        Op.Halt:
+            return "HALT"

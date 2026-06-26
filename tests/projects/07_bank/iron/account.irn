@@ -1,0 +1,66 @@
+# transaction kind codes: 1=deposit 2=withdraw 3=interest 4=transfer_in 5=transfer_out
+
+class Account:
+    id: i64
+    owner: str
+    balance: i64
+    kinds: list[i64]
+    amounts: list[i64]
+
+    def deposit(self, amount: i64) -> i64:
+        if amount <= 0:
+            return 0
+        self.balance = self.balance + amount
+        self.kinds.append(1)
+        self.amounts.append(amount)
+        return 1
+
+    def withdraw(self, amount: i64) -> i64:
+        if amount <= 0:
+            return 0
+        if amount > self.balance:
+            return 0
+        self.balance = self.balance - amount
+        self.kinds.append(2)
+        self.amounts.append(amount)
+        return 1
+
+    def credit(self, amount: i64, kind: i64) -> i64:
+        self.balance = self.balance + amount
+        self.kinds.append(kind)
+        self.amounts.append(amount)
+        return 1
+
+    def debit(self, amount: i64, kind: i64) -> i64:
+        if amount > self.balance:
+            return 0
+        self.balance = self.balance - amount
+        self.kinds.append(kind)
+        self.amounts.append(amount)
+        return 1
+
+    def apply_interest(self, rate_bps: i64) -> i64:
+        gain = self.balance * rate_bps // 10000
+        if gain <= 0:
+            return 0
+        self.balance = self.balance + gain
+        self.kinds.append(3)
+        self.amounts.append(gain)
+        return gain
+
+    def history_len(self) -> i64:
+        return len(self.kinds)
+
+
+def kind_name(kind: i64) -> str:
+    if kind == 1:
+        return "deposit"
+    if kind == 2:
+        return "withdraw"
+    if kind == 3:
+        return "interest"
+    if kind == 4:
+        return "transfer_in"
+    if kind == 5:
+        return "transfer_out"
+    return "unknown"

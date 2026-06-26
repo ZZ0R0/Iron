@@ -1,0 +1,11 @@
+class Item:
+    name: str
+    unit_price: i64
+    qty: i64
+
+    def line_total(self) -> i64:
+        return self.unit_price * self.qty
+
+
+def make_item(name: str, unit_price: i64, qty: i64) -> Item:
+    return Item(name=name, unit_price=unit_price, qty=qty)

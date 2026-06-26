@@ -1,0 +1,47 @@
+import item
+import pricing
+
+class Cart:
+    items: list[Item]
+
+    def add(self, it: Item):
+        self.items.append(it)
+
+    def subtotal(self) -> i64:
+        total = 0
+        for it in self.items:
+            total = total + it.line_total()
+        return total
+
+    def total_units(self) -> i64:
+        n = 0
+        for it in self.items:
+            n = n + it.qty
+        return n
+
+    def print_lines(self):
+        for it in self.items:
+            print(f"{it.name} {it.qty} x {it.unit_price} = {it.line_total()}")
+
+    def qty_discount_total(self, rules: list[QtyRule]) -> i64:
+        total = 0
+        for it in self.items:
+            total = total + line_discount(it, rules)
+        return total
+
+
+def new_cart() -> Cart:
+    empty = []
+    return Cart(items=empty)
+
+
+def checkout(cart: Cart, rules: list[QtyRule], threshold: i64, thr_percent: i64, rate_bp: i64) -> list[i64]:
+    sub = cart.subtotal()
+    qty_disc = cart.qty_discount_total(rules)
+    after_qty = sub - qty_disc
+    thr_disc = threshold_discount(after_qty, threshold, thr_percent)
+    taxable = after_qty - thr_disc
+    tax = tax_amount(taxable, rate_bp)
+    grand = taxable + tax
+    result = [sub, qty_disc, thr_disc, taxable, tax, grand]
+    return result

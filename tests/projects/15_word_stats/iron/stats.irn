@@ -1,0 +1,80 @@
+def frequencies(words: list[str]) -> dict[str, i64]:
+    counts = {}
+    for w in words:
+        if counts.contains(w):
+            counts[w] = counts[w] + 1
+        else:
+            counts[w] = 1
+    return counts
+
+
+def unique_count(counts: dict[str, i64]) -> i64:
+    return len(counts.keys())
+
+
+def top_n(counts: dict[str, i64], n: i64) -> list[(str, i64)]:
+    pairs = []
+    for k in counts.keys():
+        pairs.append((-counts[k], k))
+    pairs.sort()
+    out = []
+    i = 0
+    for p in pairs:
+        if i >= n:
+            break
+        out.append((p.1, -p.0))
+        i = i + 1
+    return out
+
+
+def avg_word_len_x100(words: list[str]) -> i64:
+    if len(words) == 0:
+        return 0
+    total = 0
+    for w in words:
+        total = total + len(w)
+    return total * 100 // len(words)
+
+
+def count_over_length(words: list[str], threshold: i64) -> i64:
+    n = 0
+    for w in words:
+        if len(w) > threshold:
+            n = n + 1
+    return n
+
+
+def length_histogram(words: list[str]) -> dict[i64, i64]:
+    hist = {}
+    for w in words:
+        length = len(w)
+        if hist.contains(length):
+            hist[length] = hist[length] + 1
+        else:
+            hist[length] = 1
+    return hist
+
+
+def hapax_count(counts: dict[str, i64]) -> i64:
+    n = 0
+    for k in counts.keys():
+        if counts[k] == 1:
+            n = n + 1
+    return n
+
+
+def max_frequency(counts: dict[str, i64]) -> i64:
+    best = 0
+    for k in counts.keys():
+        if counts[k] > best:
+            best = counts[k]
+    return best
+
+
+def words_with_frequency(counts: dict[str, i64], freq: i64) -> list[str]:
+    out = []
+    for k in counts.keys():
+        if counts[k] == freq:
+            out.append(k)
+    out.sort()
+    return out

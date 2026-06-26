@@ -1,0 +1,58 @@
+from board import make_board
+from rules import next_state
+
+
+def show(b):
+    lines = b.render()
+    i = 0
+    while i < len(lines):
+        print(lines[i])
+        i = i + 1
+
+
+def run_pattern(name, rows, cols, coords, gens):
+    b = make_board(rows, cols)
+    b.place_pattern(coords)
+    print(name)
+    print("initial:")
+    show(b)
+    pops = []
+    pops.append(b.population())
+    g = 0
+    while g < gens:
+        b.step()
+        pops.append(b.population())
+        g = g + 1
+    i = 0
+    while i < len(pops):
+        print(f"gen {i} pop {pops[i]}")
+        i = i + 1
+    print("final:")
+    show(b)
+    print("---")
+
+
+def main():
+    blinker = [[2, 1], [2, 2], [2, 3]]
+    run_pattern("blinker", 5, 5, blinker, 4)
+
+    block = [[1, 1], [1, 2], [2, 1], [2, 2]]
+    run_pattern("block", 4, 4, block, 3)
+
+    glider = [[0, 1], [1, 2], [2, 0], [2, 1], [2, 2]]
+    run_pattern("glider", 8, 8, glider, 8)
+
+    toad = [[3, 3], [3, 4], [3, 5], [4, 2], [4, 3], [4, 4]]
+    run_pattern("toad", 8, 8, toad, 4)
+
+    print("rule table:")
+    a = 0
+    while a <= 1:
+        n = 0
+        while n <= 8:
+            print(f"alive={a} n={n} -> {next_state(a, n)}")
+            n = n + 1
+        a = a + 1
+
+
+main()

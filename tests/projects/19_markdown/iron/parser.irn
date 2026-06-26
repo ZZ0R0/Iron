@@ -1,0 +1,85 @@
+# Block-level parser for mini-Markdown. Splits raw text into lines, then
+# groups consecutive lines into typed blocks: headings, list items and
+# paragraphs. Blank lines act as separators.
+
+class Block:
+    kind: str
+    level: i64
+    lines: list[str]
+    def add(self, line: str):
+        self.lines.append(line)
+    def size(self) -> i64:
+        return len(self.lines)
+
+def split_lines(text: str) -> list[str]:
+    raw = text.split("\n")
+    out = []
+    for piece in raw:
+        out.append(piece)
+    return out
+
+def is_blank(line: str) -> bool:
+    return len(line.strip()) == 0
+
+def is_heading(line: str) -> bool:
+    return line.startswith("#")
+
+def heading_level(line: str) -> i64:
+    level = 0
+    while level < len(line) and line[level:level + 1] == "#":
+        level = level + 1
+    if level > 6:
+        level = 6
+    return level
+
+def heading_text(line: str) -> str:
+    level = heading_level(line)
+    rest = line[level:]
+    return rest.strip()
+
+def is_list_item(line: str) -> bool:
+    stripped = line.strip()
+    return stripped.startswith("- ")
+
+def list_text(line: str) -> str:
+    stripped = line.strip()
+    return stripped[2:].strip()
+
+def parse_blocks(lines: list[str]) -> list[Block]:
+    blocks = []
+    cur = -1
+    for line in lines:
+        if is_blank(line):
+            cur = -1
+        elif is_heading(line):
+            b = Block(kind="heading", level=heading_level(line), lines=[])
+            b.add(heading_text(line))
+            blocks.append(b)
+            cur = -1
+        elif is_list_item(line):
+            if cur < 0 or blocks[cur].kind != "list":
+                nb = Block(kind="list", level=0, lines=[])
+                blocks.append(nb)
+                cur = len(blocks) - 1
+            blocks[cur].add(list_text(line))
+        else:
+            if cur < 0 or blocks[cur].kind != "para":
+                pb = Block(kind="para", level=0, lines=[])
+                blocks.append(pb)
+                cur = len(blocks) - 1
+            blocks[cur].add(line.strip())
+    return blocks
+
+def count_kind(blocks: list[Block], kind: str) -> i64:
+    total = 0
+    for b in blocks:
+        if b.kind == kind:
+            total = total + 1
+    return total
+
+def count_list_items(blocks: list[Block]) -> i64:
+    total = 0
+    for b in blocks:
+        if b.kind == "list":
+            total = total + b.size()
+    return total

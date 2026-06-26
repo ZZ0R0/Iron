@@ -1,0 +1,49 @@
+from team import strength_of
+
+
+def standard_bracket(n):
+    # Standard single-elimination seed order: seed 1 and 2 meet only in final.
+    order = [1]
+    size = 1
+    while size < n:
+        size = size * 2
+        nxt = []
+        for s in order:
+            nxt.append(s)
+            nxt.append(size + 1 - s)
+        order = nxt
+    return order
+
+
+def winner_of(teams, a, b):
+    sa = strength_of(teams, a)
+    sb = strength_of(teams, b)
+    if sb > sa:
+        return b
+    if sb == sa and b < a:
+        return b
+    return a
+
+
+def play(teams, a, b):
+    # Deterministic match: winner has the higher strength (tie -> lower id).
+    # Scores derived from strengths so the winner always scores more.
+    sa = strength_of(teams, a)
+    sb = strength_of(teams, b)
+    margin = abs(sa - sb) % 4 + 1
+    loser_score = min(sa, sb) % 4
+    winner_score = loser_score + margin
+    w = winner_of(teams, a, b)
+    score_a = winner_score if w == a else loser_score
+    score_b = winner_score if w == b else loser_score
+    return score_a, score_b, w
+
+
+def round_name(remaining):
+    if remaining == 2:
+        return "Final"
+    if remaining == 4:
+        return "Semifinal"
+    if remaining == 8:
+        return "Quarterfinal"
+    return "Round"

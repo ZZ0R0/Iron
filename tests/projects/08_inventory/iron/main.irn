@@ -1,0 +1,52 @@
+import product
+import store
+
+def main():
+    s = make_store()
+    s.add(make_product(101, 1, 10, 250, 4))
+    s.add(make_product(102, 2, 0, 100, 3))
+    s.add(make_product(103, 3, 30, 80, 5))
+    s.add(make_product(104, 4, 7, 500, 8))
+    s.add(make_product(105, 5, 15, 120, 6))
+
+    print(s.total_units())
+    print(s.total_value())
+
+    log = []
+    log.append((1, 101, 4))
+    log.append((0, 102, 12))
+    log.append((1, 103, 35))
+    log.append((1, 104, 3))
+    log.append((0, 105, 5))
+    log.append((1, 102, 6))
+    log.append((1, 105, 20))
+    log.append((0, 101, 2))
+    log.append((1, 104, 4))
+
+    step = 0
+    for t in log:
+        step = step + 1
+        if t.0 == 0:
+            s.receive(t.1, t.2)
+            moved = t.2
+        else:
+            moved = s.ship(t.1, t.2)
+        print(f"step {step}: sku {t.1} moved {moved} -> qty {s.products[s.find(t.1)].qty}")
+
+    print(f"shipped_total={s.shipped_total}")
+    print(f"lost_sales={s.lost_sales}")
+    print(f"out_of_stock={s.count_out()}")
+
+    low = s.low_skus()
+    print(f"low_count={len(low)}")
+    print(low)
+
+    print(f"final_units={s.total_units()}")
+    print(f"final_value={s.total_value()}")
+
+    top = s.top_n(3)
+    print(top)
+    for sku in top:
+        idx = s.find(sku)
+        p = s.products[idx]
+        print(f"rank sku {sku} qty {p.qty} value {p.value()}")

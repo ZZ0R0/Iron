@@ -1,0 +1,32 @@
+# Validation of Roman numeral strings and of the integer domain.
+# A string is a *valid* Roman numeral when it is non-empty, uses only the
+# seven Roman letters, decodes to a value in [1, 3999], and is identical to
+# the canonical encoding of that value. The canonical round-trip rejects
+# malformed forms such as "IIII", "VV", "IC" or out-of-range magnitudes.
+
+import roman
+
+def in_range(n: i64) -> bool:
+    return n >= 1 and n <= 3999
+
+def is_valid_roman(s: str) -> bool:
+    if len(s) == 0:
+        return False
+    if not only_valid_chars(s):
+        return False
+    value = from_roman(s)
+    if not in_range(value):
+        return False
+    return to_roman(value) == s
+
+def safe_decode(s: str) -> i64:
+    result = -1
+    if is_valid_roman(s):
+        result = from_roman(s)
+    return result
+
+def safe_encode(n: i64) -> str:
+    result = ""
+    if in_range(n):
+        result = to_roman(n)
+    return result

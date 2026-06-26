@@ -1,0 +1,115 @@
+from distance import levenshtein, lcs_length, hamming, is_one_edit_away
+from distance import common_prefix_len
+from spell import make_dictionary, correct_text
+
+
+def banner(title):
+    print("== " + title + " ==")
+
+
+def yesno(b):
+    if b:
+        return "yes"
+    return "no"
+
+
+def main():
+    banner("LEVENSHTEIN")
+    pairs = [("kitten", "sitting"), ("flaw", "lawn"), ("gumbo", "gambol"),
+             ("book", "back"), ("abc", "abc"), ("", "hello"),
+             ("intention", "execution")]
+    for p in pairs:
+        a = p[0]
+        b = p[1]
+        label = f"{a} {b}"
+        d = levenshtein(a, b)
+        print(f"{label} {d}")
+
+    banner("LCS")
+    for p in pairs:
+        a = p[0]
+        b = p[1]
+        label = f"{a} {b}"
+        d = lcs_length(a, b)
+        print(f"{label} {d}")
+
+    banner("HAMMING")
+    hpairs = [("karolin", "kathrin"), ("1011101", "1001001"),
+              ("abc", "abcd"), ("roses", "toned")]
+    for p in hpairs:
+        a = p[0]
+        b = p[1]
+        label = f"{a} {b}"
+        d = hamming(a, b)
+        print(f"{label} {d}")
+
+    banner("PREFIX")
+    for p in pairs:
+        a = p[0]
+        b = p[1]
+        label = f"{a} {b}"
+        d = common_prefix_len(a, b)
+        print(f"{label} {d}")
+
+    banner("ONEEDIT")
+    epairs = [("cat", "cot"), ("cat", "cats"), ("cat", "dog"),
+              ("cat", "cat"), ("cat", "at")]
+    for p in epairs:
+        a = p[0]
+        b = p[1]
+        label = f"{a} {b}"
+        flag = yesno(is_one_edit_away(a, b))
+        print(f"{label} {flag}")
+
+    words = ["apple", "apply", "ample", "maple", "april",
+             "banana", "bandana", "orange", "grape", "grasp"]
+    dict = make_dictionary(words)
+
+    banner("DICT")
+    sz = dict.size()
+    print(f"size {sz}")
+
+    banner("KNOWN")
+    queries = ["apple", "aple", "appl", "bananna", "grapp", "ornge", "xyz"]
+    for q in queries:
+        label = f"{q}"
+        flag = yesno(dict.is_known(q))
+        print(f"{label} {flag}")
+
+    banner("MINDIST")
+    for q in queries:
+        label = f"{q}"
+        md = dict.min_distance(q)
+        print(f"{label} {md}")
+
+    banner("BEST")
+    for q in queries:
+        label = f"{q}"
+        bm = dict.best_match(q)
+        print(f"{label} {bm}")
+
+    banner("SUGGEST3")
+    for q in queries:
+        label = f"{q}"
+        sg = dict.suggest(q, 3)
+        line = label
+        for w in sg:
+            line = line + " " + w
+        print(line)
+
+    banner("WITHIN2")
+    for q in queries:
+        label = f"{q}"
+        cnt = dict.within(q, 2)
+        print(f"{label} {cnt}")
+
+    banner("CORRECT")
+    sentence = ["aple", "banan", "grapp", "orang", "maple"]
+    fixed = correct_text(dict, sentence)
+    out = ""
+    for w in fixed:
+        out = out + w + " "
+    print(out)
+
+
+main()

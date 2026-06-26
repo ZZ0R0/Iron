@@ -1,0 +1,23 @@
+class Product:
+    sku: i64
+    name: i64
+    qty: i64
+    price: i64
+    reorder: i64
+
+    def value(self) -> i64:
+        return self.qty * self.price
+
+    def is_low(self) -> i64:
+        if self.qty <= self.reorder:
+            return 1
+        return 0
+
+    def is_out(self) -> i64:
+        if self.qty == 0:
+            return 1
+        return 0
+
+
+def make_product(sku: i64, name: i64, qty: i64, price: i64, reorder: i64) -> Product:
+    return Product(sku=sku, name=name, qty=qty, price=price, reorder=reorder)

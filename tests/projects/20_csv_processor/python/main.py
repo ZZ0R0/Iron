@@ -1,0 +1,100 @@
+# CSV processor demo: parse an embedded employee table, then run filters,
+# group-by aggregates, and overall stats. All output is integers / explicit
+# strings / sorted dict iteration so it stays comparable across backends.
+
+from parse import parse_table, header_of
+from query import filter_salary_min, filter_age_below, filter_dept
+from query import count_by, sum_by, avg_by, max_by, min_by
+from query import total_salary, overall_average_salary
+
+
+def build_csv():
+    lines = []
+    lines.append("dept,name,age,salary")
+    lines.append("eng,alice,34,9500")
+    lines.append("eng,bob,29,7200")
+    lines.append("eng,carol,41,11000")
+    lines.append("sales,dave,38,6100")
+    lines.append("sales,erin,26,5400")
+    lines.append("sales,frank,52,7300")
+    lines.append("ops,grace,45,6800")
+    lines.append("ops,heidi,31,5900")
+    lines.append("eng,ivan,23,4800")
+    lines.append("sales,judy,49,8200")
+    lines.append("ops,mallory,37,7100")
+    out = ""
+    for line in lines:
+        out = out + line + "\n"
+    return out
+
+
+def yesno(flag):
+    if flag:
+        return "yes"
+    return "no"
+
+
+def print_dict(title, d):
+    print("== " + title + " ==")
+    for k in sorted(d.keys()):
+        print(k + " " + str(d[k]))
+
+
+def main():
+    text = build_csv()
+    sep = ","
+
+    header = header_of(text, sep)
+    print("== header ==")
+    print(",".join(header))
+
+    records = parse_table(text, sep)
+    print("== rows ==")
+    print(len(records))
+
+    print("== records ==")
+    for r in records:
+        print(r.dept + " " + r.name + " " + str(r.age) + " " + str(r.salary))
+
+    print_dict("count_by_dept", count_by(records, "dept"))
+    print_dict("sum_salary_by_dept", sum_by(records, "dept", "salary"))
+    print_dict("avg_salary_by_dept", avg_by(records, "dept", "salary"))
+    print_dict("max_salary_by_dept", max_by(records, "dept", "salary"))
+    print_dict("min_age_by_dept", min_by(records, "dept", "age"))
+    print_dict("avg_age_by_dept", avg_by(records, "dept", "age"))
+
+    print("== filter salary>=7000 ==")
+    rich = filter_salary_min(records, 7000)
+    print(len(rich))
+    for r in rich:
+        print(r.name + " " + str(r.salary))
+
+    print("== filter age<30 ==")
+    young = filter_age_below(records, 30)
+    print(len(young))
+    for r in young:
+        print(r.name + " " + str(r.age))
+
+    print("== eng dept ==")
+    eng = filter_dept(records, "eng")
+    print(len(eng))
+    print("eng_total_salary " + str(total_salary(eng)))
+    print("eng_avg_salary " + str(overall_average_salary(eng)))
+
+    print("== summary ==")
+    print("total_salary " + str(total_salary(records)))
+    print("overall_avg_salary " + str(overall_average_salary(records)))
+    print("has_eng " + yesno(len(eng) > 0))
+    print("has_legal " + yesno(len(filter_dept(records, "legal")) > 0))
+
+    counts = count_by(records, "dept")
+    biggest = ""
+    biggest_n = -1
+    for k in sorted(counts.keys()):
+        if counts[k] > biggest_n:
+            biggest_n = counts[k]
+            biggest = k
+    print("biggest_dept " + biggest + " " + str(biggest_n))
+
+
+main()

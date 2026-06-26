@@ -1,0 +1,116 @@
+class Tree:
+    vals: list[i64]
+    left: list[i64]
+    right: list[i64]
+    root: i64
+    size: i64
+
+    def new_node(self, v: i64) -> i64:
+        idx = len(self.vals)
+        self.vals.append(v)
+        self.left.append(-1)
+        self.right.append(-1)
+        return idx
+
+    def insert(self, v: i64):
+        node = self.new_node(v)
+        if self.root == -1:
+            self.root = node
+            self.size = self.size + 1
+            return
+        cur = self.root
+        while cur != -1:
+            if v < self.vals[cur]:
+                if self.left[cur] == -1:
+                    self.left[cur] = node
+                    self.size = self.size + 1
+                    cur = -1
+                else:
+                    cur = self.left[cur]
+            elif v > self.vals[cur]:
+                if self.right[cur] == -1:
+                    self.right[cur] = node
+                    self.size = self.size + 1
+                    cur = -1
+                else:
+                    cur = self.right[cur]
+            else:
+                cur = -1
+
+    def contains_at(self, node: i64, v: i64) -> bool:
+        cur = node
+        while cur != -1:
+            if v == self.vals[cur]:
+                return True
+            elif v < self.vals[cur]:
+                cur = self.left[cur]
+            else:
+                cur = self.right[cur]
+        return False
+
+    def contains(self, v: i64) -> bool:
+        return self.contains_at(self.root, v)
+
+    def inorder_at(self, node: i64) -> list[i64]:
+        out = []
+        if node == -1:
+            return out
+        left = self.inorder_at(self.left[node])
+        for x in left:
+            out.append(x)
+        out.append(self.vals[node])
+        right = self.inorder_at(self.right[node])
+        for x in right:
+            out.append(x)
+        return out
+
+    def inorder(self) -> list[i64]:
+        return self.inorder_at(self.root)
+
+    def preorder_at(self, node: i64) -> list[i64]:
+        out = []
+        if node == -1:
+            return out
+        out.append(self.vals[node])
+        left = self.preorder_at(self.left[node])
+        for x in left:
+            out.append(x)
+        right = self.preorder_at(self.right[node])
+        for x in right:
+            out.append(x)
+        return out
+
+    def preorder(self) -> list[i64]:
+        return self.preorder_at(self.root)
+
+    def height_at(self, node: i64) -> i64:
+        if node == -1:
+            return 0
+        lh = self.height_at(self.left[node])
+        rh = self.height_at(self.right[node])
+        if lh > rh:
+            return lh + 1
+        return rh + 1
+
+    def height(self) -> i64:
+        return self.height_at(self.root)
+
+    def count_at(self, node: i64) -> i64:
+        if node == -1:
+            return 0
+        return 1 + self.count_at(self.left[node]) + self.count_at(self.right[node])
+
+    def count(self) -> i64:
+        return self.count_at(self.root)
+
+    def min_value(self) -> i64:
+        cur = self.root
+        while self.left[cur] != -1:
+            cur = self.left[cur]
+        return self.vals[cur]
+
+    def max_value(self) -> i64:
+        cur = self.root
+        while self.right[cur] != -1:
+            cur = self.right[cur]
+        return self.vals[cur]

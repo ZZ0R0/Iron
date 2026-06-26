@@ -1,0 +1,63 @@
+import models
+import catalog
+
+def setup() -> Library:
+    lib = Library(books=[], members=[], loans=[])
+    lib.add_book(1, "Dune", 2)
+    lib.add_book(2, "Hyperion", 1)
+    lib.add_book(3, "Foundation", 3)
+    lib.add_book(4, "Neuromancer", 1)
+    lib.add_member(10, "Ann")
+    lib.add_member(20, "Bob")
+    lib.add_member(30, "Cara")
+    return lib
+
+def main():
+    lib = setup()
+
+    print("== availability start ==")
+    for bid in lib.available_book_ids():
+        i = lib.book_index(bid)
+        print(f"book {bid} avail {lib.books[i].available}")
+
+    print("== checkouts ==")
+    plan = [(1, 10, 0), (1, 20, 1), (2, 10, 2), (3, 30, 3), (4, 20, 5), (2, 30, 6)]
+    for book_id, member_id, day in plan:
+        ok = lib.checkout(book_id, member_id, day)
+        print(f"day {day} m{member_id} book {book_id} -> {ok}")
+
+    print("== availability after checkouts ==")
+    for b in lib.books:
+        print(f"book {b.id} avail {b.available} out {b.total - b.available}")
+
+    print("== overdue at day 20 ==")
+    od = lib.overdue_book_ids(20)
+    print(od)
+    print(f"count {len(od)}")
+
+    print("== returns ==")
+    returns = [(1, 10, 10), (2, 10, 18), (3, 30, 30), (1, 20, 22)]
+    for book_id, member_id, day in returns:
+        fine = lib.return_book(book_id, member_id, day)
+        print(f"day {day} m{member_id} book {book_id} fine {fine}")
+
+    print("== member fines ==")
+    for m in lib.members:
+        print(f"m{m.id} active {m.active} total {m.borrowed_total} fines {m.fines}")
+
+    print("== outstanding fines at day 40 ==")
+    rows = []
+    for ln in lib.loans:
+        if ln.returned_day < 0:
+            f = fine_for(ln, 40)
+            rows.append((ln.member_id, ln.book_id, f))
+    rows.sort()
+    for member_id, book_id, f in rows:
+        print(f"m{member_id} book {book_id} owes {f}")
+
+    print("== stats ==")
+    print(f"copies out now {lib.total_copies_out()}")
+    print(f"most borrowed {lib.most_borrowed_id()}")
+    avail = lib.available_book_ids()
+    print(avail)
+    print(f"available titles {len(avail)}")

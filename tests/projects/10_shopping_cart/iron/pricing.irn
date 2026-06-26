@@ -1,0 +1,35 @@
+import item
+
+class QtyRule:
+    name: str
+    min_qty: i64
+    percent: i64
+
+
+def line_discount(it: Item, rules: list[QtyRule]) -> i64:
+    best = 0
+    for r in rules:
+        if it.name == r.name and it.qty >= r.min_qty:
+            d = it.line_total() * r.percent // 100
+            if d > best:
+                best = d
+    return best
+
+
+def threshold_discount(subtotal: i64, threshold: i64, percent: i64) -> i64:
+    if subtotal >= threshold:
+        return subtotal * percent // 100
+    return 0
+
+
+def tax_amount(taxable: i64, rate_bp: i64) -> i64:
+    return taxable * rate_bp // 10000
+
+
+def round_to_nickel(cents: i64) -> i64:
+    rem = cents % 5
+    if rem == 0:
+        return cents
+    if rem < 3:
+        return cents - rem
+    return cents + (5 - rem)
