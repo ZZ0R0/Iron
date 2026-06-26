@@ -24,14 +24,17 @@
 | **V5** | Complétude : `move` (I1), `inout` (I3), inférence méthode, NaN (I12), métrique | G1–G8 | M2++ | invariants comblés ; corpus inchangé ; **0 clone** mesuré | ✅ réalisé |
 | **V6** | Finition : les **18 manques** de l'audit (I11 flux, I5 `Rc`, closures, modules…) | 20400 30300 20700 20500 20600 30400 50400 70200 80200 10300 (60200·90100 différés) | M5+/M6+ | I11/I5 honorés + dettes payées | ✅ **réalisé** (10/12) |
 | **V7** | **« Langage réel »** : langage-cœur (tuples/f-strings/compréhensions/numériques), crates Rust réelles, stdlib solide (wrappers `std`), lint, tooling/cargo | A:10400–21000 · B:50500–50800 · C:80300–80800 · D:60200–60400 · E:70300–70600 · F:30500–90200 (~28) | M1–M7 | Iron **utilisable pour de vrai** | ✅ **réalisé** (batterie 30/30) |
-| **V8** | **« Écosystème »** : **auto-binding des crates Rust** — types natifs récursifs, POO (`impl`/méthodes/ctors), génériques (instance-pinning), **reconnaisseurs d'idiomes** (builder/getter/iter/closure) | 50900 51000 51100 51200 51300 51400 51500 · 21100 · 40200 · 90300 (10) | M8 | `ironc bind regex/serde_json/csv` → API Iron **style Python** ; **≥ 90 %** couverture mesurée ; 0 `unsafe` (I2) | 🔶 **cadré + planifié** |
+| **V8** | **« Écosystème »** : **auto-binding des crates Rust** — types natifs récursifs, POO (`impl`/méthodes/ctors), génériques (instance-pinning), **reconnaisseurs d'idiomes** (builder/getter/iter/closure) | 50900 51000 51100 51200 51300 51400 51500 · 21100 · 40200 · 90300 (10) | M8 | `ironc bind regex/serde_json/csv` → API Iron **style Python** ; couverture 62–92 % ; 0 `unsafe` | ✅ **réalisé** (10 crates réels, gate VERT) |
+| **V9** | **« Clôture — fini à 99.9% »** : interop 100% (trait-binding, `import`, registre, inverse Iron→Rust), **concurrence** (threading + async), polish cœur (try/except, I11, yield, inférence), **tooling** (fmt, LSP, REPL), diagnostics & lint réels, **métrique chiffrée** | A:51600–70800 · B:30700·70900·21200 · C:40300·40400·10900·21300 · D:71000–71200 · E:60500–60700 · F:90400·90100·90500 (21) | M9 | projet réel multi-crates + threading + tooling complet ; **métrique de vérité chiffrée** ; 0 `unsafe` | 🔶 **cadré + planifié** |
 
-> **V0–V7 réalisés**, chacun avec sa trace `specs/Vn/realisation.md`. **V7** : langage = clone Python en
-> syntaxe, prouvé par une **batterie de 30 projets réels Python↔Iron** (sortie identique 30/30, gate vert).
-> **V8 cadrée + planifiée** (`specs/V8/`) : 1 chantier (l'auto-binding), 10 specs, 11 pistes en 4 vagues,
-> **fondé sur une mesure** (binder actuel = 0 % sur vrais crates → ~95 % atteignable via types+POO+idiomes).
-> Décisions D0–D6 tranchées (format `.iri` v2 · projection récursive · idiomes détectés au bind / glue au lower).
-> **Registre communautaire de bindings · `async`/threading · LSP · auto-hébergement = V9+.**
+> **V0–V8 réalisés**, chacun avec sa trace `specs/Vn/realisation.md`. **V7** : clone Python (batterie 30/30).
+> **V8 réalisé** (`specs/V8/`) : auto-binding prouvé sur **10 vrais crates** (regex, serde_json, csv, ureq/HTTP,
+> std::thread, sha2, chrono…), gate binding VERT, couverture auto 62–92 %.
+> **V9 cadrée + planifiée** (`specs/V9/`) : la **version de clôture** — 6 chantiers, 21 specs, 22 pistes en
+> 6 vagues. Ferme **tout** ce qui restait (le résidu `rust{}` via trait-binding, threading/async natifs,
+> tooling fmt/LSP/REPL, lint/diagnostics réels, `import` ergonomique + registre, inverse Iron→Rust, métrique
+> chiffrée). Décisions D0–D6 (🔶 D4 async-runtime, D5 yield à arbitrer). **À la fin de V9 : langage fini à
+> 99.9%** — reste le 0.1% assumé (HM complet, auto-hébergement, async exotique, binding garanti de tout crate).
 > **V6 réalisé** : 10/12 specs implémentées + prouvées (gate **vert** : 37/37 corpus, 0 `unsafe`, 3 clones
 > intentionnels, remontée I8 OK, modules multi-fichiers OK). **2 différées par conception** : 60200
 > (source-maps expression — mécanisme 🔶-ouvert) et 90100 (métrique de vérité — exige le gel du langage).
