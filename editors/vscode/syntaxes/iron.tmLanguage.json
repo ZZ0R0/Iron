@@ -1,0 +1,72 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Iron",
+  "scopeName": "source.iron",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#decorators" },
+    { "include": "#keywords" },
+    { "include": "#types" },
+    { "include": "#constants" },
+    { "include": "#fstrings" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#functions" }
+  ],
+  "repository": {
+    "comments": {
+      "match": "#.*$",
+      "name": "comment.line.number-sign.iron"
+    },
+    "decorators": {
+      "match": "^\\s*(@)([A-Za-z_][\\w:]*)",
+      "captures": {
+        "1": { "name": "punctuation.definition.decorator.iron" },
+        "2": { "name": "entity.name.function.decorator.iron" }
+      }
+    },
+    "keywords": {
+      "patterns": [
+        { "name": "keyword.control.iron", "match": "\\b(if|elif|else|for|while|return|break|continue|pass|match|case|try|except|raise|yield|with|in|async|await)\\b" },
+        { "name": "keyword.other.iron", "match": "\\b(def|class|enum|trait|impl|lambda|import|use|extern|crate|assert)\\b" },
+        { "name": "keyword.operator.logical.iron", "match": "\\b(and|or|not|is)\\b" }
+      ]
+    },
+    "types": {
+      "patterns": [
+        { "name": "support.type.primitive.iron", "match": "\\b(i8|i16|i32|i64|i128|isize|u8|u16|u32|u64|u128|usize|f32|f64|bool|str|char|unit)\\b" },
+        { "name": "support.type.builtin.iron", "match": "\\b(list|dict|set|tuple|Option|Result|shared|shared_sync|fn)\\b" },
+        { "name": "entity.name.type.iron", "match": "\\b([A-Z][A-Za-z0-9_]*)\\b" }
+      ]
+    },
+    "constants": {
+      "name": "constant.language.iron",
+      "match": "\\b(True|False|None|none|some|ok|err)\\b"
+    },
+    "fstrings": {
+      "name": "string.interpolated.iron",
+      "begin": "\\bf\"",
+      "end": "\"",
+      "patterns": [
+        { "name": "meta.embedded.iron", "begin": "\\{", "end": "\\}", "patterns": [{ "include": "$self" }] }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        { "name": "string.quoted.double.iron", "begin": "\"", "end": "\"", "patterns": [{ "name": "constant.character.escape.iron", "match": "\\\\." }] },
+        { "name": "string.quoted.single.iron", "begin": "'", "end": "'", "patterns": [{ "name": "constant.character.escape.iron", "match": "\\\\." }] }
+      ]
+    },
+    "numbers": {
+      "name": "constant.numeric.iron",
+      "match": "\\b([0-9][0-9_]*(\\.[0-9_]+)?)\\b"
+    },
+    "functions": {
+      "match": "\\b(def)\\s+([a-z_][A-Za-z0-9_]*)",
+      "captures": {
+        "1": { "name": "keyword.other.iron" },
+        "2": { "name": "entity.name.function.iron" }
+      }
+    }
+  }
+}

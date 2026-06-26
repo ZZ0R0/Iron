@@ -1,0 +1,54 @@
+{
+  "name": "iron-lang",
+  "displayName": "Iron",
+  "description": "Support du langage Iron (.irn) — coloration, diagnostics live (LSP + overlay rustc), imports de crates Rust, build/run.",
+  "version": "0.1.0",
+  "publisher": "iron",
+  "engines": { "vscode": "^1.75.0" },
+  "categories": ["Programming Languages", "Linters"],
+  "main": "./out/extension.js",
+  "activationEvents": ["onLanguage:iron"],
+  "contributes": {
+    "languages": [
+      {
+        "id": "iron",
+        "aliases": ["Iron", "iron"],
+        "extensions": [".irn", ".iri"],
+        "configuration": "./language-configuration.json",
+        "icon": { "light": "./icons/iron.svg", "dark": "./icons/iron.svg" }
+      }
+    ],
+    "grammars": [
+      { "language": "iron", "scopeName": "source.iron", "path": "./syntaxes/iron.tmLanguage.json" }
+    ],
+    "commands": [
+      { "command": "iron.addCrate", "title": "Iron: Add crate (import Rust)" },
+      { "command": "iron.build", "title": "Iron: Build" },
+      { "command": "iron.run", "title": "Iron: Run" },
+      { "command": "iron.test", "title": "Iron: Test" },
+      { "command": "iron.format", "title": "Iron: Format" }
+    ],
+    "configuration": {
+      "title": "Iron",
+      "properties": {
+        "iron.path": {
+          "type": "string",
+          "default": "ironc",
+          "description": "Chemin du binaire ironc."
+        },
+        "iron.checkOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Lancer `ironc check` (overlay rustc) à la sauvegarde."
+        }
+      }
+    },
+    "taskDefinitions": [{ "type": "iron", "required": ["command"], "properties": { "command": { "type": "string" } } }]
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "package": "vsce package"
+  },
+  "dependencies": { "vscode-languageclient": "^9.0.1" },
+  "devDependencies": { "@types/vscode": "^1.75.0", "typescript": "^5.0.0" }
+}
