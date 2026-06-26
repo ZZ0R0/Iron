@@ -32,6 +32,7 @@ fn main() {
         "add" => driver::add(positional[1].as_str()),
         "remove" => driver::remove(positional[1].as_str()),
         "check" => driver::check(input),
+        "fmt" => driver::fmt(input),
         "doc" => driver::doc(input),
         "lib" => driver::lib(input),
         "lint" => driver::lint(input),

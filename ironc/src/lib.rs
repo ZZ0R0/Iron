@@ -14,6 +14,7 @@ pub mod resolve;
 pub mod lower;
 pub mod sourcemap;
 pub mod driver;
+pub mod fmt;
 pub mod lint;
 pub mod lsp;
 pub mod repl;

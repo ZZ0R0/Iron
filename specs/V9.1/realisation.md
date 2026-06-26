@@ -14,7 +14,7 @@
 | 2.1 | 60800 | Diagnostics overlay rustc | 2 | ✅ fait |
 | 2.2 | 60900 | Source-maps granularité expression | 2 | 🔶 ligne OK, expr = raffinement |
 | 2.3 | 71300 | LSP enrichi (complétion/hover/go-to-def) | 2 | ✅ fait |
-| 2.4 | 71400 | `ironc fmt` (commentaires) | 2 | ☐ todo |
+| 2.4 | 71400 | `ironc fmt` (commentaires) | 2 | ✅ fait |
 | 3.1 | 71500 | Extension VSCode : langage + icônes | 3 | ✅ fait |
 | 3.2 | 71600 | Grammaire de coloration | 3 | ✅ fait |
 | 3.3 | 71700 | Client LSP + linter VSCode | 3 | ✅ fait |
@@ -50,6 +50,9 @@ pas d'un type-checker Iron maison. La surcouche, comme le codegen.
 - **2.1** `ironc check` : diagnostics overlay rustc (la surcouche) — erreur rustc → Span Iron, zéro faux-positif.
 - **2.3** LSP enrichi : `completion` (mots-clés + types + symboles du fichier) · `hover` (signature en
   ```iron```) · `definition` (go-to-def intra-fichier). Tout dérivé de l'AST (front-end pur, pas de checker).
+- **2.4** `ironc fmt` : normaliseur de lignes **idempotent** préservant les commentaires (le re-spacing
+  token-à-token serait fragile en langage indentation-sensible). Recanonise l'indentation (4 espaces via
+  pile), aligne les commentaires sur le code suivant, réduit les blanches, continuations `[...]` préservées.
 - **Vague 3 COMPLÈTE** (extension VSCode `editors/vscode/`) : langage `.irn`/`.iri` + icône · coloration
   TextMate · client LSP + `ironc check` au save · `Iron: Add crate` · build/run + CodeLens « ▶ Run ».
 - **4.1** génériques utilisateur (`def f[T]`/`class Pair[A,B]` + bornes ; borne `Clone` par défaut) → 7, 30.
@@ -60,8 +63,8 @@ pas d'un type-checker Iron maison. La surcouche, comme le codegen.
 - **4.6** `ironc doc` (overlay rustdoc → HTML).
 - **2.2** source-maps : la ligne marche déjà (granularité expression = raffinement non fait).
 
-**☐ RESTE** : 2.4 fmt (bloqueur trivia commentaires) · 4.2 erreurs typées `Result[T,E]` (D5, lourd) ·
-4.7 debugger · Vague 5 (5.1 doc 0.1% · 5.2 batterie-30 · 5.3 gate).
+**☐ RESTE** : 4.2 erreurs typées `Result[T,E]` (D5, lourd) · 4.7 debugger ·
+Vague 5 (5.1 doc 0.1% · 5.2 batterie-30 · 5.3 gate).
 
 ## Écarts / faiblesses (relevés)
 

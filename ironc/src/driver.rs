@@ -339,6 +339,23 @@ pub fn add(crate_name: &str) -> CResult<()> {
     Ok(())
 }
 
+/// `ironc fmt <file>` (V9.1, 71400) : formate la source **en place** en préservant les commentaires.
+/// Valide d'abord que le fichier lexe (indentation cohérente) — on ne reformate jamais un fichier cassé.
+pub fn fmt(input: &Path) -> CResult<()> {
+    let src = std::fs::read_to_string(input)
+        .map_err(|e| CompileError::msg(format!("lecture {} : {e}", input.display())))?;
+    crate::lex::lex(&src, 0)?; // garde-fou : indentation lexicalement valide avant reformatage
+    let formatted = crate::fmt::format(&src);
+    if formatted != src {
+        std::fs::write(input, &formatted)
+            .map_err(|e| CompileError::msg(format!("écriture {} : {e}", input.display())))?;
+        println!("formaté : {}", input.display());
+    } else {
+        println!("déjà formaté : {}", input.display());
+    }
+    Ok(())
+}
+
 /// `ironc lint` (V9, 60500) : passe de lint sur l'AST ; jamais bloquant (warnings, I4).
 pub fn lint(input: &Path) -> CResult<()> {
     let src = std::fs::read_to_string(input)
