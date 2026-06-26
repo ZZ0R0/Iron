@@ -167,7 +167,8 @@ pub(crate) fn expr(cx: &mut Inf, e: &Expr, scope: &Scope) -> Type {
             let lt = expr(cx, lhs, scope);
             let _rt = expr(cx, rhs, scope);
             match op {
-                BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Rem => lt,
+                BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Rem
+                | BinOp::FloorDiv | BinOp::Pow => lt,
                 _ => Type::Bool,
             }
         }
