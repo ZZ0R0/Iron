@@ -196,6 +196,14 @@ pub(crate) fn expr(cx: &mut Inf, e: &Expr, scope: &Scope) -> Type {
                     "some" => Type::Option(Box::new(arg0_ty(cx, args))),
                     "ok" => Type::Result(Box::new(arg0_ty(cx, args))),
                     "err" => Type::Result(Box::new(Type::Unit)),
+                    // concurrence : partage mutable thread-safe (V9, 30700/70900).
+                    "ref_sync" => Type::SharedSync(Box::new(arg0_ty(cx, args))),
+                    "clone_sync" => arg0_ty(cx, args),
+                    "lock_get" => match arg0_ty(cx, args) {
+                        Type::SharedSync(t) => *t,
+                        _ => Type::Unit,
+                    },
+                    "lock_set" | "lock_add" => Type::Unit,
                     // stdlib V4 (80100)
                     "str" | "join" => Type::Str,
                     "sqrt" => Type::F64,

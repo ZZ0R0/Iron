@@ -1292,6 +1292,29 @@ impl Cx<'_> {
                     let x = self.value(&args[0]);
                     return quote! { ((#x).round() as i64) };
                 }
+                // concurrence (V9, 30700/70900) : `Arc<Mutex>` partagé entre threads.
+                "ref_sync" if args.len() == 1 => {
+                    let v = self.value(&args[0]);
+                    return quote! { std::sync::Arc::new(std::sync::Mutex::new(#v)) };
+                }
+                "clone_sync" if args.len() == 1 => {
+                    let s = self.place(&args[0]);
+                    return quote! { std::sync::Arc::clone(&#s) };
+                }
+                "lock_get" if args.len() == 1 => {
+                    let s = self.place(&args[0]);
+                    return quote! { (*#s.lock().unwrap()).clone() };
+                }
+                "lock_set" if args.len() == 2 => {
+                    let s = self.place(&args[0]);
+                    let v = self.value(&args[1]);
+                    return quote! { { *#s.lock().unwrap() = #v; } };
+                }
+                "lock_add" if args.len() == 2 => {
+                    let s = self.place(&args[0]);
+                    let v = self.value(&args[1]);
+                    return quote! { { *#s.lock().unwrap() += #v; } };
+                }
                 // casts numériques `to_<t>(x)` → `(x as t)` (20800).
                 cast if args.len() == 1
                     && cast.strip_prefix("to_").map_or(false, |t| numeric_type_by_name(t).is_some()) =>

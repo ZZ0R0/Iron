@@ -1,0 +1,12 @@
+def main():
+    counter = ref_sync(0)
+    c1 = clone_sync(counter)
+    c2 = clone_sync(counter)
+    c3 = clone_sync(counter)
+    h1 = thread.spawn(lambda: lock_add(c1, 10))
+    h2 = thread.spawn(lambda: lock_add(c2, 20))
+    h3 = thread.spawn(lambda: lock_add(c3, 30))
+    h1.join()
+    h2.join()
+    h3.join()
+    print(lock_get(counter))
