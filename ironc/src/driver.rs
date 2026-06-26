@@ -39,6 +39,12 @@ pub fn compile(src: &str, file: FileId, base_dir: &Path) -> CResult<Compiled> {
     let (mut loaded, mut loading): (Vec<String>, Vec<String>) = (Vec::new(), Vec::new());
     let mut ext = std::mem::take(&mut ast.extern_types);
     for m in std::mem::take(&mut ast.modules) {
+        // `import <crate>` (V9, 70700) : pas de module Iron `m.irn` mais un binding `m.iri` présent
+        // → import de crate (= `use "m.iri"`). Sinon, module Iron classique (70200).
+        if !base_dir.join(format!("{m}.irn")).exists() && base_dir.join(format!("{m}.iri")).exists() {
+            ast.imports.push(format!("{m}.iri"));
+            continue;
+        }
         load_module(&m, base_dir, &mut ast.items, &mut ast.imports, &mut ext, &mut next_id, &mut next_file, &mut loaded, &mut loading)?;
     }
     ast.extern_types = ext;

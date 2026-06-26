@@ -1,0 +1,17 @@
+crate regex = "1.12.4"
+crate serde = "1" features [derive]
+crate serde_json = "1"
+crate chrono = "0.4"
+crate sha2 = "0.10"
+
+extern type Regex = "regex::Regex":
+    fn new(pattern: str) -> Result[Regex] = "regex::Regex::new"
+    fn is_match(self, text: str) -> bool = "is_match"
+
+extern type NaiveDate = "chrono::NaiveDate":
+    fn parse_from_str(s: str, fmt: str) -> Result[NaiveDate] = "chrono::NaiveDate::parse_from_str"
+    fn year(self) -> i32 = "chrono::Datelike::year"
+
+extern fn parse_weights(s: str) -> Result[list[i64]] = "serde_json::from_str::<Vec<i64>>"
+extern fn record_to_json(r: Record) -> Result[str] = "serde_json::to_string::<Record>"
+extern fn record_from_json(s: str) -> Result[Record] = "serde_json::from_str::<Record>"

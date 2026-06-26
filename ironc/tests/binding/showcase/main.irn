@@ -1,0 +1,60 @@
+use "lib.iri"
+
+# Une struct sérialisable serde (attributs pass-through @derive)
+@derive(serde::Serialize, serde::Deserialize)
+class Record:
+    id: i64
+    weight: i64
+
+# --- threading natif : somme parallèle 1..n sur 2 threads ---
+def range_sum(lo: i64, hi: i64) -> i64:
+    total = 0
+    for i in range(lo, hi + 1):
+        total = total + i
+    return total
+
+def parallel_total(n: i64) -> i64:
+    mid = n / 2
+    h1 = thread.spawn(lambda: range_sum(1, mid))
+    h2 = thread.spawn(lambda: range_sum(mid + 1, n))
+    return h1.join() + h2.join()
+
+# --- regex : compte les IDs valides dans une liste (compréhension + méthode) ---
+def count_valid(ids: list[str]) -> Result[i64]:
+    r = Regex.new("^[A-Z][A-Z][0-9]+$")?
+    valid = [s for s in ids if r.is_match(s)]
+    return len(valid)
+
+# --- chrono : année d'une date (méthode de trait Datelike) ---
+def year_of(date: str) -> Result[i64]:
+    d = NaiveDate.parse_from_str(date, "%Y-%m-%d")?
+    return to_i64(d.year())
+
+# --- serde : round-trip d'une struct Iron via JSON ---
+def echo_weight(id: i64, w: i64) -> Result[i64]:
+    rec = Record(id=id, weight=w)
+    back = record_from_json(record_to_json(rec)?)?
+    return back.weight
+
+# --- sha2 : empreinte (résidu trait Digest → rust{}) ---
+def fingerprint(s: str) -> str:
+    out = ""
+    rust {
+        use sha2::Digest;
+        let h = sha2::Sha256::digest(s.as_bytes());
+        out = format!("{:x}", h)[..12].to_string();
+    }
+    return out
+
+def main():
+    print(parallel_total(100))
+    print(count_valid(["AB12", "x", "CD345", "9", "ZZ7"]).unwrap_or(0))
+    print(sum(parse_weights("[5, 10, 15]").unwrap_or([])))
+    print(year_of("2026-06-26").unwrap_or(0))
+    print(echo_weight(1, 42).unwrap_or(0))
+    print(fingerprint("iron-rocks"))
+    try:
+        oops = year_of("not-a-date")?
+        print("parsed")
+    except e:
+        print("invalid date handled")
