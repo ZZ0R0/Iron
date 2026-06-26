@@ -14,6 +14,7 @@
 | 2.3 | 51800 | Inverse : export Iron → crate Rust (`ironc lib`) | 2 |
 | 2.4 | 70700 | `import <crate>` (auto-bind + cache) | 2 |
 | 2.5 | 70800 | Registre de bindings curés + `ironc add` | 2 |
+| 2.6 | 51900 | Attributs Rust pass-through (`@derive`/`@repr`/`@inline`) | 2 |
 | 3.1 | 40300 | Fix `try/except` + hoisting | 3 |
 | 3.2 | 40400 | Auto-wrap I11 complet | 3 |
 | 3.3 | 21300 | Inférence élargie (HOF fiable) | 3 |

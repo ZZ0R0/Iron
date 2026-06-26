@@ -34,6 +34,7 @@ avec fmt/lint/LSP, et la correction est chiffrée sur corpus.**
 | `51800` | **Inverse : Iron → crate Rust** (`ironc lib`) : émet un crate `{Cargo.toml, lib.rs}` réutilisable depuis un projet Rust |
 | `70700` | **`import <crate>`** : auto-bind **caché + caché en cache**, version résolue via `ironc.toml` (1 ligne au lieu de `bind`+`use`) |
 | `70800` | **Registre de bindings curés** + **`ironc add <crate>`** : `.iri` mutualisés (modèle @types/nimble), seed du top-N par l'équipe cœur |
+| `51900` | **Attributs Rust pass-through** : décorateur `@derive(Serialize)`/`@repr(C)`/`@inline` → `#[…]` (la **3ᵉ jambe** : Iron pilote la codegen Rust ; débloque **struct Iron ↔ JSON** via serde) |
 
 ### B — Concurrence (ownership `3`, tooling `7`, types `2`)
 | Spec | Contenu |
