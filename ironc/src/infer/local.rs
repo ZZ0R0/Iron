@@ -11,6 +11,24 @@ fn arg0_ty(cx: &Inf, args: &[Expr]) -> Type {
     args.first().and_then(|a| cx.tm.get(&a.id).cloned()).unwrap_or(Type::Unit)
 }
 
+/// Type de retour d'une méthode built-in (str/list/dict, 80500) ; `None` si inconnue.
+fn builtin_method_ret(bt: &Type, name: &str) -> Option<Type> {
+    Some(match (bt, name) {
+        (Type::Str, "upper" | "lower" | "strip" | "replace") => Type::Str,
+        (Type::Str, "split") => Type::List(Box::new(Type::Str)),
+        (Type::Str, "startswith" | "endswith" | "contains") => Type::Bool,
+        (Type::Str | Type::List(_), "len") => Type::I64,
+        (Type::List(_), "append" | "sort" | "reverse") => Type::Unit,
+        (Type::List(e), "pop") => Type::Option(e.clone()),
+        (Type::List(_) | Type::Set(_), "contains") => Type::Bool,
+        (Type::Dict(k, _), "keys") => Type::List(k.clone()),
+        (Type::Dict(_, v), "values") => Type::List(v.clone()),
+        (Type::Dict(_, v), "get") => Type::Option(v.clone()),
+        (Type::Dict(..), "contains") => Type::Bool,
+        _ => return None,
+    })
+}
+
 pub(crate) fn stmt(cx: &mut Inf, s: &Stmt, scope: &mut Scope) {
     match &s.kind {
         StmtKind::Let { name, value } => {
@@ -210,6 +228,10 @@ pub(crate) fn expr(cx: &mut Inf, e: &Expr, scope: &Scope) -> Type {
                             if cx.enums.contains_key(ename) {
                                 return cx.set(e.id, Type::Enum(ename.clone()));
                             }
+                        }
+                        // méthodes des types built-in (str/list/dict, 80500)
+                        if let Some(ret) = builtin_method_ret(&bt, name) {
+                            return cx.set(e.id, ret);
                         }
                         // appel de méthode : type de retour de l'`impl` (V5/DX3)
                         if let Type::Struct(tn) = &bt {

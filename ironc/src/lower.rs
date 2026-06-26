@@ -935,6 +935,12 @@ impl Cx<'_> {
                 }
             }
         }
+        // méthodes des types built-in (surface Python) : `xs.append(x)`, `s.upper()`, `d.keys()`.
+        if let ExprKind::Field { base, name } = &callee.kind {
+            if let Some(ts) = self.try_builtin_method(base, name, args) {
+                return ts;
+            }
+        }
         if let ExprKind::Var(name) = &callee.kind {
             // les fns utilisateur priment sur les built-ins homonymes (ex. un `fn add` perso).
             if !self.user_fns.contains(name) {
@@ -1128,6 +1134,92 @@ impl Cx<'_> {
             a.push(ts);
         }
         quote! { #c( #(#a),* ) }
+    }
+
+    /// Méthodes des types built-in (surface Python, 80500) : `xs.append(x)`, `s.upper()`, `d.keys()`…
+    /// `None` = pas une méthode built-in connue → l'appel retombe sur le chemin normal.
+    fn try_builtin_method(&mut self, base: &Expr, name: &str, args: &[Expr]) -> Option<TokenStream> {
+        let bt = self.type_of(base);
+        let arg = |s: &mut Self, i: usize| s.value(&args[i]);
+        Some(match (&bt, name) {
+            // --- str ---
+            (Type::Str, "upper") => { let b = self.place(base); quote! { #b.to_uppercase() } }
+            (Type::Str, "lower") => { let b = self.place(base); quote! { #b.to_lowercase() } }
+            (Type::Str, "strip") => { let b = self.place(base); quote! { #b.trim().to_string() } }
+            (Type::Str, "split") if args.len() == 1 => {
+                let b = self.place(base);
+                let s = arg(self, 0);
+                quote! { #b.split((#s).as_str()).map(|x| x.to_string()).collect::<Vec<_>>() }
+            }
+            (Type::Str, "replace") if args.len() == 2 => {
+                let b = self.place(base);
+                let a = arg(self, 0);
+                let c = arg(self, 1);
+                quote! { #b.replace((#a).as_str(), (#c).as_str()) }
+            }
+            (Type::Str, "startswith") if args.len() == 1 => {
+                let b = self.place(base);
+                let s = arg(self, 0);
+                quote! { #b.starts_with((#s).as_str()) }
+            }
+            (Type::Str, "endswith") if args.len() == 1 => {
+                let b = self.place(base);
+                let s = arg(self, 0);
+                quote! { #b.ends_with((#s).as_str()) }
+            }
+            (Type::Str, "contains") if args.len() == 1 => {
+                let b = self.place(base);
+                let s = arg(self, 0);
+                quote! { #b.contains((#s).as_str()) }
+            }
+            (Type::Str | Type::List(_), "len") => {
+                let b = self.place(base);
+                quote! { (#b.len() as i64) }
+            }
+            // --- list ---
+            (Type::List(_), "append") if args.len() == 1 => {
+                let b = self.place(base);
+                let x = arg(self, 0);
+                quote! { #b.push(#x) }
+            }
+            (Type::List(_), "pop") => {
+                let b = self.place(base);
+                quote! { #b.pop() }
+            }
+            (Type::List(_), "sort") => {
+                let b = self.place(base);
+                quote! { #b.sort_by(|a, b| a.partial_cmp(b).unwrap()) }
+            }
+            (Type::List(_), "reverse") => {
+                let b = self.place(base);
+                quote! { #b.reverse() }
+            }
+            (Type::List(_) | Type::Set(_), "contains") if args.len() == 1 => {
+                let b = self.place(base);
+                let x = arg(self, 0);
+                quote! { #b.contains(&#x) }
+            }
+            // --- dict ---
+            (Type::Dict(..), "keys") => {
+                let b = self.place(base);
+                quote! { #b.keys().cloned().collect::<Vec<_>>() }
+            }
+            (Type::Dict(..), "values") => {
+                let b = self.place(base);
+                quote! { #b.values().cloned().collect::<Vec<_>>() }
+            }
+            (Type::Dict(..), "get") if args.len() == 1 => {
+                let b = self.place(base);
+                let k = arg(self, 0);
+                quote! { #b.get(&#k).cloned() }
+            }
+            (Type::Dict(..), "contains") if args.len() == 1 => {
+                let b = self.place(base);
+                let k = arg(self, 0);
+                quote! { #b.contains_key(&#k) }
+            }
+            _ => return None,
+        })
     }
 
     /// Module stdlib `io` (80300, D2) : wrappers minces sur `std::fs`, faillibles → `Result`/`IronError`.
