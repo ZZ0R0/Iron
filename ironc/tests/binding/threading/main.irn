@@ -1,12 +1,14 @@
-def parallel_sum(n: i64) -> i64:
+def range_sum(lo: i64, hi: i64) -> i64:
     total = 0
-    rust {
-        let mid = n / 2;
-        let h1 = std::thread::spawn(move || (1..=mid).sum::<i64>());
-        let h2 = std::thread::spawn(move || (mid + 1..=n).sum::<i64>());
-        total = h1.join().unwrap() + h2.join().unwrap();
-    }
+    for i in range(lo, hi + 1):
+        total = total + i
     return total
+
+def parallel_sum(n: i64) -> i64:
+    mid = n / 2
+    h1 = thread.spawn(lambda: range_sum(1, mid))
+    h2 = thread.spawn(lambda: range_sum(mid + 1, n))
+    return h1.join() + h2.join()
 
 def main():
     print(parallel_sum(100))

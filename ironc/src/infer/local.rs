@@ -272,6 +272,17 @@ pub(crate) fn expr(cx: &mut Inf, e: &Expr, scope: &Scope) -> Type {
                                 }
                             }
                         }
+                        // thread.spawn(f) (V9, 70900) → handle `__Handle[T]` (T = retour de la lambda).
+                        if let ExprKind::Var(m) = &base.kind {
+                            if m == "thread" && name == "spawn" {
+                                let ft = args.first().map(|a| expr(cx, a, scope)).unwrap_or(Type::Unit);
+                                let ret = match ft {
+                                    Type::Fn(_, r) => *r,
+                                    _ => Type::Unit,
+                                };
+                                return cx.set(e.id, Type::App("__Handle".to_string(), vec![ret]));
+                            }
+                        }
                         // modules stdlib io/os/time (80300/80800) : types de retour.
                         if let ExprKind::Var(m) = &base.kind {
                             let s = Box::new(Type::Str);
@@ -315,6 +326,12 @@ pub(crate) fn expr(cx: &mut Inf, e: &Expr, scope: &Scope) -> Type {
                         if let Type::Extern(iron_name) = &bt {
                             if let Some(ret) = cx.extern_method_ret(iron_name, name) {
                                 return cx.set(e.id, ret);
+                            }
+                        }
+                        // handle de thread (V9, 70900) : `h.join()` → le type porté par `__Handle[T]`.
+                        if let Type::App(n, targs) = &bt {
+                            if n == "__Handle" && name == "join" {
+                                return cx.set(e.id, targs.first().cloned().unwrap_or(Type::Unit));
                             }
                         }
                         Type::Unit

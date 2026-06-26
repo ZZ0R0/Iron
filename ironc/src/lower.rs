@@ -1038,7 +1038,19 @@ impl Cx<'_> {
                     "io" => return self.lower_io(name, args),
                     "os" => return self.lower_os(name, args),
                     "time" => return self.lower_time(name, args),
+                    "thread" => return self.lower_thread(name, args), // V9, 70900
                     _ => {}
+                }
+            }
+        }
+        // handle de thread (V9, 70900) : `h.join()` → `h.join().unwrap()`.
+        if let ExprKind::Field { base, name } = &callee.kind {
+            if name == "join" {
+                if let Type::App(n, _) = self.type_of(base) {
+                    if n == "__Handle" {
+                        let recv = self.place(base);
+                        return quote! { #recv.join().unwrap() };
+                    }
                 }
             }
         }
@@ -1515,6 +1527,28 @@ impl Cx<'_> {
     }
 
     /// Module stdlib `os` (80800) : env/args/exit — wrappers `std::env`/`std::process`.
+    /// Module `thread` (V9, 70900) : `spawn(lambda)` → `std::thread::spawn(move || …)`. Le `move` rend la
+    /// closure `Send` ; l'état partagé entre threads exige `shared_sync` (Arc<Mutex>, 30700) — un `shared`
+    /// (Rc, !Send) est rejeté par `rustc` (filet I2).
+    fn lower_thread(&mut self, name: &str, args: &[Expr]) -> TokenStream {
+        match name {
+            "spawn" if args.len() == 1 => {
+                let body = match &args[0].kind {
+                    ExprKind::Lambda { params, body } if params.is_empty() => self.value(body),
+                    _ => {
+                        let f = self.value(&args[0]);
+                        quote! { (#f)() }
+                    }
+                };
+                quote! { std::thread::spawn(move || #body) }
+            }
+            other => {
+                let msg = format!("thread.{other} non supporté (spawn uniquement au v0)");
+                quote! { compile_error!(#msg) }
+            }
+        }
+    }
+
     fn lower_os(&mut self, name: &str, args: &[Expr]) -> TokenStream {
         match name {
             "env" if args.len() == 1 => {
