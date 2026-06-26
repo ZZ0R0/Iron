@@ -1091,6 +1091,38 @@ impl Cx<'_> {
                     let b = self.place(&args[1]);
                     return quote! { (&#a - &#b) };
                 }
+                // itertools (80700)
+                "enumerate" if args.len() == 1 => {
+                    let xs = self.value(&args[0]);
+                    return quote! { (#xs).into_iter().enumerate().map(|(__i, __x)| (__i as i64, __x)).collect::<Vec<_>>() };
+                }
+                "zip" if args.len() == 2 => {
+                    let xs = self.value(&args[0]);
+                    let ys = self.value(&args[1]);
+                    return quote! { (#xs).into_iter().zip(#ys).collect::<Vec<_>>() };
+                }
+                "reversed" if args.len() == 1 => {
+                    let xs = self.value(&args[0]);
+                    return quote! { { let mut __v = #xs; __v.reverse(); __v } };
+                }
+                "sorted" if args.len() == 1 => {
+                    let xs = self.value(&args[0]);
+                    return quote! { { let mut __v = #xs; __v.sort_by(|a, b| a.partial_cmp(b).unwrap()); __v } };
+                }
+                "any" if args.len() == 1 => {
+                    let xs = self.place(&args[0]);
+                    return quote! { #xs.iter().any(|__b| *__b) };
+                }
+                "all" if args.len() == 1 => {
+                    let xs = self.place(&args[0]);
+                    return quote! { #xs.iter().all(|__b| *__b) };
+                }
+                "reduce" if args.len() == 3 => {
+                    let f = self.fn_arg(&args[0]);
+                    let xs = self.value(&args[1]);
+                    let init = self.value(&args[2]);
+                    return quote! { (#xs).into_iter().fold(#init, #f) };
+                }
                 // casts numériques `to_<t>(x)` → `(x as t)` (20800).
                 cast if args.len() == 1
                     && cast.strip_prefix("to_").map_or(false, |t| numeric_type_by_name(t).is_some()) =>

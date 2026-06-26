@@ -204,6 +204,26 @@ pub(crate) fn expr(cx: &mut Inf, e: &Expr, scope: &Scope) -> Type {
                     }
                     // map/filter (20700) : best-effort = type de la liste source (args[1]).
                     "map" | "filter" => args.get(1).and_then(|a| cx.tm.get(&a.id)).cloned().unwrap_or(Type::Unit),
+                    // itertools (80700)
+                    "enumerate" => match args.first().and_then(|a| cx.tm.get(&a.id)) {
+                        Some(Type::List(e)) => {
+                            Type::List(Box::new(Type::Tuple(vec![Type::I64, (**e).clone()])))
+                        }
+                        _ => Type::List(Box::new(Type::Unit)),
+                    },
+                    "zip" => {
+                        let a = args.first().and_then(|x| cx.tm.get(&x.id)).cloned();
+                        let b = args.get(1).and_then(|x| cx.tm.get(&x.id)).cloned();
+                        match (a, b) {
+                            (Some(Type::List(ea)), Some(Type::List(eb))) => {
+                                Type::List(Box::new(Type::Tuple(vec![*ea, *eb])))
+                            }
+                            _ => Type::List(Box::new(Type::Unit)),
+                        }
+                    }
+                    "reversed" | "sorted" => arg0_ty(cx, args),
+                    "any" | "all" => Type::Bool,
+                    "reduce" => args.get(2).and_then(|a| cx.tm.get(&a.id)).cloned().unwrap_or(Type::Unit),
                     _ => cx.sigs.get(name).map(|(_, r)| r.clone()).unwrap_or(Type::Unit),
                 },
                 _ => {
