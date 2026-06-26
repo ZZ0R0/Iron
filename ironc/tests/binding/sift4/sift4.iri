@@ -1,0 +1,6 @@
+# bindings auto-générés depuis `sift4` (ironc bind)
+crate sift4 = "0.1.4"
+
+extern fn simple(s1: str, s2: str) -> i32 = "sift4::simple"
+
+# 1 item(s) bindé(s), 0 non mappable(s) sauté(s)

@@ -244,6 +244,7 @@ pub fn doc(input: &Path) -> CResult<()> {
 
 /// `ironc remove <crate>` (V9.1, 72100) : retire le crate d'`ironc.toml` + supprime `<crate>.iri`.
 pub fn remove(crate_name: &str) -> CResult<()> {
+    let crate_name = &crate_name.replace('-', "_"); // même normalisation que `add` (tirets → underscores)
     let _ = std::fs::remove_file(format!("{crate_name}.iri"));
     if let Ok(toml) = std::fs::read_to_string("ironc.toml") {
         let filtered: Vec<&str> = toml
@@ -303,6 +304,10 @@ pub fn check(input: &Path) -> CResult<()> {
 /// `ironc add <crate>` (V9.1, 52300) : binde un crate Rust et écrit `<crate>.iri` dans le dossier courant
 /// (que `import <crate>` trouvera) + l'ajoute à `ironc.toml`. Crée un projet temporaire pour rustdoc.
 pub fn add(crate_name: &str) -> CResult<()> {
+    // Le **nom de fichier** `.iri` (= identifiant d'import) normalise les tirets en underscores :
+    // `import num_integer`, pas `num-integer` (illégal comme identifiant). Le **nom de crate** garde son
+    // tiret pour `cargo`/le binder (rustdoc), et les chemins Rust sont déjà en underscore.
+    let stem = crate_name.replace('-', "_");
     if curated_iri(crate_name).is_some() {
         println!("`{crate_name}` est déjà un binding curé (import direct, rien à ajouter).");
         return Ok(());
@@ -321,8 +326,8 @@ pub fn add(crate_name: &str) -> CResult<()> {
     let _ = Command::new("cargo").args(["fetch"]).current_dir(&tmp).output();
     // bind → `.iri`.
     let iri = crate::bind::bind(&tmp, Some(crate_name))?;
-    std::fs::write(format!("{crate_name}.iri"), &iri)
-        .map_err(|e| CompileError::msg(format!("écriture {crate_name}.iri : {e}")))?;
+    std::fs::write(format!("{stem}.iri"), &iri)
+        .map_err(|e| CompileError::msg(format!("écriture {stem}.iri : {e}")))?;
     // ajout à `ironc.toml` (si présent).
     if let Ok(mut toml) = std::fs::read_to_string("ironc.toml") {
         if !toml.contains(&format!("{crate_name} =")) {
@@ -334,7 +339,7 @@ pub fn add(crate_name: &str) -> CResult<()> {
             let _ = std::fs::write("ironc.toml", toml);
         }
     }
-    println!("`{crate_name}` ajouté : {crate_name}.iri écrit ({} fns/types bindés). `import {crate_name}` est prêt.",
+    println!("`{crate_name}` ajouté : {stem}.iri écrit ({} fns/types bindés). `import {stem}` est prêt.",
         iri.matches("extern ").count());
     Ok(())
 }

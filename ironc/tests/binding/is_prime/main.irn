@@ -1,0 +1,4 @@
+import is_prime
+
+def main():
+    print(is_prime("97"))

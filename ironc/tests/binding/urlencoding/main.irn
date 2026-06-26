@@ -1,0 +1,4 @@
+import urlencoding
+
+def main():
+    print(encode("a b&c"))

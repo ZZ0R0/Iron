@@ -1,0 +1,9 @@
+# bindings auto-générés depuis `distance` (ironc bind)
+crate distance = "0.4.0"
+
+extern fn levenshtein(s: str, t: str) -> usize = "distance::levenshtein"
+extern fn sift3(s: str, t: str) -> f32 = "distance::sift3"
+extern fn hamming(s: str, t: str) -> Result[usize] = "distance::hamming"
+extern fn damerau_levenshtein(s: str, t: str) -> usize = "distance::damerau_levenshtein"
+
+# 4 item(s) bindé(s), 0 non mappable(s) sauté(s)

@@ -1,0 +1,14 @@
+# bindings auto-générés depuis `urlencoding` (ironc bind)
+crate urlencoding = "2.1.3"
+
+extern type Encoded = "urlencoding::Encoded":
+    fn to_str(self) -> str = "to_str"
+    fn to_string(self) -> str = "to_string"
+    fn append_to(self, string: str) -> unit = "append_to"
+
+extern fn encode_binary(data: list[u8]) -> str = "urlencoding::encode_binary"
+extern fn decode(data: str) -> Result[str] = "urlencoding::decode"
+extern fn decode_binary(data: list[u8]) -> str = "urlencoding::decode_binary"
+extern fn encode(data: str) -> str = "urlencoding::encode"
+
+# 7 item(s) bindé(s), 3 non mappable(s) sauté(s)

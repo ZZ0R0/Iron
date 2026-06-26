@@ -1,0 +1,41 @@
+# bindings auto-générés depuis `gcd` (ironc bind)
+crate gcd = "2.3.0"
+
+extern type NonZeroU128 = "gcd::NonZeroU128"
+
+extern type NonZeroU16 = "gcd::NonZeroU16"
+
+extern type NonZeroU32 = "gcd::NonZeroU32"
+
+extern type NonZeroU64 = "gcd::NonZeroU64"
+
+extern type NonZeroU8 = "gcd::NonZeroU8"
+
+extern type NonZeroUsize = "gcd::NonZeroUsize"
+
+extern fn binary_u8(u: u8, v: u8) -> u8 = "gcd::binary_u8"
+extern fn euclid_u8(a: u8, b: u8) -> u8 = "gcd::euclid_u8"
+extern fn binary_u16(u: u16, v: u16) -> u16 = "gcd::binary_u16"
+extern fn euclid_u16(a: u16, b: u16) -> u16 = "gcd::euclid_u16"
+extern fn binary_u32(u: u32, v: u32) -> u32 = "gcd::binary_u32"
+extern fn euclid_u32(a: u32, b: u32) -> u32 = "gcd::euclid_u32"
+extern fn binary_u64(u: u64, v: u64) -> u64 = "gcd::binary_u64"
+extern fn euclid_u64(a: u64, b: u64) -> u64 = "gcd::euclid_u64"
+extern fn binary_u128(u: u128, v: u128) -> u128 = "gcd::binary_u128"
+extern fn euclid_u128(a: u128, b: u128) -> u128 = "gcd::euclid_u128"
+extern fn binary_usize(u: usize, v: usize) -> usize = "gcd::binary_usize"
+extern fn euclid_usize(a: usize, b: usize) -> usize = "gcd::euclid_usize"
+extern fn binary_nonzero_u8(u: NonZeroU8, v: NonZeroU8) -> NonZeroU8 = "gcd::binary_nonzero_u8"
+extern fn euclid_nonzero_u8(a: NonZeroU8, b: NonZeroU8) -> NonZeroU8 = "gcd::euclid_nonzero_u8"
+extern fn binary_nonzero_u16(u: NonZeroU16, v: NonZeroU16) -> NonZeroU16 = "gcd::binary_nonzero_u16"
+extern fn euclid_nonzero_u16(a: NonZeroU16, b: NonZeroU16) -> NonZeroU16 = "gcd::euclid_nonzero_u16"
+extern fn binary_nonzero_u32(u: NonZeroU32, v: NonZeroU32) -> NonZeroU32 = "gcd::binary_nonzero_u32"
+extern fn euclid_nonzero_u32(a: NonZeroU32, b: NonZeroU32) -> NonZeroU32 = "gcd::euclid_nonzero_u32"
+extern fn binary_nonzero_u64(u: NonZeroU64, v: NonZeroU64) -> NonZeroU64 = "gcd::binary_nonzero_u64"
+extern fn euclid_nonzero_u64(a: NonZeroU64, b: NonZeroU64) -> NonZeroU64 = "gcd::euclid_nonzero_u64"
+extern fn binary_nonzero_u128(u: NonZeroU128, v: NonZeroU128) -> NonZeroU128 = "gcd::binary_nonzero_u128"
+extern fn euclid_nonzero_u128(a: NonZeroU128, b: NonZeroU128) -> NonZeroU128 = "gcd::euclid_nonzero_u128"
+extern fn binary_nonzero_usize(u: NonZeroUsize, v: NonZeroUsize) -> NonZeroUsize = "gcd::binary_nonzero_usize"
+extern fn euclid_nonzero_usize(a: NonZeroUsize, b: NonZeroUsize) -> NonZeroUsize = "gcd::euclid_nonzero_usize"
+
+# 24 item(s) bindé(s), 0 non mappable(s) sauté(s)

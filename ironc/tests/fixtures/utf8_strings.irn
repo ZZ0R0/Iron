@@ -1,0 +1,8 @@
+# [V9.1/5.2] Littéraux non-ASCII : le lexer décode l'UTF-8 (corrige le bug octet-comme-char).
+
+def main():
+    print("café déjà")
+    print("Köln — 北京")
+    print("emoji: 🦀")
+    s = "naïve"
+    print(len(s))

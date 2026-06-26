@@ -1,6 +1,6 @@
 # V9.1 — Réalisation (tracker)
 
-> **État : RÉALISATION QUASI COMPLÈTE — 22/23 pistes ✅** (reste 5.2 batterie-30 + 5.3 gate final ;
+> **État : RÉALISATION QUASI COMPLÈTE — 23/23 pistes ✅** (reste 5.3 = agrégation du gate final ;
 > 2.2 source-maps-expr = raffinement assumé non bloquant). **Liste propre et exhaustive**, 1:1 avec les specs.
 
 ## Avancement des pistes (5 vagues, 23 pistes)
@@ -28,7 +28,7 @@
 | 4.6 | 72200 | `ironc doc` | 4 | ✅ fait |
 | 4.7 | 72300 | Intégration debugger | 4 | ✅ fait |
 | 5.1 | 90600 | Le « 0.1 % » tracé | 5 | ✅ fait |
-| 5.2 | 90700 | Batterie élargie 30 vrais crates | 5 | ☐ todo |
+| 5.2 | 90700 | Batterie élargie 30 vrais crates | 5 | ✅ fait |
 | **5.3** | 90800 | **Gate V9.1 final** | 5 | ☐ todo |
 
 ## Principe figé (D1) — ne jamais l'oublier
@@ -69,8 +69,13 @@ pas d'un type-checker Iron maison. La surcouche, comme le codegen.
   I8) + `launch.json` CodeLLDB + commande VSCode `Iron: Build (debug)`. Flux prouvé bout-en-bout (gdb pose
   un breakpoint sur le `.rs`, la map retraduit l'arrêt en ligne Iron). Middleware DAP transparent = post-v0.
 - **2.2** source-maps : la ligne marche déjà (granularité expression = raffinement non fait).
+- **5.1** « 0.1 % » figé dans `generator.md` + messages d'orientation vérifiés (table ci-dessous).
+- **5.2** batterie **30/30 VERT** (15 existants + 15 nouveaux crates auto-bindés via `ironc add` + `import`).
+  **Iron-pur mesuré : 26/30 (87 %)** (4 `rust { }`, dans la fourchette V8 62–92 %). 16 via `import`, 11 via
+  `use` manuel. Nouveaux : strsim · urlencoding · titlecase · is_prime · roman · deunicode · unidecode ·
+  levenshtein · htmlescape · fastrand · pluralizer · gcd · distance · sift4 · primes.
 
-**☐ RESTE** : Vague 5 (5.1 doc 0.1% · 5.2 batterie-30 · 5.3 gate).
+**☐ RESTE** : 5.3 (agrégation gate V9.1 final).
 
 ## Écarts / faiblesses (relevés)
 
@@ -87,6 +92,17 @@ pas d'un type-checker Iron maison. La surcouche, comme le codegen.
   unreachable!()` ⇒ totalité prouvée. Bénéficie aussi au cas `IronError`.
 - Extern `Result[T, E]` (binding `.iri`) hors-scope V0 : les fns externes restent `Result[T]`→`IronError`
   (le mapping `.map_err(IronError)` ne s'applique qu'à `Result(_)`). Erreurs typées = fns Iron pour l'instant.
+- **5.2 a révélé deux vrais bugs de langage** (le but même de la batterie) — corrigés :
+  - **Littéraux non-ASCII mojibakés** : le lexer poussait `octet as char` (Latin-1) → `"café"` devenait
+    `Café`. Corrigé : `push_char` décode le code point UTF-8 complet (`lex_string`/`lex_fstring`/`lex_char`).
+  - **`len(str)` rendait des octets** (`.len()`) au lieu de caractères (sémantique Python) → `len("naïve")`
+    valait 6. Corrigé : `len`/`.len()` type-aware → `chars().count()` pour `str`, `.len()` pour list/dict/set.
+  Fixture `utf8_strings.irn` gèle les deux.
+- `ironc add` normalise désormais le **nom de fichier** `.iri` (tirets → underscores) : `import num_integer`
+  trouve `num_integer.iri` (le nom de crate garde son tiret pour cargo). Débloque les crates hyphénés.
+- Couverture du binder **mesurée honnêtement** : ~30 crates sondés, ~15 bindés proprement « Iron-pur » du
+  premier coup ; les ratés typiques = génériques `AsRef`/`impl Trait`, retours `Cow`, traits non bénis,
+  params `&[u8]`. Conforme au « 0.1 % » (binding non garanti → `.iri` curé ou `rust { }`).
 
 ## Hors V9.1 (le « 0.1 % », spec 90600) — **tracé + messages d'orientation vérifiés**
 

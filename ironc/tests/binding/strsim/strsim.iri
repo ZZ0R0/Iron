@@ -1,0 +1,16 @@
+# bindings auto-générés depuis `strsim` (ironc bind)
+crate strsim = "0.11.1"
+
+extern type HammingResult = "strsim::HammingResult"
+
+extern fn hamming(a: str, b: str) -> HammingResult = "strsim::hamming"
+extern fn jaro(a: str, b: str) -> f64 = "strsim::jaro"
+extern fn jaro_winkler(a: str, b: str) -> f64 = "strsim::jaro_winkler"
+extern fn levenshtein(a: str, b: str) -> usize = "strsim::levenshtein"
+extern fn normalized_levenshtein(a: str, b: str) -> f64 = "strsim::normalized_levenshtein"
+extern fn osa_distance(a: str, b: str) -> usize = "strsim::osa_distance"
+extern fn damerau_levenshtein(a: str, b: str) -> usize = "strsim::damerau_levenshtein"
+extern fn normalized_damerau_levenshtein(a: str, b: str) -> f64 = "strsim::normalized_damerau_levenshtein"
+extern fn sorensen_dice(a: str, b: str) -> f64 = "strsim::sorensen_dice"
+
+# 9 item(s) bindé(s), 5 non mappable(s) sauté(s)

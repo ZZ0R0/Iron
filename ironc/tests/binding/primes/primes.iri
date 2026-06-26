@@ -1,0 +1,22 @@
+# bindings auto-générés depuis `primes` (ironc bind)
+crate primes = "0.4.0"
+
+extern type PrimeSetIter = "primes::PrimeSetIter":
+    fn next(mut self) -> Option[u64] = "primes::Iterator::next"
+
+extern type Sieve = "primes::Sieve":
+    fn new() -> Sieve = "primes::Sieve::new"
+    fn expand(mut self) -> unit = "primes::PrimeSetBasics::expand"
+    fn list(self) -> list[u64] = "primes::PrimeSetBasics::list" [clone]
+
+extern type TrialDivision = "primes::TrialDivision":
+    fn new() -> TrialDivision = "primes::TrialDivision::new"
+    fn expand(mut self) -> unit = "primes::PrimeSetBasics::expand"
+    fn list(self) -> list[u64] = "primes::PrimeSetBasics::list" [clone]
+    fn index(self, index: usize) -> u64 = "primes::Index::index" [clone]
+
+extern fn factors(x: u64) -> list[u64] = "primes::factors"
+extern fn factors_uniq(x: u64) -> list[u64] = "primes::factors_uniq"
+extern fn is_prime(n: u64) -> bool = "primes::is_prime"
+
+# 11 item(s) bindé(s), 0 non mappable(s) sauté(s)

@@ -1,0 +1,9 @@
+# bindings auto-générés depuis `roman` (ironc bind)
+crate roman = "0.2.1"
+
+extern fn to(n: i32) -> Option[str] = "roman::to"
+extern fn to_lower(n: i32) -> Option[str] = "roman::to_lower"
+extern fn from(txt: str) -> Option[i32] = "roman::from"
+extern fn from_lower(txt: str) -> Option[i32] = "roman::from_lower"
+
+# 4 item(s) bindé(s), 0 non mappable(s) sauté(s)

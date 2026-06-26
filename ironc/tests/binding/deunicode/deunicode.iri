@@ -1,0 +1,13 @@
+# bindings auto-générés depuis `deunicode` (ironc bind)
+crate deunicode = "1.6.2"
+
+extern type AsciiCharsIter = "deunicode::AsciiCharsIter":
+    fn count(own self) -> usize = "deunicode::Iterator::count"
+    fn size_hint(self) -> (usize, Option[usize]) = "deunicode::Iterator::size_hint"
+
+extern fn deunicode(s: str) -> str = "deunicode::deunicode"
+extern fn deunicode_with_tofu(s: str, custom_placeholder: str) -> str = "deunicode::deunicode_with_tofu"
+extern fn deunicode_with_tofu_cow(s: str, custom_placeholder: str) -> str = "deunicode::deunicode_with_tofu_cow"
+extern fn deunicode_char(ch: char) -> Option[str] = "deunicode::deunicode_char"
+
+# 6 item(s) bindé(s), 2 non mappable(s) sauté(s)

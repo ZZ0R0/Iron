@@ -1,0 +1,6 @@
+# bindings auto-générés depuis `levenshtein` (ironc bind)
+crate levenshtein = "1.0.5"
+
+extern fn levenshtein(a: str, b: str) -> usize = "levenshtein::levenshtein"
+
+# 1 item(s) bindé(s), 0 non mappable(s) sauté(s)

@@ -1,0 +1,34 @@
+# bindings auto-générés depuis `fastrand` (ironc bind)
+crate fastrand = "2.4.1"
+
+extern type Rng = "fastrand::Rng":
+    fn new() -> Rng = "fastrand::Rng::new"
+    fn alphabetic(mut self) -> char = "alphabetic"
+    fn alphanumeric(mut self) -> char = "alphanumeric"
+    fn bool(mut self) -> bool = "bool"
+    fn digit(mut self, base: u32) -> char = "digit"
+    fn f32_inclusive(mut self) -> f32 = "f32_inclusive"
+    fn f32(mut self) -> f32 = "f32"
+    fn f64_inclusive(mut self) -> f64 = "f64_inclusive"
+    fn f64(mut self) -> f64 = "f64"
+    fn lowercase(mut self) -> char = "lowercase"
+    fn seed(mut self, seed: u64) -> unit = "seed"
+    fn get_seed(self) -> u64 = "get_seed"
+    fn fill(mut self, slice: list[u8]) -> unit = "fill"
+    fn uppercase(mut self) -> char = "uppercase"
+
+extern fn seed(seed: u64) -> unit = "fastrand::seed"
+extern fn get_seed() -> u64 = "fastrand::get_seed"
+extern fn digit(base: u32) -> char = "fastrand::digit"
+extern fn fill(slice: list[u8]) -> unit = "fastrand::fill"
+extern fn bool() -> bool = "fastrand::bool"
+extern fn f32() -> f32 = "fastrand::f32"
+extern fn f32_inclusive() -> f32 = "fastrand::f32_inclusive"
+extern fn alphabetic() -> char = "fastrand::alphabetic"
+extern fn f64() -> f64 = "fastrand::f64"
+extern fn f64_inclusive() -> f64 = "fastrand::f64_inclusive"
+extern fn alphanumeric() -> char = "fastrand::alphanumeric"
+extern fn lowercase() -> char = "fastrand::lowercase"
+extern fn uppercase() -> char = "fastrand::uppercase"
+
+# 27 item(s) bindé(s), 34 non mappable(s) sauté(s)

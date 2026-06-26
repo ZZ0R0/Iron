@@ -48,6 +48,19 @@ impl<'a> Lexer<'a> {
     fn peek2(&self) -> Option<u8> {
         self.src.get(self.pos + 1).copied()
     }
+    /// Pousse le **code point UTF-8** courant dans `s` et avance `pos` du bon nombre d'octets. Corrige
+    /// le bug « octet-comme-char » (`c as char`) qui mojibakait les littéraux non-ASCII (`"café"` → `Café`).
+    /// La source `.irn` est de l'UTF-8 valide ; on décode la séquence complète d'après l'octet de tête.
+    fn push_char(&mut self, s: &mut String) {
+        let b = self.src[self.pos];
+        let len = if b < 0x80 { 1 } else if b < 0xE0 { 2 } else if b < 0xF0 { 3 } else { 4 };
+        let end = (self.pos + len).min(self.src.len());
+        match std::str::from_utf8(&self.src[self.pos..end]) {
+            Ok(ch) => s.push_str(ch),
+            Err(_) => s.push(b as char), // repli défensif (ne devrait pas survenir sur UTF-8 valide)
+        }
+        self.pos = end;
+    }
     fn span(&self, start: usize) -> Span {
         Span::new(self.file, start as u32, self.pos as u32)
     }
@@ -340,10 +353,7 @@ impl<'a> Lexer<'a> {
                     }
                     self.pos += 1;
                 }
-                Some(c) => {
-                    s.push(c as char);
-                    self.pos += 1;
-                }
+                Some(_) => self.push_char(&mut s), // UTF-8 complet (corrige le mojibake non-ASCII)
             }
         }
         let mut chars = s.chars();
@@ -377,10 +387,7 @@ impl<'a> Lexer<'a> {
                     }
                     self.pos += 1;
                 }
-                Some(c) => {
-                    s.push(c as char);
-                    self.pos += 1;
-                }
+                Some(_) => self.push_char(&mut s), // UTF-8 complet (corrige le mojibake non-ASCII)
             }
         }
         self.push(TokenKind::FStr(s), start);
@@ -410,10 +417,7 @@ impl<'a> Lexer<'a> {
                     self.pos += 1;
                 }
                 Some(b'\n') => return Err(self.err(start, "chaîne non terminée")),
-                Some(c) => {
-                    s.push(c as char);
-                    self.pos += 1;
-                }
+                Some(_) => self.push_char(&mut s), // UTF-8 complet (corrige le mojibake non-ASCII)
             }
         }
         self.push(TokenKind::Str(s), start);

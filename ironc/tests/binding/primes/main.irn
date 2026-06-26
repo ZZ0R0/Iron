@@ -1,0 +1,4 @@
+import primes
+
+def main():
+    print(is_prime(to_u64(97)))

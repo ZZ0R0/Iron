@@ -1,0 +1,4 @@
+import gcd
+
+def main():
+    print(to_i64(binary_u8(to_u8(48), to_u8(36))))

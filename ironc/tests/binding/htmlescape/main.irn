@@ -1,0 +1,4 @@
+import htmlescape
+
+def main():
+    print(encode_minimal("<x>"))

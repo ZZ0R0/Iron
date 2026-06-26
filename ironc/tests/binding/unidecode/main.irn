@@ -1,0 +1,4 @@
+import unidecode
+
+def main():
+    print(unidecode("Æneid çà 北京"))

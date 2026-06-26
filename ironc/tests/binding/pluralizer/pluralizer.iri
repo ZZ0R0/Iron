@@ -1,0 +1,14 @@
+# bindings auto-générés depuis `pluralizer` (ironc bind)
+crate pluralizer = "0.5.0"
+
+extern type Regex = "pluralizer::Regex"
+
+extern type UncountableRule = "pluralizer::UncountableRule"
+
+extern fn add_irregular_rule(singular: str, plural: str) -> unit = "pluralizer::add_irregular_rule"
+extern fn add_uncountable_rule(rule: UncountableRule) -> unit = "pluralizer::add_uncountable_rule"
+extern fn add_plural_rule(rule: Regex, placement: str) -> unit = "pluralizer::add_plural_rule"
+extern fn add_singular_rule(rule: Regex, placement: str) -> unit = "pluralizer::add_singular_rule"
+extern fn pluralize(word: str, count: isize, include_count: bool) -> str = "pluralizer::pluralize"
+
+# 5 item(s) bindé(s), 0 non mappable(s) sauté(s)

@@ -1,0 +1,4 @@
+import levenshtein
+
+def main():
+    print(levenshtein("foo", "bar"))

@@ -1,0 +1,6 @@
+# bindings auto-générés depuis `is_prime` (ironc bind)
+crate is_prime = "2.0.9"
+
+extern fn is_prime(n_str: str) -> bool = "is_prime::is_prime"
+
+# 1 item(s) bindé(s), 0 non mappable(s) sauté(s)

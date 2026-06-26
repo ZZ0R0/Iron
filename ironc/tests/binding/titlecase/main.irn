@@ -1,0 +1,4 @@
+import titlecase
+
+def main():
+    print(titlecase("a tale of two cities"))

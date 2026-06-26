@@ -1,0 +1,7 @@
+# bindings auto-générés depuis `unidecode` (ironc bind)
+crate unidecode = "0.3.0"
+
+extern fn unidecode(s: str) -> str = "unidecode::unidecode"
+extern fn unidecode_char(ch: char) -> str = "unidecode::unidecode_char" [clone]
+
+# 2 item(s) bindé(s), 0 non mappable(s) sauté(s)

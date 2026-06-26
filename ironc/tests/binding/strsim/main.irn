@@ -1,0 +1,4 @@
+import strsim
+
+def main():
+    print(levenshtein("kitten", "sitting"))

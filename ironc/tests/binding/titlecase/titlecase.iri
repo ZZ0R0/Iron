@@ -1,0 +1,7 @@
+# bindings auto-générés depuis `titlecase` (ironc bind)
+crate titlecase = "3.6.0"
+
+extern fn titlecase(input: str) -> str = "titlecase::titlecase"
+extern fn ceil_char_boundary(s: str, index: usize) -> usize = "titlecase::ceil_char_boundary"
+
+# 2 item(s) bindé(s), 0 non mappable(s) sauté(s)

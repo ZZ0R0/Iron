@@ -1,0 +1,8 @@
+# bindings auto-générés depuis `htmlescape` (ironc bind)
+crate htmlescape = "0.3.1"
+
+extern fn encode_minimal(s: str) -> str = "htmlescape::encode_minimal"
+extern fn encode_attribute(s: str) -> str = "htmlescape::encode_attribute"
+extern fn decode_html(s: str) -> Result[str] = "htmlescape::decode_html"
+
+# 3 item(s) bindé(s), 3 non mappable(s) sauté(s)

@@ -1,0 +1,5 @@
+import fastrand
+
+def main():
+    seed(to_u64(12345))
+    print(get_seed())

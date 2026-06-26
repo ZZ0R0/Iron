@@ -1218,7 +1218,13 @@ impl Cx<'_> {
                 }
                 "len" if args.len() == 1 => {
                     let a = self.place(&args[0]);
-                    return quote! { (#a.len() as i64) };
+                    // Sémantique Python : `len(str)` = nombre de **caractères** (Unicode), pas d'octets.
+                    // list/dict/set → `.len()` (nombre d'éléments).
+                    return if matches!(self.type_of(&args[0]), Type::Str) {
+                        quote! { (#a.chars().count() as i64) }
+                    } else {
+                        quote! { (#a.len() as i64) }
+                    };
                 }
                 "range" => {
                     let r = self.range_bounds(args);
@@ -1621,7 +1627,11 @@ impl Cx<'_> {
                 let s = arg(self, 0);
                 quote! { #b.contains((#s).as_str()) }
             }
-            (Type::Str | Type::List(_), "len") => {
+            (Type::Str, "len") => {
+                let b = self.place(base);
+                quote! { (#b.chars().count() as i64) } // Python : len(str) = nb de caractères Unicode
+            }
+            (Type::List(_), "len") => {
                 let b = self.place(base);
                 quote! { (#b.len() as i64) }
             }

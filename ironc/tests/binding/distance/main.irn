@@ -1,0 +1,4 @@
+import distance
+
+def main():
+    print(to_i64(levenshtein("foo", "bar")))

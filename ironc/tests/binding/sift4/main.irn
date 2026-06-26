@@ -1,0 +1,4 @@
+import sift4
+
+def main():
+    print(to_i64(simple("London", "Lndon")))

@@ -1,0 +1,4 @@
+import pluralizer
+
+def main():
+    print(pluralize("box", to_isize(2), false))

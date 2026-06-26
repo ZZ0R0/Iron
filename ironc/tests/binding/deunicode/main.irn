@@ -1,0 +1,4 @@
+import deunicode
+
+def main():
+    print(deunicode("Café déjà vu — Köln"))
