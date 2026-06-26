@@ -188,9 +188,16 @@ pub(crate) fn expr(cx: &mut Inf, e: &Expr, scope: &Scope) -> Type {
                     "ok" => Type::Result(Box::new(arg0_ty(cx, args))),
                     "err" => Type::Result(Box::new(Type::Unit)),
                     // stdlib V4 (80100)
-                    "str" => Type::Str,
+                    "str" | "join" => Type::Str,
                     "sqrt" => Type::F64,
-                    "abs" | "min" | "max" => arg0_ty(cx, args),
+                    "int" | "round" => Type::I64,
+                    "float" => Type::F64,
+                    "abs" => arg0_ty(cx, args),
+                    // min/max : sur liste (1 arg) → type d'élément ; sur 2 args → leur type.
+                    "min" | "max" => match (args.len(), arg0_ty(cx, args)) {
+                        (1, Type::List(e)) => *e,
+                        (_, t) => t,
+                    },
                     "push" => Type::Unit,
                     // stdlib élargie V6 (80200)
                     "sum" => match args.first().and_then(|a| cx.tm.get(&a.id)) {

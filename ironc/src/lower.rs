@@ -1155,6 +1155,33 @@ impl Cx<'_> {
                     let init = self.value(&args[2]);
                     return quote! { (#xs).into_iter().fold(#init, #f) };
                 }
+                // min/max sur une LISTE (Python) : `min(xs)` ; les formes 2-arg restent plus bas.
+                "min" if args.len() == 1 => {
+                    let xs = self.place(&args[0]);
+                    return quote! { #xs.iter().cloned().min_by(|a, b| a.partial_cmp(b).unwrap()).unwrap() };
+                }
+                "max" if args.len() == 1 => {
+                    let xs = self.place(&args[0]);
+                    return quote! { #xs.iter().cloned().max_by(|a, b| a.partial_cmp(b).unwrap()).unwrap() };
+                }
+                // conversions / chaînes
+                "join" if args.len() == 2 => {
+                    let xs = self.place(&args[0]);
+                    let sep = self.value(&args[1]);
+                    return quote! { #xs.join((#sep).as_str()) };
+                }
+                "int" if args.len() == 1 => {
+                    let s = self.value(&args[0]);
+                    return quote! { (#s).trim().parse::<i64>().unwrap_or(0) };
+                }
+                "float" if args.len() == 1 => {
+                    let s = self.value(&args[0]);
+                    return quote! { (#s).trim().parse::<f64>().unwrap_or(0.0) };
+                }
+                "round" if args.len() == 1 => {
+                    let x = self.value(&args[0]);
+                    return quote! { ((#x).round() as i64) };
+                }
                 // casts numériques `to_<t>(x)` → `(x as t)` (20800).
                 cast if args.len() == 1
                     && cast.strip_prefix("to_").map_or(false, |t| numeric_type_by_name(t).is_some()) =>
