@@ -916,11 +916,14 @@ impl Cx<'_> {
     }
 
     fn call(&mut self, callee: &Expr, args: &[Expr]) -> TokenStream {
-        // modules stdlib namespacés (surface Python, D2) : `io.read_file(...)` → wrappers `std::fs`.
+        // modules stdlib namespacés (surface Python, D2) : `io`/`os`/`time` → wrappers `std`.
         if let ExprKind::Field { base, name } = &callee.kind {
             if let ExprKind::Var(m) = &base.kind {
-                if m == "io" && !self.user_fns.contains("io") {
-                    return self.lower_io(name, args);
+                match m.as_str() {
+                    "io" => return self.lower_io(name, args),
+                    "os" => return self.lower_os(name, args),
+                    "time" => return self.lower_time(name, args),
+                    _ => {}
                 }
             }
         }
@@ -1240,6 +1243,10 @@ impl Cx<'_> {
                 let b = self.place(base);
                 quote! { #b.values().cloned().collect::<Vec<_>>() }
             }
+            (Type::Dict(..), "items") => {
+                let b = self.place(base);
+                quote! { #b.iter().map(|(__k, __v)| (__k.clone(), __v.clone())).collect::<Vec<_>>() }
+            }
             (Type::Dict(..), "get") if args.len() == 1 => {
                 let b = self.place(base);
                 let k = arg(self, 0);
@@ -1252,6 +1259,45 @@ impl Cx<'_> {
             }
             _ => return None,
         })
+    }
+
+    /// Module stdlib `os` (80800) : env/args/exit — wrappers `std::env`/`std::process`.
+    fn lower_os(&mut self, name: &str, args: &[Expr]) -> TokenStream {
+        match name {
+            "env" if args.len() == 1 => {
+                let n = self.value(&args[0]);
+                quote! { std::env::var(#n).ok() }
+            }
+            "args" => quote! { std::env::args().skip(1).collect::<Vec<_>>() },
+            "exit" if args.len() == 1 => {
+                let c = self.value(&args[0]);
+                quote! { std::process::exit((#c) as i32) }
+            }
+            other => {
+                let msg = format!("os.{other} : inconnue");
+                quote! { compile_error!(#msg) }
+            }
+        }
+    }
+
+    /// Module stdlib `time` (80800) : horloge/sommeil — wrappers `std::time`/`std::thread`.
+    fn lower_time(&mut self, name: &str, args: &[Expr]) -> TokenStream {
+        match name {
+            "now_secs" => quote! {
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs() as i64)
+                    .unwrap_or(0)
+            },
+            "sleep_ms" if args.len() == 1 => {
+                let n = self.value(&args[0]);
+                quote! { std::thread::sleep(std::time::Duration::from_millis((#n) as u64)) }
+            }
+            other => {
+                let msg = format!("time.{other} : inconnue");
+                quote! { compile_error!(#msg) }
+            }
+        }
     }
 
     /// Module stdlib `io` (80300, D2) : wrappers minces sur `std::fs`, faillibles → `Result`/`IronError`.

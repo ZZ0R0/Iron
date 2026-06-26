@@ -23,6 +23,7 @@ fn builtin_method_ret(bt: &Type, name: &str) -> Option<Type> {
         (Type::List(_) | Type::Set(_), "contains") => Type::Bool,
         (Type::Dict(k, _), "keys") => Type::List(k.clone()),
         (Type::Dict(_, v), "values") => Type::List(v.clone()),
+        (Type::Dict(k, v), "items") => Type::List(Box::new(Type::Tuple(vec![(**k).clone(), (**v).clone()]))),
         (Type::Dict(_, v), "get") => Type::Option(v.clone()),
         (Type::Dict(..), "contains") => Type::Bool,
         _ => return None,
@@ -243,19 +244,27 @@ pub(crate) fn expr(cx: &mut Inf, e: &Expr, scope: &Scope) -> Type {
                 },
                 _ => {
                     if let ExprKind::Field { base, name } = &callee.kind {
-                        // module stdlib `io` (80300) : types de retour (faillibles → Result).
-                        if matches!(&base.kind, ExprKind::Var(m) if m == "io") {
-                            let ret = match name.as_str() {
-                                "read_file" => Type::Result(Box::new(Type::Str)),
-                                "write_file" | "append_file" => Type::Result(Box::new(Type::Unit)),
-                                "read_lines" => Type::Result(Box::new(Type::List(Box::new(Type::Str)))),
-                                "exists" => Type::Bool,
-                                _ => Type::Unit,
+                        // modules stdlib io/os/time (80300/80800) : types de retour.
+                        if let ExprKind::Var(m) = &base.kind {
+                            let s = Box::new(Type::Str);
+                            let mod_ret = match (m.as_str(), name.as_str()) {
+                                ("io", "read_file") => Some(Type::Result(s.clone())),
+                                ("io", "write_file" | "append_file") => Some(Type::Result(Box::new(Type::Unit))),
+                                ("io", "read_lines") => Some(Type::Result(Box::new(Type::List(s.clone())))),
+                                ("io", "exists") => Some(Type::Bool),
+                                ("os", "env") => Some(Type::Option(s.clone())),
+                                ("os", "args") => Some(Type::List(s.clone())),
+                                ("os", "exit") => Some(Type::Unit),
+                                ("time", "now_secs") => Some(Type::I64),
+                                ("time", "sleep_ms") => Some(Type::Unit),
+                                _ => None,
                             };
-                            for a in args {
-                                expr(cx, a, scope);
+                            if let Some(ret) = mod_ret {
+                                for a in args {
+                                    expr(cx, a, scope);
+                                }
+                                return cx.set(e.id, ret);
                             }
-                            return cx.set(e.id, ret);
                         }
                         let bt = expr(cx, base, scope);
                         // construction de variante d'enum : `Enum.Variant(...)`
