@@ -1,0 +1,18 @@
+import primes
+import theory
+
+def main():
+    p = sieve(50)
+    print(p)
+    print(len(p))
+    for n in [12, 60, 97, 100]:
+        fs = factorize(n)
+        print(f"{n} -> {fs}")
+    print(f"gcd(48,36)={gcd(48, 36)} lcm(4,6)={lcm(4, 6)}")
+    for n in [6, 7, 27]:
+        print(f"collatz({n})={collatz_length(n)}")
+    perfects = []
+    for n in range(2, 100):
+        if divisor_sum(n) == n:
+            perfects.append(n)
+    print(f"perfects: {perfects}")

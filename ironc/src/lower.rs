@@ -131,6 +131,25 @@ fn is_copy(t: &Type) -> bool {
     matches!(t, Type::I64 | Type::F64 | Type::Bool | Type::Unit | Type::Num(_) | Type::Char)
 }
 
+/// Un paramètre est-il **réassigné** dans le corps (`n = …`) → `mut` dans la signature Rust (pattern Python).
+fn param_reassigned(name: &str, body: &[Stmt]) -> bool {
+    body.iter().any(|s| match &s.kind {
+        StmtKind::Let { name: n, .. } => n == name,
+        StmtKind::Assign { target, .. } => matches!(&target.kind, ExprKind::Var(n) if n == name),
+        StmtKind::If { then, elifs, els, .. } => {
+            param_reassigned(name, then)
+                || elifs.iter().any(|(_, b)| param_reassigned(name, b))
+                || param_reassigned(name, els)
+        }
+        StmtKind::While { body, .. } | StmtKind::For { body, .. } => param_reassigned(name, body),
+        StmtKind::Match { arms, .. } => arms.iter().any(|a| param_reassigned(name, &a.body)),
+        StmtKind::TryExcept { body, handler, .. } => {
+            param_reassigned(name, body) || param_reassigned(name, handler)
+        }
+        _ => false,
+    })
+}
+
 /// Une méthode mute-t-elle `self` → `&mut self` : affectation à `self.champ`/`self[i]` OU appel d'une
 /// méthode mutante sur un champ de `self` (`self.items.append(x)`). (surface Python)
 fn stmts_mutate_self(body: &[Stmt]) -> bool {
@@ -212,10 +231,16 @@ impl Cx<'_> {
                     .map(|(i, (n, t))| {
                         let pid = format_ident!("{}", n);
                         let ty = lower_type(t);
+                        // `mut` si le param est réassigné dans le corps (`n = …`) — pattern Python.
+                        let mut_kw = if param_reassigned(n, body) {
+                            quote! { mut }
+                        } else {
+                            quote! {}
+                        };
                         match mode_of(self.param_modes, name, i) {
                             ParamMode::ByRef => quote! { #pid: &#ty },
                             // InOut : `ty` est déjà `&mut T` (lower_type(Ref)).
-                            ParamMode::ByValue | ParamMode::InOut => quote! { #pid: #ty },
+                            ParamMode::ByValue | ParamMode::InOut => quote! { #mut_kw #pid: #ty },
                         }
                     })
                     .collect();

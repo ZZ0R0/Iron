@@ -1,0 +1,28 @@
+def sieve(n):
+    is_p = []
+    for i in range(n + 1):
+        is_p.append(True)
+    is_p[0] = False
+    if n >= 1:
+        is_p[1] = False
+    result = []
+    for i in range(2, n + 1):
+        if is_p[i]:
+            result.append(i)
+            j = i * i
+            while j <= n:
+                is_p[j] = False
+                j = j + i
+    return result
+
+def factorize(n):
+    factors = []
+    d = 2
+    while d * d <= n:
+        while n % d == 0:
+            factors.append(d)
+            n = n // d
+        d = d + 1
+    if n > 1:
+        factors.append(n)
+    return factors
