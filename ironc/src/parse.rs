@@ -714,11 +714,27 @@ impl Parser {
         let start = self.i;
         let id = self.fresh();
         self.adv(); // for
-        let var = self.ident()?;
+        // `for x in …` ou `for a, b in …` (destructuring de boucle, surface Python).
+        let mut names = vec![self.ident()?];
+        while self.eat(&TokenKind::Comma) {
+            names.push(self.ident()?);
+        }
         self.expect(&TokenKind::In, "`in`")?;
         let iter = self.expr()?;
         let body = self.block()?;
-        Ok(self.node(start, id, StmtKind::For { var, iter, body }))
+        if names.len() == 1 {
+            let var = names.pop().unwrap();
+            return Ok(self.node(start, id, StmtKind::For { var, iter, body }));
+        }
+        // désucre `for a, b in it` → `for __fvN in it: a, b = __fvN`.
+        let tmp = format!("__fv{}", id.0);
+        let did = self.fresh();
+        let tvid = self.fresh();
+        let tvar = self.node(start, tvid, ExprKind::Var(tmp.clone()));
+        let destr = self.node(start, did, StmtKind::Destructure { targets: names, value: tvar });
+        let mut new_body = vec![destr];
+        new_body.extend(body);
+        Ok(self.node(start, id, StmtKind::For { var: tmp, iter, body: new_body }))
     }
 
     fn match_stmt(&mut self) -> CResult<Stmt> {
