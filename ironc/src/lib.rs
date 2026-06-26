@@ -14,3 +14,4 @@ pub mod resolve;
 pub mod lower;
 pub mod sourcemap;
 pub mod driver;
+pub mod lint;

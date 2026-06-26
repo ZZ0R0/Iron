@@ -178,6 +178,21 @@ pub fn lib(input: &Path) -> CResult<()> {
     Ok(())
 }
 
+/// `ironc lint` (V9, 60500) : passe de lint sur l'AST ; jamais bloquant (warnings, I4).
+pub fn lint(input: &Path) -> CResult<()> {
+    let src = std::fs::read_to_string(input)
+        .map_err(|e| CompileError::msg(format!("lecture {} : {e}", input.display())))?;
+    let toks = crate::lex::lex(&src, 0)?;
+    let ast = crate::parse::parse(toks)?;
+    let lints = crate::lint::lint(&ast);
+    for l in &lints {
+        let (line, col) = line_col(&src, l.span.start);
+        eprintln!("{}:{}:{}: {} {}", input.display(), line, col, l.code, l.msg);
+    }
+    println!("{} lint(s).", lints.len());
+    Ok(())
+}
+
 pub fn build(input: &Path, audit: bool) -> CResult<PathBuf> {
     let src = std::fs::read_to_string(input)
         .map_err(|e| CompileError::msg(format!("lecture {} : {e}", input.display())))?;
