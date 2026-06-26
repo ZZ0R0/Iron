@@ -75,6 +75,41 @@ fn used_in_display(name: &str, body: &[Stmt]) -> bool {
     body.iter().any(|s| in_stmt(name, s))
 }
 
+/// Le param `name` est-il **appelé** (`name(...)`) dans le corps → type fonction (HOF, surface Python).
+fn param_is_called(name: &str, body: &[Stmt]) -> bool {
+    fn in_expr(name: &str, e: &Expr) -> bool {
+        match &e.kind {
+            ExprKind::Call { callee, args } => {
+                matches!(&callee.kind, ExprKind::Var(n) if n == name)
+                    || in_expr(name, callee)
+                    || args.iter().any(|a| in_expr(name, a))
+            }
+            ExprKind::Binary { lhs, rhs, .. } => in_expr(name, lhs) || in_expr(name, rhs),
+            ExprKind::Unary { expr, .. } => in_expr(name, expr),
+            ExprKind::Field { base, .. } => in_expr(name, base),
+            ExprKind::Index { base, idx } => in_expr(name, base) || in_expr(name, idx),
+            _ => false,
+        }
+    }
+    fn in_stmt(name: &str, s: &Stmt) -> bool {
+        match &s.kind {
+            StmtKind::Let { value, .. } | StmtKind::ExprStmt(value) | StmtKind::Assign { value, .. } => {
+                in_expr(name, value)
+            }
+            StmtKind::Return { value: Some(v) } => in_expr(name, v),
+            StmtKind::If { then, elifs, els, .. } => {
+                param_is_called(name, then)
+                    || elifs.iter().any(|(_, b)| param_is_called(name, b))
+                    || param_is_called(name, els)
+            }
+            StmtKind::While { body, .. } | StmtKind::For { body, .. } => param_is_called(name, body),
+            StmtKind::Match { arms, .. } => arms.iter().any(|a| param_is_called(name, &a.body)),
+            _ => false,
+        }
+    }
+    body.iter().any(|s| in_stmt(name, s))
+}
+
 /// Type d'un défaut littéral (`greeting="Hi"` → str, `by=1` → i64) — surface Python.
 fn default_literal_type(default: Option<&Expr>) -> Option<Type> {
     match default.map(|e| &e.kind) {
@@ -94,6 +129,11 @@ fn resolve_fn_params(generics: &mut Generics, params: &mut [(String, Type)], def
             continue;
         }
         let pname = params[idx].0.clone();
+        // Param APPELÉ (`f(x)`) → type fonction. Heuristique i64→i64 (cas courant) ; sinon annoter.
+        if param_is_called(&pname, body) {
+            params[idx].1 = Type::Fn(vec![Type::I64], Box::new(Type::I64));
+            continue;
+        }
         let resolved = default_literal_type(defaults.get(idx).and_then(|o| o.as_ref()))
             .or_else(|| used_numerically(&pname, body).then_some(Type::I64))
             .or_else(|| used_in_display(&pname, body).then_some(Type::Str))

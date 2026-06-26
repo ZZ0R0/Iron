@@ -131,10 +131,12 @@ fn is_copy(t: &Type) -> bool {
     matches!(t, Type::I64 | Type::F64 | Type::Bool | Type::Unit | Type::Num(_) | Type::Char)
 }
 
-/// Une méthode mute-t-elle `self` (affectation à `self.champ`/`self[i]`) → `&mut self` (surface Python).
+/// Une méthode mute-t-elle `self` → `&mut self` : affectation à `self.champ`/`self[i]` OU appel d'une
+/// méthode mutante sur un champ de `self` (`self.items.append(x)`). (surface Python)
 fn stmts_mutate_self(body: &[Stmt]) -> bool {
     body.iter().any(|s| match &s.kind {
         StmtKind::Assign { target, .. } => expr_is_self_place(target),
+        StmtKind::ExprStmt(e) | StmtKind::Let { value: e, .. } => expr_mutates_self(e),
         StmtKind::If { then, elifs, els, .. } => {
             stmts_mutate_self(then) || elifs.iter().any(|(_, b)| stmts_mutate_self(b)) || stmts_mutate_self(els)
         }
@@ -144,11 +146,32 @@ fn stmts_mutate_self(body: &[Stmt]) -> bool {
     })
 }
 
+/// Place dérivée de `self` (`self.champ`, `self[i]`, `self.a.b`).
 fn expr_is_self_place(e: &Expr) -> bool {
     match &e.kind {
-        ExprKind::Field { base, .. } | ExprKind::Index { base, .. } => {
-            matches!(&base.kind, ExprKind::Var(n) if n == "self") || expr_is_self_place(base)
+        ExprKind::Var(n) => n == "self",
+        ExprKind::Field { base, .. } | ExprKind::Index { base, .. } => expr_is_self_place(base),
+        _ => false,
+    }
+}
+
+/// Méthode built-in qui mute son receveur (`xs.append(x)`, `s.insert`, …).
+fn is_mutating_method(name: &str) -> bool {
+    matches!(
+        name,
+        "append" | "push" | "pop" | "sort" | "reverse" | "insert" | "remove" | "add" | "clear" | "extend"
+    )
+}
+
+fn expr_mutates_self(e: &Expr) -> bool {
+    match &e.kind {
+        ExprKind::Call { callee, args } => {
+            let direct = matches!(&callee.kind,
+                ExprKind::Field { base, name } if expr_is_self_place(base) && is_mutating_method(name));
+            direct || args.iter().any(expr_mutates_self)
         }
+        ExprKind::Binary { lhs, rhs, .. } => expr_mutates_self(lhs) || expr_mutates_self(rhs),
+        ExprKind::Unary { expr, .. } | ExprKind::Field { base: expr, .. } => expr_mutates_self(expr),
         _ => false,
     }
 }
