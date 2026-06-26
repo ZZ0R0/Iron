@@ -220,6 +220,31 @@ pub fn lib(input: &Path) -> CResult<()> {
     Ok(())
 }
 
+/// `ironc check` (V9.1, 60800) : diagnostics haute-fidélité par **overlay rustc** (la surcouche). Transpile
+/// → `cargo check` → remonte les erreurs rustc en `Span` Iron. Erreurs Iron (lex/parse/inférence) attrapées
+/// d'abord par `compile` ; erreurs profondes (types/traits/borrow) par rustc. Zéro faux-positif.
+pub fn check(input: &Path) -> CResult<()> {
+    let src = std::fs::read_to_string(input)
+        .map_err(|e| CompileError::msg(format!("lecture {} : {e}", input.display())))?;
+    let base_dir = input.parent().unwrap_or(Path::new("."));
+    let compiled = compile(&src, 0, base_dir)?; // niveau rapide : erreurs Iron
+    let out_dir = out_dir_for(input);
+    emit_project(&out_dir, &compiled.rust_src, &compiled.crates)
+        .map_err(|e| CompileError::msg(format!("émission projet : {e}")))?;
+    let output = Command::new("cargo")
+        .args(["check", "--quiet"])
+        .current_dir(&out_dir)
+        .output()
+        .map_err(|e| CompileError::msg(format!("cargo introuvable : {e}")))?;
+    if !output.status.success() {
+        // niveau profond : erreurs rustc → remontées en Span Iron (I8).
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(CompileError::msg(remontee(&stderr, &compiled, &src, input)));
+    }
+    println!("✓ aucune erreur ({}).", input.display());
+    Ok(())
+}
+
 /// `ironc add <crate>` (V9.1, 52300) : binde un crate Rust et écrit `<crate>.iri` dans le dossier courant
 /// (que `import <crate>` trouvera) + l'ajoute à `ironc.toml`. Crée un projet temporaire pour rustdoc.
 pub fn add(crate_name: &str) -> CResult<()> {
