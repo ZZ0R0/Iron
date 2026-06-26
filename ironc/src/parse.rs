@@ -1158,11 +1158,14 @@ impl Parser {
             match self.cur() {
                 TokenKind::LParen => {
                     self.adv();
-                    if matches!(self.cur(), TokenKind::Ident(_)) && matches!(self.nth(1), TokenKind::Assign) {
-                        // arguments nommés → construction de struct `S(champ=expr)`
+                    if matches!(self.cur(), TokenKind::Ident(_))
+                        && matches!(self.nth(1), TokenKind::Assign)
+                        && matches!(e.kind, ExprKind::Var(_))
+                    {
+                        // arguments nommés sur un identifiant → construction de struct / appel-kwargs `Name(champ=expr)`
                         let name = match &e.kind {
                             ExprKind::Var(n) => n.clone(),
-                            _ => return Err(self.err("construction de struct sur non-identifiant")),
+                            _ => unreachable!(),
                         };
                         let mut fields = Vec::new();
                         while !self.is(&TokenKind::RParen) {
@@ -1180,6 +1183,12 @@ impl Parser {
                     } else {
                         let mut args = Vec::new();
                         while !self.is(&TokenKind::RParen) {
+                            // arguments nommés sur méthode / appel mixte : non supportés (limite V7).
+                            if matches!(self.cur(), TokenKind::Ident(_)) && matches!(self.nth(1), TokenKind::Assign) {
+                                return Err(self.err(
+                                    "argument nommé non supporté ici (méthode ou appel mixte) — utilisez le positionnel : obj.methode(val) / sorted(xs)",
+                                ));
+                            }
                             args.push(self.expr()?);
                             if !self.eat(&TokenKind::Comma) {
                                 break;

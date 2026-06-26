@@ -696,6 +696,11 @@ impl Cx<'_> {
                         let r = self.value(rhs);
                         quote! { (#l).div_euclid(#r) }
                     }
+                    // `+` sur chaînes (Python) : concaténation (Rust `String + String` ne marche pas).
+                    BinOp::Add if matches!(self.type_of(lhs), Type::Str) => {
+                        let r = self.value(rhs);
+                        quote! { format!("{}{}", #l, #r) }
+                    }
                     // `in`/`not in` (10800) : contains / contains_key.
                     BinOp::In | BinOp::NotIn => {
                         let coll = self.place(rhs);
