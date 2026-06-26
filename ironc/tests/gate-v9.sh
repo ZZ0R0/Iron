@@ -21,9 +21,11 @@ chk "ironc lib (export Iron→Rust)" "cargo run --quiet --manifest-path $M -- li
 printf 'def main():\n    x = 1\n    y = 2\n    print(y)\n' > "$tmp/l.irn"
 chk "ironc lint" "cargo run --quiet --manifest-path $M -- lint $tmp/l.irn"
 chk "ironc run/build" "cargo run --quiet --manifest-path $M -- build $tmp/l.irn"
+printf 'Content-Length: 58\r\n\r\n{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' > "$tmp/lsp.in"
+chk "ironc lsp (initialize)" "cargo run --quiet --manifest-path $M -- lsp < $tmp/lsp.in | grep -q capabilities"
 rm -rf "$tmp"
 echo "========================================"
 echo "Gate V9 : $ok OK / $ko KO"
-[ "$ko" -eq 0 ] && echo "GATE V9: VERT (Pareto réalisé : interop bidir. + concurrence + polish + tooling + métrique)" \
+[ "$ko" -eq 0 ] && echo "GATE V9: VERT (interop bidir. + concurrence + async + yield + LSP + polish + tooling + métrique)" \
   || echo "GATE V9: ROUGE"
-echo "Reste (20% assumé, hors Pareto) : async · LSP · yield · fmt · source-maps-expr · type-errors · repl · registre · batterie-30"
+echo "Reste (long-tail, optionnel) : fmt · source-maps-expr · type-errors · repl · registre · batterie-30"
