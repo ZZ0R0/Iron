@@ -99,6 +99,9 @@ pub(crate) fn stmt(cx: &mut Inf, s: &Stmt, scope: &mut Scope) {
         StmtKind::ExprStmt(e) => {
             expr(cx, e, scope);
         }
+        StmtKind::Yield(e) => {
+            expr(cx, e, scope); // V9 (10900) : type collecté → `list[T]` (effective_ret)
+        }
         StmtKind::Match { scrutinee, arms } => {
             let sty = expr(cx, scrutinee, scope);
             for arm in arms {
@@ -413,6 +416,8 @@ pub(crate) fn expr(cx: &mut Inf, e: &Expr, scope: &Scope) -> Type {
                 other => other,
             }
         }
+        // `await e` (V9, 21200) : type de la valeur attendue (le `Future` n'est pas modélisé → type de `e`).
+        ExprKind::Await(e) => expr(cx, e, scope),
         ExprKind::Lambda { params, body } => {
             // Types des params laissés à l'inférence Rust (I2) ; on annote quand même le corps.
             let mut inner = scope.clone();

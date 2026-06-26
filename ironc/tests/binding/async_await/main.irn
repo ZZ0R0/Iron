@@ -1,0 +1,11 @@
+async def double(x: i64) -> i64:
+    return x * 2
+
+async def add_async(a: i64, b: i64) -> i64:
+    da = await double(a)
+    db = await double(b)
+    return da + db
+
+async def main():
+    r = await add_async(10, 11)
+    print(r)

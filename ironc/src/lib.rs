@@ -15,3 +15,4 @@ pub mod lower;
 pub mod sourcemap;
 pub mod driver;
 pub mod lint;
+pub mod lsp;

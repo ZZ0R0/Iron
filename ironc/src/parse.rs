@@ -181,8 +181,13 @@ impl Parser {
     }
 
     fn item(&mut self) -> CResult<Item> {
+        // `async def` (V9, 21200) : préfixe async devant `def`.
+        let is_async = matches!(self.cur(), TokenKind::Ident(s) if s == "async");
+        if is_async {
+            self.adv();
+        }
         match self.cur() {
-            TokenKind::Fn => self.fn_item(),
+            TokenKind::Fn => self.fn_item(is_async),
             TokenKind::Struct => self.struct_item(),
             TokenKind::Enum => self.enum_item(),
             TokenKind::Trait => self.trait_item(),
@@ -218,7 +223,7 @@ impl Parser {
         Ok((params, defaults))
     }
 
-    fn fn_item(&mut self) -> CResult<Item> {
+    fn fn_item(&mut self, is_async: bool) -> CResult<Item> {
         let start = self.i;
         let id = self.fresh();
         self.expect(&TokenKind::Fn, "`fn`")?;
@@ -232,7 +237,7 @@ impl Parser {
             Type::Unit
         };
         let body = self.block()?;
-        Ok(self.node(start, id, ItemKind::Fn { name, generics, params, ret, body, defaults }))
+        Ok(self.node(start, id, ItemKind::Fn { name, generics, params, ret, body, defaults, is_async }))
     }
 
     fn parse_generics(&mut self) -> CResult<Generics> {
@@ -606,6 +611,15 @@ impl Parser {
         }
         if matches!(self.cur(), TokenKind::Ident(s) if s == "raise") {
             return self.raise_stmt();
+        }
+        // `yield e` (V9, 10900) : générateur — soft-keyword.
+        if matches!(self.cur(), TokenKind::Ident(s) if s == "yield") {
+            let start = self.i;
+            let id = self.fresh();
+            self.adv();
+            let e = self.expr()?;
+            self.stmt_end()?;
+            return Ok(self.node(start, id, StmtKind::Yield(e)));
         }
         match self.cur() {
             TokenKind::Return => self.return_stmt(),
@@ -1159,6 +1173,14 @@ impl Parser {
     }
 
     fn unary_expr(&mut self) -> CResult<Expr> {
+        // `await e` (V9, 21200) : préfixe → `(e).await`.
+        if matches!(self.cur(), TokenKind::Ident(s) if s == "await") {
+            let start = self.i;
+            let id = self.fresh();
+            self.adv();
+            let e = self.unary_expr()?;
+            return Ok(self.node(start, id, ExprKind::Await(Box::new(e))));
+        }
         if self.is(&TokenKind::Minus) {
             let start = self.i;
             let id = self.fresh();

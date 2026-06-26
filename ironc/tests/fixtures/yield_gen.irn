@@ -1,0 +1,14 @@
+def evens(n: i64) -> list[i64]:
+    for i in range(n):
+        if i % 2 == 0:
+            yield i
+
+def squares(n: i64) -> list[i64]:
+    for i in range(n):
+        yield i * i
+
+def main():
+    print(sum(evens(10)))
+    print(sum(squares(5)))
+    for e in evens(6):
+        print(e)

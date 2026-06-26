@@ -1,6 +1,6 @@
 //! CLI `ironc build|run [--audit] <fichier.irn>`.
 
-use ironc::{bind, driver};
+use ironc::{bind, driver, lsp};
 use std::path::Path;
 use std::process::exit;
 
@@ -8,6 +8,10 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let audit = args.iter().any(|a| a == "--audit");
     let positional: Vec<&String> = args.iter().filter(|a| !a.starts_with("--")).collect();
+    // `ironc lsp` : serveur de langage (stdio, sans fichier).
+    if positional.first().map(|s| s.as_str()) == Some("lsp") {
+        exit(if lsp::lsp().is_ok() { 0 } else { 1 });
+    }
     if positional.len() < 2 {
         eprintln!("usage: ironc <build|run|test|bind|new> [--audit] <fichier.irn | nom>");
         exit(2);

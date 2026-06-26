@@ -50,7 +50,12 @@ pub fn compile(src: &str, file: FileId, base_dir: &Path) -> CResult<Compiled> {
     ast.extern_types = ext;
     // 20500 : résoudre les types de paramètres non annotés (pré-passe, réécrit l'AST) avant tout le reste.
     infer::params::resolve_param_types(&mut ast);
-    let bindings = load_bindings(&ast.imports, base_dir)?;
+    let mut bindings = load_bindings(&ast.imports, base_dir)?;
+    // async (V9, 21200) : si un `async def` est présent, injecter le runtime tokio (D4 : défaut tokio).
+    let has_async = ast.items.iter().any(|it| matches!(&it.kind, ItemKind::Fn { is_async: true, .. }));
+    if has_async && !bindings.crates.iter().any(|(n, _, _)| n == "tokio") {
+        bindings.crates.push(("tokio".to_string(), "1".to_string(), vec!["full".to_string()]));
+    }
     let types = infer::infer(&ast, &bindings);
     let (own, param_modes) = resolve::resolve(&ast, &types);
     let (ts, sm, audit) = lower::lower(&ast, &types, &own, &param_modes, &bindings);

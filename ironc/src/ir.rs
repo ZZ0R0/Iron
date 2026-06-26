@@ -224,6 +224,8 @@ pub enum ItemKind {
         body: Vec<Stmt>,
         /// Valeurs par défaut par paramètre (surface Python) ; `None` = obligatoire. Même longueur que `params`.
         defaults: Vec<Option<Expr>>,
+        /// `async def` (V9, 21200) → `async fn` + `await` ; runtime tokio injecté sur `main`.
+        is_async: bool,
     },
     Struct {
         name: String,
@@ -273,6 +275,8 @@ pub enum StmtKind {
     Continue,
     Return { value: Option<Expr> },
     ExprStmt(Expr),
+    /// `yield e` (V9, 10900) : générateur → accumulé dans un Vec (eager), la fn renvoie `list[T]`.
+    Yield(Expr),
     Pass,
     /// Bloc `rust { … }` : Rust verbatim (interop niveau 1, 50100).
     RustBlock(String),
@@ -366,6 +370,8 @@ pub enum ExprKind {
     ListLit { items: Vec<Expr> },
     DictLit { pairs: Vec<(Expr, Expr)> },
     Try { inner: Box<Expr> },
+    /// `await e` (V9, 21200) → `(e).await`.
+    Await(Box<Expr>),
     /// Closure (V6, 20700) : `lambda x, y: expr`. Corps mono-expression ; types des params
     /// laissés à l'inférence Rust (I2).
     Lambda { params: Vec<String>, body: Box<Expr> },

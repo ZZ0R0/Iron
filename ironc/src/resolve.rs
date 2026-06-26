@@ -64,7 +64,7 @@ fn compute_moves(body: &[Stmt], own: &mut OwnershipMap) {
 
 fn creads_stmt(s: &Stmt, in_loop: bool, out: &mut Vec<(String, NodeId, bool)>) {
     match &s.kind {
-        StmtKind::Let { value, .. } => creads(value, Pos::Value, in_loop, out),
+        StmtKind::Let { value, .. } | StmtKind::Yield(value) => creads(value, Pos::Value, in_loop, out),
         StmtKind::Assign { target, value } => {
             creads(target, Pos::Borrow, in_loop, out);
             creads(value, Pos::Value, in_loop, out);
@@ -154,6 +154,7 @@ fn creads(e: &Expr, pos: Pos, in_loop: bool, out: &mut Vec<(String, NodeId, bool
             creads(v, Pos::Value, in_loop, out);
         }),
         ExprKind::Try { inner } => creads(inner, Pos::Value, in_loop, out),
+        ExprKind::Await(inner) => creads(inner, Pos::Value, in_loop, out),
         // Closure (20700) : capture par référence → position Borrow (jamais un move de capture).
         ExprKind::Lambda { body, .. } => creads(body, Pos::Borrow, in_loop, out),
         ExprKind::Tuple(items) => items.iter().for_each(|e| creads(e, Pos::Value, in_loop, out)),
@@ -200,7 +201,7 @@ enum Pos {
 
 fn visit_stmt(s: &Stmt, esc: &mut HashSet<String>) {
     match &s.kind {
-        StmtKind::Let { value, .. } => visit(value, Pos::Value, esc),
+        StmtKind::Let { value, .. } | StmtKind::Yield(value) => visit(value, Pos::Value, esc),
         StmtKind::Assign { target, value } => {
             visit(target, Pos::Borrow, esc);
             visit(value, Pos::Value, esc);
@@ -297,6 +298,7 @@ fn visit(e: &Expr, pos: Pos, esc: &mut HashSet<String>) {
             visit(v, Pos::Value, esc);
         }),
         ExprKind::Try { inner } => visit(inner, Pos::Value, esc),
+        ExprKind::Await(inner) => visit(inner, Pos::Value, esc),
         // Closure (20700) : un param capturé peut s'échapper → position Value (conservateur, sûr).
         ExprKind::Lambda { body, .. } => visit(body, Pos::Value, esc),
         ExprKind::Tuple(items) => items.iter().for_each(|e| visit(e, Pos::Value, esc)),

@@ -140,6 +140,20 @@ fn is_copy(t: &Type) -> bool {
     matches!(t, Type::I64 | Type::F64 | Type::Bool | Type::Unit | Type::Num(_) | Type::Char)
 }
 
+/// Le corps contient-il un `yield` → générateur (V9, 10900) : accumulation eager dans `__gen`.
+fn body_has_yield(body: &[Stmt]) -> bool {
+    body.iter().any(|s| match &s.kind {
+        StmtKind::Yield(_) => true,
+        StmtKind::If { then, elifs, els, .. } => {
+            body_has_yield(then) || elifs.iter().any(|(_, b)| body_has_yield(b)) || body_has_yield(els)
+        }
+        StmtKind::While { body, .. } | StmtKind::For { body, .. } => body_has_yield(body),
+        StmtKind::Match { arms, .. } => arms.iter().any(|a| body_has_yield(&a.body)),
+        StmtKind::TryExcept { body, handler, .. } => body_has_yield(body) || body_has_yield(handler),
+        _ => false,
+    })
+}
+
 /// Un paramètre est-il **réassigné** dans le corps (`n = …`) → `mut` dans la signature Rust (pattern Python).
 fn param_reassigned(name: &str, body: &[Stmt]) -> bool {
     body.iter().any(|s| match &s.kind {
@@ -254,7 +268,7 @@ impl Cx<'_> {
     fn item(&mut self, it: &Item) -> TokenStream {
         self.flow_wrap = None; // (les méthodes d'impl ne font pas d'inférence flux dans cet incrément)
         match &it.kind {
-            ItemKind::Fn { name, generics, params, ret, body, .. } => {
+            ItemKind::Fn { name, generics, params, ret, body, is_async, .. } => {
                 let fid = format_ident!("{}", name);
                 let gens = lower_generics(generics);
                 let ps: Vec<TokenStream> = params
@@ -328,6 +342,10 @@ impl Cx<'_> {
                 } else {
                     quote! {}
                 };
+                // Générateur (V9, 10900) : `yield` → `__gen` accumulé puis renvoyé.
+                let is_gen = body_has_yield(body);
+                let gen_init = if is_gen { quote! { let mut __gen = Vec::new(); } } else { quote! {} };
+                let tail = if is_gen { quote! { __gen } } else { tail };
                 // `def test_*()` → `#[test]` (ironc test) ; ignoré au build/run normal (cfg(test)).
                 let test_attr = if name.starts_with("test_") {
                     quote! { #[test] }
@@ -335,7 +353,15 @@ impl Cx<'_> {
                     quote! {}
                 };
                 // `pub` : items réutilisables si exportés en crate (`ironc lib`, 51800) ; inoffensif en binaire.
-                quote! { #test_attr pub fn #fid #gens ( #(#ps),* ) #ret_ts { #(#decls)* #(#stmts)* #tail } }
+                // async (V9, 21200) : `async fn` ; `main` async → `#[tokio::main]` (transforme + lance le runtime).
+                let header = if *is_async && name == "main" {
+                    quote! { #[tokio::main] async }
+                } else if *is_async {
+                    quote! { #test_attr pub async }
+                } else {
+                    quote! { #test_attr pub }
+                };
+                quote! { #header fn #fid #gens ( #(#ps),* ) #ret_ts { #gen_init #(#decls)* #(#stmts)* #tail } }
             }
             ItemKind::Struct { name, generics, fields } => {
                 let sid = format_ident!("{}", name);
@@ -469,6 +495,11 @@ impl Cx<'_> {
                 } else {
                     quote! { #id = #v; }
                 }
+            }
+            StmtKind::Yield(e) => {
+                // V9 (10900) : générateur → accumulation eager dans `__gen` (Vec), la fn renvoie `__gen`.
+                let v = self.value(e);
+                quote! { __gen.push(#v); }
             }
             StmtKind::Assign { target, value } => {
                 let v = self.value(value);
@@ -919,6 +950,11 @@ impl Cx<'_> {
                     }
                     None => quote! { (#x?) },
                 }
+            }
+            // `await e` (V9, 21200) → `(e).await`.
+            ExprKind::Await(inner) => {
+                let v = self.value(inner);
+                quote! { (#v).await }
             }
             ExprKind::Lambda { params, body } => {
                 // Closure Rust (20700) : types des params inférés par rustc (I2).
