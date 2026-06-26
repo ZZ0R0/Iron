@@ -149,9 +149,11 @@ impl P {
         let ret = if self.eat(&TokenKind::Arrow) { self.parse_type()? } else { Type::Unit };
         self.expect(&TokenKind::Assign, "`=`")?;
         let mut path = self.string()?;
-        // chemin court d'une méthode → préfixer par le chemin du type.
+        // Préfixer par le chemin du type **uniquement pour un constructeur** (recv None) → `crate::Type::ctor`.
+        // Une méthode garde son nom court (syntaxe-méthode, V9) ; une méthode de trait arrive déjà en chemin
+        // complet `crate::Trait::method` (UFCS) depuis `bind`.
         if let Some(own) = owner {
-            if !path.contains("::") {
+            if recv.is_none() && !path.contains("::") {
                 path = format!("{own}::{path}");
             }
         }

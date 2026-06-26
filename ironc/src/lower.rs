@@ -60,6 +60,7 @@ pub fn lower(
         types,
         param_modes,
         bindings,
+        item_attrs: &ast.item_attrs,
         enums,
         user_fns,
         fn_params,
@@ -110,6 +111,8 @@ struct Cx<'a> {
     types: &'a TypeMap,
     param_modes: &'a ParamModes,
     bindings: &'a Bindings,
+    /// Attributs Rust pass-through par item (V9, 51900) : `NodeId` → `derive(Serialize)`/`repr(C)`…
+    item_attrs: &'a HashMap<NodeId, Vec<String>>,
     enums: HashSet<String>,
     /// Fns définies par l'utilisateur — priment sur les built-ins homonymes (ex. un `fn add` perso).
     user_fns: HashSet<String>,
@@ -219,6 +222,29 @@ impl Cx<'_> {
         self.types.get(&e.id).cloned().unwrap_or(Type::Unit)
     }
 
+    /// Attributs d'un item (V9, 51900) : fusionne les `@derive(...)` user avec les derives auto, émet les
+    /// autres attributs (`repr(C)`/`inline`…) en `#[…]` verbatim.
+    fn item_attrs_ts(&self, id: NodeId, auto: &[&str]) -> TokenStream {
+        let mut derives: Vec<String> = auto.iter().map(|s| s.to_string()).collect();
+        let mut others: Vec<TokenStream> = Vec::new();
+        if let Some(list) = self.item_attrs.get(&id) {
+            for a in list {
+                let a = a.trim();
+                if let Some(inner) = a.strip_prefix("derive(").and_then(|s| s.strip_suffix(')')) {
+                    for d in inner.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+                        if !derives.iter().any(|x| x == d) {
+                            derives.push(d.to_string());
+                        }
+                    }
+                } else if let Ok(ts) = TokenStream::from_str(a) {
+                    others.push(quote! { #[#ts] }); // `repr(C)`, `inline(never)`, …
+                }
+            }
+        }
+        let derive_ts = TokenStream::from_str(&derives.join(", ")).unwrap_or_default();
+        quote! { #[derive(#derive_ts)] #(#others)* }
+    }
+
     fn item(&mut self, it: &Item) -> TokenStream {
         self.flow_wrap = None; // (les méthodes d'impl ne font pas d'inférence flux dans cet incrément)
         match &it.kind {
@@ -258,9 +284,12 @@ impl Cx<'_> {
                 // Option/Result, on emballe les retours et (Option) on ajoute la chute `None`.
                 let declared = ret;
                 let effective = self.types.get(&it.id).cloned().unwrap_or_else(|| declared.clone());
-                self.flow_wrap = match (&effective, declared) {
-                    (Type::Option(_), d) if !matches!(d, Type::Option(_) | Type::Result(_)) => Some(FlowWrap::Some_),
-                    (Type::Result(_), d) if !matches!(d, Type::Option(_) | Type::Result(_)) => Some(FlowWrap::Ok_),
+                // I11 complet (V9, 40400) : on emballe dès que la fn est flux-Option/Result (annotée OU
+                // inférée) ; le wrap au `return` est **conscient du type** (n'emballe pas un expr déjà
+                // Option/Result), ce qui supprime le `ok(...)`/`some(...)` manuel.
+                self.flow_wrap = match &effective {
+                    Type::Option(_) => Some(FlowWrap::Some_),
+                    Type::Result(_) => Some(FlowWrap::Ok_),
                     _ => None,
                 };
                 let mut locals: Vec<(String, Type)> = Vec::new();
@@ -312,8 +341,9 @@ impl Cx<'_> {
                         quote! { #fid: #ty }
                     })
                     .collect();
+                let attrs = self.item_attrs_ts(it.id, &["Debug", "Clone"]);
                 quote! {
-                    #[derive(Debug, Clone)]
+                    #attrs
                     struct #sid #gens { #(#fs),* }
                 }
             }
@@ -332,8 +362,9 @@ impl Cx<'_> {
                         }
                     })
                     .collect();
+                let attrs = self.item_attrs_ts(it.id, &["Debug", "Clone"]);
                 quote! {
-                    #[derive(Debug, Clone)]
+                    #attrs
                     enum #eid #gens { #(#vs),* }
                 }
             }
@@ -491,12 +522,14 @@ impl Cx<'_> {
                     quote! { return None; }
                 }
                 Some(e) => {
+                    let et = self.type_of(e);
                     let ev = self.return_value(e);
-                    // I11 par flux : emballe le retour si la fn est flux-Option/Result.
+                    // I11 conscient du type : n'emballe que si l'expr n'est pas DÉJÀ Option/Result
+                    // (`return ok(x)`/`return compile(p)?` ... → laissés tels quels ; `return bool` → `Ok(bool)`).
                     match self.flow_wrap {
-                        Some(FlowWrap::Some_) => quote! { return Some(#ev); },
-                        Some(FlowWrap::Ok_) => quote! { return Ok(#ev); },
-                        None => quote! { return #ev; },
+                        Some(FlowWrap::Some_) if !matches!(et, Type::Option(_)) => quote! { return Some(#ev); },
+                        Some(FlowWrap::Ok_) if !matches!(et, Type::Result(_)) => quote! { return Ok(#ev); },
+                        _ => quote! { return #ev; },
                     }
                 }
                 None => match self.flow_wrap {
@@ -1323,14 +1356,23 @@ impl Cx<'_> {
             },
             None => return None,
         };
-        // Syntaxe méthode `recv.rust_method(args)` : auto-ref/deref de Rust gère le `recv`
-        // (`&self`/`&mut self`/`self`) et les méthodes atteintes par `Deref` (ex. `str` sur `String`).
-        let method_name = ef.path.rsplit("::").next().unwrap_or(&ef.path);
-        let mid = format_ident!("{}", method_name);
         let recv = self.place(base);
         let a: Vec<TokenStream> = args.iter().map(|x| self.extern_arg(x)).collect();
-        let mut call = quote! { #recv.#mid( #(#a),* ) };
-        let _ = ef.recv;
+        // Méthode de **trait** (chemin `crate::Trait::method`) → UFCS `Trait::method(<recv>, args)` (évite
+        // `use Trait`). Méthode **inhérente** (nom court) → syntaxe-méthode `recv.m(args)` (auto-ref/deref,
+        // gère les méthodes via `Deref` comme `str` sur `String`).
+        let mut call = if ef.path.contains("::") {
+            let path = TokenStream::from_str(&ef.path).unwrap_or_else(|_| quote! { () });
+            let recv_ref = match ef.recv {
+                Some(Recv::ByRefMut) => quote! { &mut #recv },
+                Some(Recv::ByValue) => quote! { #recv },
+                _ => quote! { &#recv },
+            };
+            quote! { #path( #recv_ref #(, #a)* ) }
+        } else {
+            let mid = format_ident!("{}", ef.path.rsplit("::").next().unwrap_or(&ef.path));
+            quote! { #recv.#mid( #(#a),* ) }
+        };
         for idiom in &ef.idioms {
             match idiom {
                 // getter (D4) : retour emprunté → valeur possédée. `.cloned()` pour Option, `.clone()` sinon.
@@ -1718,6 +1760,11 @@ fn lower_type(t: &Type) -> TokenStream {
         Type::Weak(t) => {
             let i = lower_type(t);
             quote! { std::rc::Weak<std::cell::RefCell<#i>> }
+        }
+        // Partage thread-safe (V9, 30700) : Arc<Mutex<T>>.
+        Type::SharedSync(t) => {
+            let inner = lower_type(t);
+            quote! { std::sync::Arc<std::sync::Mutex<#inner>> }
         }
     }
 }

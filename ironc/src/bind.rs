@@ -76,11 +76,18 @@ fn emit(v: &Json, crate_name: &str) -> CResult<String> {
 
     for item in index.values() {
         let imp = &item["inner"]["impl"];
-        if !imp.is_object() || !imp["trait"].is_null() {
-            continue; // inhérent seulement (51100 ; traits → V9)
+        if !imp.is_object() {
+            continue;
         }
         if imp["is_synthetic"].as_bool() == Some(true) || !imp["blanket_impl"].is_null() {
             continue;
+        }
+        // V9 (51600) : inhérent (`trait` null) OU `impl Trait for T` d'un trait **utile** (méthodes de
+        // comportement : Digest, Datelike, Iterator, Read…). Les traits-bruit (Debug/Clone/From…) sautés.
+        if let Some(tr) = imp["trait"]["path"].as_str() {
+            if is_noise_trait(tr.rsplit("::").next().unwrap_or(tr)) {
+                continue;
+            }
         }
         let for_id = imp["for"]["resolved_path"]["id"].as_u64();
         let tyname = match imp["for"]["resolved_path"]["path"].as_str() {
@@ -91,6 +98,10 @@ fn emit(v: &Json, crate_name: &str) -> CResult<String> {
         if !for_id.map_or(false, |id| is_local(paths, id)) {
             continue;
         }
+        // trait court d'un `impl Trait for T` (None = inhérent) → méthodes de trait appelées en UFCS.
+        let trait_short = imp["trait"]["path"]
+            .as_str()
+            .map(|t| t.rsplit("::").next().unwrap_or(t).to_string());
         for mid in imp["items"].as_array().into_iter().flatten() {
             let Some(id) = mid.as_u64() else { continue };
             method_ids.insert(id);
@@ -105,7 +116,10 @@ fn emit(v: &Json, crate_name: &str) -> CResult<String> {
                     Some(sig) => {
                         let entry = types.entry(tyname.clone()).or_default();
                         if sig.recv.is_some() {
-                            entry.1.push(render(name, &sig, None)); // méthode → nom court (syntaxe méthode)
+                            // méthode de trait → chemin UFCS `crate::Trait::method` (évite `use Trait`) ;
+                            // méthode inhérente → nom court (syntaxe-méthode auto-ref/deref).
+                            let mpath = trait_short.as_ref().map(|tr| format!("{crate_name}::{tr}::{name}"));
+                            entry.1.push(render(name, &sig, mpath.as_deref()));
                         } else {
                             // ctor → chemin complet `crate::Type::ctor`.
                             let full = format!("{crate_name}::{tyname}::{name}");
@@ -316,6 +330,19 @@ fn map_named(name: &str, targs: &[&Json]) -> Option<String> {
         other if other.chars().next().map_or(false, |c| c.is_ascii_uppercase()) => Some(other.to_string()),
         _ => None,
     }
+}
+
+/// Traits « bruit » (dérives/marqueurs/conversions) dont on ne binde PAS les méthodes (51600) : elles
+/// polluent l'API (fmt/clone/eq/from…) sans valeur. On garde les traits de **comportement**.
+fn is_noise_trait(name: &str) -> bool {
+    matches!(
+        name,
+        "Debug" | "Display" | "Clone" | "Copy" | "Send" | "Sync" | "Sized" | "Unpin"
+            | "PartialEq" | "Eq" | "PartialOrd" | "Ord" | "Hash" | "Default"
+            | "From" | "Into" | "TryFrom" | "TryInto" | "AsRef" | "AsMut" | "Borrow" | "BorrowMut"
+            | "Deref" | "DerefMut" | "Drop" | "ToOwned" | "ToString"
+            | "Serialize" | "Deserialize" | "Freeze" | "RefUnwindSafe" | "UnwindSafe"
+    )
 }
 
 fn map_prim(p: &str) -> Option<String> {

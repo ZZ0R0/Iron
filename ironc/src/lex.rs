@@ -90,6 +90,20 @@ impl<'a> Lexer<'a> {
                         self.pos += 1;
                     }
                 }
+                // décorateur d'attribut `@derive(...)`/`@repr(C)` (V9, 51900) : reste de ligne capté brut.
+                b'@' => {
+                    let start = self.pos;
+                    self.pos += 1;
+                    let s0 = self.pos;
+                    while let Some(c) = self.peek() {
+                        if c == b'\n' {
+                            break;
+                        }
+                        self.pos += 1;
+                    }
+                    let content = String::from_utf8_lossy(&self.src[s0..self.pos]).trim().to_string();
+                    self.push(TokenKind::Decorator(content), start);
+                }
                 b'0'..=b'9' => self.lex_number()?,
                 // f-string `f"…"` (10500) : `f` immédiatement suivi de `"`.
                 b'f' if self.src.get(self.pos + 1) == Some(&b'"') => self.lex_fstring()?,

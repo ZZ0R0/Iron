@@ -1,15 +1,13 @@
 use "chrono.iri"
 
-def weekday(date: str) -> str:
-    day = ""
-    rust {
-        use chrono::Datelike;
-        if let Ok(d) = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d") {
-            day = format!("{:?}", d.weekday());
-        }
-    }
-    return day
+def year_of(date: str) -> Result[i64]:
+    d = NaiveDate.parse_from_str(date, "%Y-%m-%d")?
+    return to_i64(d.year())
+
+def day_of_year(date: str) -> Result[i64]:
+    d = NaiveDate.parse_from_str(date, "%Y-%m-%d")?
+    return to_i64(d.ordinal())
 
 def main():
-    print(weekday("2026-06-26"))
-    print(weekday("2000-01-01"))
+    print(year_of("2026-06-26").unwrap_or(0))
+    print(day_of_year("2026-06-26").unwrap_or(0))

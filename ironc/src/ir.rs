@@ -114,6 +114,8 @@ pub enum TokenKind {
     Newline,
     /// Contenu brut d'un bloc `rust { … }` (interop niveau 1, capté sans tokenisation Iron).
     RustVerbatim(String),
+    /// Décorateur d'attribut Rust `@derive(...)`/`@repr(C)` (V9, 51900) : contenu brut après `@`.
+    Decorator(String),
     Eof,
 }
 
@@ -163,6 +165,9 @@ pub enum Type {
     Char,
     /// Référence faible `Weak` (V7, 30600).
     Weak(Box<Type>),
+    /// Partage explicite **thread-safe** (V9, 30700) : `shared_sync[T]` → `Arc<Mutex<T>>`. Pendant `Send`
+    /// de `Shared`/`Rc` (mono-thread) ; requis pour passer un état partagé à un `thread.spawn`.
+    SharedSync(Box<Type>),
 }
 
 /// Variantes numériques élargies (V7, 20800). `i64`/`f64` restent `Type::I64`/`F64` (défauts).
@@ -400,6 +405,9 @@ pub struct Ast {
     pub modules: Vec<String>,
     /// Types opaques `extern type Name = "rust::path"` (50400) : nom → chemin Rust ; émis en alias.
     pub extern_types: Vec<(String, String)>,
+    /// Attributs Rust pass-through (V9, 51900) : `NodeId` de l'item → attributs bruts (`derive(Serialize)`,
+    /// `repr(C)`…), émis en `#[…]`. Side-map pour éviter de toucher chaque variante d'`ItemKind`.
+    pub item_attrs: std::collections::HashMap<NodeId, Vec<String>>,
 }
 
 // ---------------------------------------------------------------- Tables annexes

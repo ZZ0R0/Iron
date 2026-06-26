@@ -1,1 +1,6 @@
 crate chrono = "0.4"
+
+extern type NaiveDate = "chrono::NaiveDate":
+    fn parse_from_str(s: str, fmt: str) -> Result[NaiveDate] = "chrono::NaiveDate::parse_from_str"
+    fn year(self) -> i32 = "chrono::Datelike::year"
+    fn ordinal(self) -> u32 = "chrono::Datelike::ordinal"

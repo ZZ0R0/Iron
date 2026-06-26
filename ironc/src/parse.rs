@@ -105,6 +105,7 @@ impl Parser {
         let mut items = Vec::new();
         let mut imports = Vec::new();
         let mut modules = Vec::new();
+        let mut item_attrs: std::collections::HashMap<NodeId, Vec<String>> = std::collections::HashMap::new();
         loop {
             while self.is(&TokenKind::Newline) {
                 self.adv();
@@ -112,6 +113,20 @@ impl Parser {
             if self.is(&TokenKind::Eof) {
                 break;
             }
+            // Décorateurs d'attributs `@derive(...)` (V9, 51900) : collectés pour le **prochain** item.
+            let mut attrs: Vec<String> = Vec::new();
+            while let TokenKind::Decorator(s) = self.cur() {
+                attrs.push(s.clone());
+                self.adv();
+                while self.is(&TokenKind::Newline) {
+                    self.adv();
+                }
+            }
+            let attr_target = |id: NodeId, m: &mut std::collections::HashMap<NodeId, Vec<String>>, a: &[String]| {
+                if !a.is_empty() {
+                    m.insert(id, a.to_vec());
+                }
+            };
             if matches!(self.cur(), TokenKind::Ident(s) if s == "use") {
                 self.adv();
                 if let TokenKind::Str(p) = self.cur() {
@@ -133,6 +148,7 @@ impl Parser {
             if matches!(self.cur(), TokenKind::Ident(s) if s == "class") {
                 // `class Name:` (surface Python) → struct + impl inhérent.
                 let (st, im) = self.class_item()?;
+                attr_target(st.id, &mut item_attrs, &attrs); // attributs sur la struct (51900)
                 items.push(st);
                 if let Some(im) = im {
                     items.push(im);
@@ -157,9 +173,11 @@ impl Parser {
                 self.extern_types.push((name, path));
                 continue;
             }
-            items.push(self.item()?);
+            let it = self.item()?;
+            attr_target(it.id, &mut item_attrs, &attrs); // attributs sur fn/struct/enum (51900)
+            items.push(it);
         }
-        Ok(Ast { items, imports, modules, extern_types: std::mem::take(&mut self.extern_types) })
+        Ok(Ast { items, imports, modules, extern_types: std::mem::take(&mut self.extern_types), item_attrs })
     }
 
     fn item(&mut self) -> CResult<Item> {

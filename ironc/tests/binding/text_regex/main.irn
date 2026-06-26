@@ -6,7 +6,7 @@ def count_matching(pat: str, lines: list[str]) -> Result[i64]:
     for line in lines:
         if r.is_match(line):
             n = n + 1
-    return ok(n)
+    return n
 
 def main():
     lines = ["abc", "a1b", "xyz", "9", "hello2"]
