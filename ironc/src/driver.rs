@@ -220,6 +220,28 @@ pub fn lib(input: &Path) -> CResult<()> {
     Ok(())
 }
 
+/// `ironc doc` (V9.1, 72200) : génère la doc via **overlay rustdoc** — émet le module en crate (lib) et lance
+/// `cargo doc`. Les items publics Iron → doc rustdoc.
+pub fn doc(input: &Path) -> CResult<()> {
+    let src = std::fs::read_to_string(input)
+        .map_err(|e| CompileError::msg(format!("lecture {} : {e}", input.display())))?;
+    let base_dir = input.parent().unwrap_or(Path::new("."));
+    let compiled = compile(&src, 0, base_dir)?;
+    let out_dir = out_dir_for(input);
+    emit_lib(&out_dir, &compiled.rust_src, &compiled.crates)
+        .map_err(|e| CompileError::msg(format!("émission lib : {e}")))?;
+    let output = Command::new("cargo")
+        .args(["doc", "--quiet", "--no-deps"])
+        .current_dir(&out_dir)
+        .output()
+        .map_err(|e| CompileError::msg(format!("cargo introuvable : {e}")))?;
+    if !output.status.success() {
+        return Err(CompileError::msg(remontee(&String::from_utf8_lossy(&output.stderr), &compiled, &src, input)));
+    }
+    println!("doc générée : {}/target/doc/iron_lib/index.html", out_dir.display());
+    Ok(())
+}
+
 /// `ironc check` (V9.1, 60800) : diagnostics haute-fidélité par **overlay rustc** (la surcouche). Transpile
 /// → `cargo check` → remonte les erreurs rustc en `Span` Iron. Erreurs Iron (lex/parse/inférence) attrapées
 /// d'abord par `compile` ; erreurs profondes (types/traits/borrow) par rustc. Zéro faux-positif.

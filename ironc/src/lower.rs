@@ -1712,11 +1712,12 @@ fn lower_generics(gens: &Generics) -> TokenStream {
         .iter()
         .map(|(n, bounds)| {
             let id = format_ident!("{}", n);
+            // Borne `Clone` par défaut (V9.1, 21400) : la sémantique-valeur d'Iron (I1) clone → `T: Clone`.
+            let bs: Vec<proc_macro2::Ident> = bounds.iter().map(|b| format_ident!("{}", b)).collect();
             if bounds.is_empty() {
-                quote! { #id }
+                quote! { #id: Clone }
             } else {
-                let bs: Vec<proc_macro2::Ident> = bounds.iter().map(|b| format_ident!("{}", b)).collect();
-                quote! { #id: #(#bs)+* }
+                quote! { #id: Clone + #(#bs)+* }
             }
         })
         .collect();

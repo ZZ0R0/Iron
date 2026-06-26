@@ -1,18 +1,11 @@
-fn id[T](x: T) -> T:
-    return x
+def first[T](xs: list[T]) -> T:
+    return xs[0]
 
-fn pick[T](cond: bool, a: T, b: T) -> T:
-    if cond:
-        return a
-    return b
+class Pair[A, B]:
+    left: A
+    right: B
 
-struct Pair[T]:
-    a: T
-    b: T
-
-fn main():
-    print(id(42))
-    print(id(true))
-    print(pick(true, 7, 9))
-    p = Pair(a=10, b=20)
-    print(p.a)
+def main():
+    print(first([7, 8, 9]))
+    p = Pair(left=10, right=20)
+    print(p.left + p.right)
