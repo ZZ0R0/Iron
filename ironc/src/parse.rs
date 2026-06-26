@@ -645,6 +645,14 @@ impl Parser {
             let start = self.i;
             let id = self.fresh();
             self.adv();
+            // `yield from` (délégation de générateur) = hors-périmètre « 0.1 % » (90600) : message orienté.
+            if matches!(self.cur(), TokenKind::Ident(s) if s == "from") {
+                return Err(self.err(
+                    "`yield from` (délégation de générateur) non supporté (hors-périmètre « 0.1 % ») — \
+                     utilise une boucle `for x in …: yield x`, ou un `rust { }` pour un générateur complexe"
+                        .to_string(),
+                ));
+            }
             let e = self.expr()?;
             self.stmt_end()?;
             return Ok(self.node(start, id, StmtKind::Yield(e)));

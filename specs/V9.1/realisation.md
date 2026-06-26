@@ -1,7 +1,7 @@
 # V9.1 — Réalisation (tracker)
 
-> **État : cadrage + planification FAITS. Réalisation NON commencée** (attend le feu vert). **Liste propre et
-> exhaustive** de ce qui reste — ne dépend plus de la mémoire. 23 pistes, 1:1 avec les specs.
+> **État : RÉALISATION QUASI COMPLÈTE — 22/23 pistes ✅** (reste 5.2 batterie-30 + 5.3 gate final ;
+> 2.2 source-maps-expr = raffinement assumé non bloquant). **Liste propre et exhaustive**, 1:1 avec les specs.
 
 ## Avancement des pistes (5 vagues, 23 pistes)
 
@@ -27,7 +27,7 @@
 | 4.5 | 72100 | Gestion de paquets | 4 | ✅ fait |
 | 4.6 | 72200 | `ironc doc` | 4 | ✅ fait |
 | 4.7 | 72300 | Intégration debugger | 4 | ✅ fait |
-| 5.1 | 90600 | Le « 0.1 % » tracé | 5 | ☐ todo |
+| 5.1 | 90600 | Le « 0.1 % » tracé | 5 | ✅ fait |
 | 5.2 | 90700 | Batterie élargie 30 vrais crates | 5 | ☐ todo |
 | **5.3** | 90800 | **Gate V9.1 final** | 5 | ☐ todo |
 
@@ -88,7 +88,17 @@ pas d'un type-checker Iron maison. La surcouche, comme le codegen.
 - Extern `Result[T, E]` (binding `.iri`) hors-scope V0 : les fns externes restent `Result[T]`→`IronError`
   (le mapping `.map_err(IronError)` ne s'applique qu'à `Result(_)`). Erreurs typées = fns Iron pour l'instant.
 
-## Hors V9.1 (le « 0.1 % », spec 90600)
+## Hors V9.1 (le « 0.1 % », spec 90600) — **tracé + messages d'orientation vérifiés**
 
-HM complet · auto-hébergement · async exotique · coroutines complexes · binding **garanti** de tout crate.
-Tout le reste est dans une spec ci-dessus, **toutes planifiées**.
+Liste figée dans `generator.md` (§1, encadré sous I14). Chaque catégorie a une **issue orientée** (critère
+d'acceptation 2), vérifiée sur ≥ 1 exemple :
+
+| Catégorie | Issue / message vérifié |
+|---|---|
+| HM globale | annotation requise → `rustc` réclame le type, **remonté en Span Iron** (overlay 60800). |
+| Auto-hébergement | N/A (contrat doc : `ironc` reste en Rust). |
+| Async exotique (`select!`…) | `rust { }` (échappatoire universelle — prouvée : showcase `sha2::Digest`). |
+| Coroutines complexes | `yield from` → **message orienté** « utilise `for…: yield x` ou `rust { }` » (parser). |
+| Binding non garanti | `.iri` note « N non mappable(s) sauté(s) » ; fournir `.iri` curé ou `rust { }`. |
+
+Tout le **reste** est dans une spec V9.1 ci-dessus, **toutes planifiées + réalisées**.

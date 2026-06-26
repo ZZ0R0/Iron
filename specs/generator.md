@@ -47,8 +47,25 @@ Décisions verrouillées au cadrage. **Aucune spec ne peut les contredire.** Tou
 - **I10 — Codegen via `TokenStream` uniquement.** Jamais de concaténation de chaînes pour produire du Rust.
 - **I11 — Inférence Option/Result depuis le flux.** Chemin retournant `None` → `Option<T>`. Opération faillible → `Result<T, IronError>`, propagée par sucre `?`. `try/except` = **sucre** abaissé vers `match`, pas un mécanisme runtime.
 - **I12 — NaN ≠ null.** `NaN` reste un `f64` valide et ne déclenche **pas** d'`Option`. Seul `None`/null → `Option`.
-- **I13 — Type d'erreur unifié `IronError` au v0.** Pas d'inférence d'un `E` précis (post-1.0).
+- **I13 — `IronError` par défaut, `Result[T, E]` typé opt-in (V9.1, 21500).** Une opération faillible sans
+  annotation → `Result<T, IronError>` (fourre-tout texte). Un `Result[T, E]` **annoté** porte un `E` concret
+  (enum Iron, type externe) ; `raise`/`?`/`try-except` propagent `E`. Pas d'**inférence** d'un `E` précis sans
+  annotation (l'annotation est le opt-in). Cf. [[I11]].
 - **I14 — Extensions.** Source `.irn`, bindings `.iri`.
+
+> **Le « 0.1 % » — hors-périmètre irréductible (V9.1, spec 90600).** Liste **stable** de ce qu'Iron ne fait
+> **pas** (coûteux/recherche, hors ambition « langage utilisable ») ; chaque cas a une **issue orientée** :
+> - **Inférence Hindley-Milner globale** : Iron reste **local + dirigé par l'usage** → certaines annotations
+>   restent nécessaires (sinon `rustc` réclame le type, message remonté en Span Iron).
+> - **Auto-hébergement** : `ironc` est en **Rust**, pas en Iron. Pas de bootstrap.
+> - **Async exotique** (`select!`, pinning, streams, async-traits) → `rust { }`.
+> - **Générateurs/coroutines complexes** (lazy/infini, `yield from`, `send`) → `rust { }` (le `yield` eager
+>   accumulé reste supporté, 10900).
+> - **Binding *garanti* de tout crate** : bornes de traits custom non-bénies, macros lourdes, lifetimes
+>   essentiels → `.iri` curé ou `rust { }`. Couverture auto **mesurée** 62–92 % (V8), jamais promise à 100 %.
+>
+> Frontière mouvante (le binder progresse) : **tenir cette liste à jour**. Aucune implémentation propre —
+> seulement ce contrat + les messages d'orientation des specs concernées.
 
 ---
 
