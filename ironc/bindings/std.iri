@@ -1,0 +1,5 @@
+# Bindings curés de la std Rust — `import std` (V9.1, principe « zéro lib Iron »).
+# Pas de ligne `crate` : la std n'est pas une dépendance Cargo.
+extern fn read_file(path: str) -> Result[str] = "std::fs::read_to_string"
+extern fn write_file(path: str, content: str) -> Result[unit] = "std::fs::write"
+extern fn env_var(name: str) -> Result[str] = "std::env::var"

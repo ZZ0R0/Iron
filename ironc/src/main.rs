@@ -22,6 +22,7 @@ fn main() {
         "run" => driver::run(input, audit),
         "test" => driver::test(input),
         "new" => driver::new_project(positional[1].as_str()),
+        "add" => driver::add(positional[1].as_str()),
         "lib" => driver::lib(input),
         "lint" => driver::lint(input),
         "bind" => bind::bind(input, positional.get(2).map(|s| s.as_str())).map(|iri| print!("{iri}")),

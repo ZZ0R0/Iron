@@ -1,0 +1,9 @@
+import std
+
+def run() -> Result[i64]:
+    write_file("/tmp/iron_std_test.txt", "iron rocks")?
+    content = read_file("/tmp/iron_std_test.txt")?
+    return len(content)
+
+def main():
+    print(run().unwrap_or(0))

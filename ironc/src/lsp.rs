@@ -3,7 +3,7 @@
 //! Iron (front-end) ; les erreurs portent un `Span` Iron → position éditeur (I8).
 
 use crate::ir::{CResult, CompileError};
-use std::io::{self, BufRead, Read, Write};
+use std::io::{self, BufRead, Write};
 
 pub fn lsp() -> CResult<()> {
     let stdin = io::stdin();

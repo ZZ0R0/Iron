@@ -280,6 +280,18 @@ impl P {
     }
 
     fn parse_type(&mut self) -> CResult<Type> {
+        // tuple `(A, B, …)` ou unit `()` (V9.1 robustesse : bind produit ces types).
+        if self.eat(&TokenKind::LParen) {
+            let mut ts = Vec::new();
+            while !self.is(&TokenKind::RParen) {
+                ts.push(self.parse_type()?);
+                if !self.eat(&TokenKind::Comma) {
+                    break;
+                }
+            }
+            self.expect(&TokenKind::RParen, "`)`")?;
+            return Ok(if ts.is_empty() { Type::Unit } else { Type::Tuple(ts) });
+        }
         // type fonction `fn(T, …) -> R` (closure idiom, 51300).
         if self.is(&TokenKind::Fn) {
             self.adv();

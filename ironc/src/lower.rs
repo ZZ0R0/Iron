@@ -1071,10 +1071,8 @@ impl Cx<'_> {
         if let ExprKind::Field { base, name } = &callee.kind {
             if let ExprKind::Var(m) = &base.kind {
                 match m.as_str() {
-                    "io" => return self.lower_io(name, args),
-                    "os" => return self.lower_os(name, args),
-                    "time" => return self.lower_time(name, args),
-                    "thread" => return self.lower_thread(name, args), // V9, 70900
+                    // V9.1 (52000) : io/os/time RETIRÉS — passer par `import std` (zéro lib Iron, D1).
+                    "thread" => return self.lower_thread(name, args), // primitive concurrence (V9, 70900)
                     _ => {}
                 }
             }
@@ -1608,89 +1606,6 @@ impl Cx<'_> {
         }
     }
 
-    fn lower_os(&mut self, name: &str, args: &[Expr]) -> TokenStream {
-        match name {
-            "env" if args.len() == 1 => {
-                let n = self.value(&args[0]);
-                quote! { std::env::var(#n).ok() }
-            }
-            "args" => quote! { std::env::args().skip(1).collect::<Vec<_>>() },
-            "exit" if args.len() == 1 => {
-                let c = self.value(&args[0]);
-                quote! { std::process::exit((#c) as i32) }
-            }
-            other => {
-                let msg = format!("os.{other} : inconnue");
-                quote! { compile_error!(#msg) }
-            }
-        }
-    }
-
-    /// Module stdlib `time` (80800) : horloge/sommeil — wrappers `std::time`/`std::thread`.
-    fn lower_time(&mut self, name: &str, args: &[Expr]) -> TokenStream {
-        match name {
-            "now_secs" => quote! {
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_secs() as i64)
-                    .unwrap_or(0)
-            },
-            "sleep_ms" if args.len() == 1 => {
-                let n = self.value(&args[0]);
-                quote! { std::thread::sleep(std::time::Duration::from_millis((#n) as u64)) }
-            }
-            other => {
-                let msg = format!("time.{other} : inconnue");
-                quote! { compile_error!(#msg) }
-            }
-        }
-    }
-
-    /// Module stdlib `io` (80300, D2) : wrappers minces sur `std::fs`, faillibles → `Result`/`IronError`.
-    fn lower_io(&mut self, name: &str, args: &[Expr]) -> TokenStream {
-        match name {
-            "read_file" if args.len() == 1 => {
-                let p = self.value(&args[0]);
-                quote! { std::fs::read_to_string(#p).map_err(|e| IronError(format!("{}", e))) }
-            }
-            "write_file" if args.len() == 2 => {
-                let p = self.value(&args[0]);
-                let c = self.value(&args[1]);
-                quote! { std::fs::write(#p, #c).map_err(|e| IronError(format!("{}", e))) }
-            }
-            "read_lines" if args.len() == 1 => {
-                let p = self.value(&args[0]);
-                quote! {
-                    std::fs::read_to_string(#p)
-                        .map(|s| s.lines().map(|l| l.to_string()).collect::<Vec<_>>())
-                        .map_err(|e| IronError(format!("{}", e)))
-                }
-            }
-            "append_file" if args.len() == 2 => {
-                let p = self.value(&args[0]);
-                let c = self.value(&args[1]);
-                quote! {{
-                    use std::io::Write;
-                    std::fs::OpenOptions::new()
-                        .create(true)
-                        .append(true)
-                        .open(#p)
-                        .and_then(|mut f| f.write_all((#c).as_bytes()))
-                        .map_err(|e| IronError(format!("{}", e)))
-                }}
-            }
-            "exists" if args.len() == 1 => {
-                let p = self.value(&args[0]);
-                quote! { std::path::Path::new(&#p).exists() }
-            }
-            other => {
-                let msg = format!("io.{other} : fonction inconnue ou mauvaise arité");
-                quote! { compile_error!(#msg) }
-            }
-        }
-    }
-
-    /// Valeurs par défaut à ajouter pour un appel partiel `f(args)` / `c.m(args)` (surface Python) :
     /// les défauts des params en trop par rapport aux args fournis.
     fn call_padding(&self, callee: &Expr, n_args: usize) -> Vec<Expr> {
         let defaults = match &callee.kind {

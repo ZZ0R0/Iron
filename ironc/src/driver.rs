@@ -30,6 +30,15 @@ impl Compiled {
 }
 
 /// Pipeline figé (I9), sans invoquer cargo. Testable isolément.
+/// Registre de bindings curés **embarqués** (V9.1, 52200/52300) : crate → `.iri` compilé dans le binaire.
+/// `import std` et les crates « bénis » viennent d'ici ; pas de fichier sur disque, pas de dépendance Cargo.
+fn curated_iri(name: &str) -> Option<&'static str> {
+    match name {
+        "std" => Some(include_str!("../bindings/std.iri")),
+        _ => None,
+    }
+}
+
 pub fn compile(src: &str, file: FileId, base_dir: &Path) -> CResult<Compiled> {
     let tokens = lex::lex(src, file)?;
     let (mut ast, mut next_id) = parse::parse_with_id(tokens, 0)?;
@@ -38,19 +47,41 @@ pub fn compile(src: &str, file: FileId, base_dir: &Path) -> CResult<Compiled> {
     let mut next_file: FileId = file + 1;
     let (mut loaded, mut loading): (Vec<String>, Vec<String>) = (Vec::new(), Vec::new());
     let mut ext = std::mem::take(&mut ast.extern_types);
+    let mut curated = Bindings::default();
     for m in std::mem::take(&mut ast.modules) {
-        // `import <crate>` (V9, 70700) : pas de module Iron `m.irn` mais un binding `m.iri` présent
-        // → import de crate (= `use "m.iri"`). Sinon, module Iron classique (70200).
-        if !base_dir.join(format!("{m}.irn")).exists() && base_dir.join(format!("{m}.iri")).exists() {
+        // Résolution d'`import` (V9.1, 52100/52200) — ordre : registre curé embarqué (`import std`) →
+        // module Iron `m.irn` → binding `.iri` local du projet.
+        if let Some(iri) = curated_iri(&m) {
+            let bb = crate::iri::parse(iri, 0)?;
+            curated.fns.extend(bb.fns);
+            curated.types.extend(bb.types);
+            curated.etypes.extend(bb.etypes);
+            curated.mods.extend(bb.mods);
+            curated.crates.extend(bb.crates);
+            continue;
+        }
+        if base_dir.join(format!("{m}.irn")).exists() {
+            load_module(&m, base_dir, &mut ast.items, &mut ast.imports, &mut ext, &mut next_id, &mut next_file, &mut loaded, &mut loading)?;
+            continue;
+        }
+        if base_dir.join(format!("{m}.iri")).exists() {
             ast.imports.push(format!("{m}.iri"));
             continue;
         }
-        load_module(&m, base_dir, &mut ast.items, &mut ast.imports, &mut ext, &mut next_id, &mut next_file, &mut loaded, &mut loading)?;
+        return Err(CompileError::msg(format!(
+            "`import {m}` : ni module `{m}.irn`, ni binding `{m}.iri`. Lance `ironc add {m}` (ou fournis `{m}.iri`)."
+        )));
     }
     ast.extern_types = ext;
     // 20500 : résoudre les types de paramètres non annotés (pré-passe, réécrit l'AST) avant tout le reste.
     infer::params::resolve_param_types(&mut ast);
     let mut bindings = load_bindings(&ast.imports, base_dir)?;
+    // fusion du registre curé (std…).
+    bindings.fns.extend(curated.fns);
+    bindings.types.extend(curated.types);
+    bindings.etypes.extend(curated.etypes);
+    bindings.mods.extend(curated.mods);
+    bindings.crates.extend(curated.crates);
     // async (V9, 21200) : si un `async def` est présent, injecter le runtime tokio (D4 : défaut tokio).
     let has_async = ast.items.iter().any(|it| matches!(&it.kind, ItemKind::Fn { is_async: true, .. }));
     if has_async && !bindings.crates.iter().any(|(n, _, _)| n == "tokio") {
@@ -186,6 +217,45 @@ pub fn lib(input: &Path) -> CResult<()> {
         return Err(CompileError::msg(remontee(&String::from_utf8_lossy(&output.stderr), &compiled, &src, input)));
     }
     println!("crate Rust émis (réutilisable) : {}", out_dir.display());
+    Ok(())
+}
+
+/// `ironc add <crate>` (V9.1, 52300) : binde un crate Rust et écrit `<crate>.iri` dans le dossier courant
+/// (que `import <crate>` trouvera) + l'ajoute à `ironc.toml`. Crée un projet temporaire pour rustdoc.
+pub fn add(crate_name: &str) -> CResult<()> {
+    if curated_iri(crate_name).is_some() {
+        println!("`{crate_name}` est déjà un binding curé (import direct, rien à ajouter).");
+        return Ok(());
+    }
+    // projet temporaire avec la dépendance → rustdoc-json.
+    let tmp = std::env::temp_dir().join(format!("ironc-add-{crate_name}"));
+    std::fs::create_dir_all(tmp.join("src"))
+        .map_err(|e| CompileError::msg(format!("création projet temp : {e}")))?;
+    std::fs::write(
+        tmp.join("Cargo.toml"),
+        format!("[package]\nname = \"ironc_add\"\nversion = \"0.0.0\"\nedition = \"2021\"\n\n[dependencies]\n{crate_name} = \"*\"\n"),
+    )
+    .map_err(|e| CompileError::msg(format!("écriture Cargo.toml : {e}")))?;
+    std::fs::write(tmp.join("src/main.rs"), "fn main() {}\n")
+        .map_err(|e| CompileError::msg(format!("écriture main.rs : {e}")))?;
+    let _ = Command::new("cargo").args(["fetch"]).current_dir(&tmp).output();
+    // bind → `.iri`.
+    let iri = crate::bind::bind(&tmp, Some(crate_name))?;
+    std::fs::write(format!("{crate_name}.iri"), &iri)
+        .map_err(|e| CompileError::msg(format!("écriture {crate_name}.iri : {e}")))?;
+    // ajout à `ironc.toml` (si présent).
+    if let Ok(mut toml) = std::fs::read_to_string("ironc.toml") {
+        if !toml.contains(&format!("{crate_name} =")) {
+            if toml.contains("[dependencies]") {
+                toml = toml.replacen("[dependencies]", &format!("[dependencies]\n{crate_name} = \"*\""), 1);
+            } else {
+                toml.push_str(&format!("\n[dependencies]\n{crate_name} = \"*\"\n"));
+            }
+            let _ = std::fs::write("ironc.toml", toml);
+        }
+    }
+    println!("`{crate_name}` ajouté : {crate_name}.iri écrit ({} fns/types bindés). `import {crate_name}` est prêt.",
+        iri.matches("extern ").count());
     Ok(())
 }
 
