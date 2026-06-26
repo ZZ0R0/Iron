@@ -574,6 +574,12 @@ impl Parser {
             Ok(stmts)
         } else {
             self.expect(&TokenKind::Colon, "`:`")?;
+            // Suite inline (surface Python) : `: stmt` sur la **même ligne** — `def f(): return x`,
+            // `if c: return y`, `while c: f()`. Pas de Newline juste après `:` ⇒ un unique statement
+            // (le lexer n'émet ni Indent ni Dedent sans saut de ligne). `stmt()` consomme sa propre fin.
+            if !self.is(&TokenKind::Newline) {
+                return Ok(vec![self.stmt()?]);
+            }
             self.expect(&TokenKind::Newline, "fin de ligne")?;
             self.expect(&TokenKind::Indent, "bloc indenté")?;
             let mut stmts = Vec::new();

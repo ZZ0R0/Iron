@@ -491,7 +491,7 @@ fn line_col(src: &str, byte: u32) -> (u32, u32) {
     (line, col)
 }
 
-fn out_dir_for(input: &Path) -> PathBuf {
+pub fn out_dir_for(input: &Path) -> PathBuf {
     let stem = input.file_stem().and_then(|s| s.to_str()).unwrap_or("out");
     // Hash du chemin **complet** → projets parallèles distincts (sinon tous les `main.irn` collisionnent).
     let full = std::fs::canonicalize(input).unwrap_or_else(|_| input.to_path_buf());

@@ -16,3 +16,4 @@ pub mod sourcemap;
 pub mod driver;
 pub mod lint;
 pub mod lsp;
+pub mod repl;

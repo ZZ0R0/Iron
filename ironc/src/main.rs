@@ -1,6 +1,6 @@
 //! CLI `ironc build|run [--audit] <fichier.irn>`.
 
-use ironc::{bind, driver, lsp};
+use ironc::{bind, driver, lsp, repl};
 use std::path::Path;
 use std::process::exit;
 
@@ -13,6 +13,9 @@ fn main() {
         exit(if lsp::lsp().is_ok() { 0 } else { 1 });
     }
     // `ironc update` : re-binde tous les `.iri` du projet (sans fichier).
+    if positional.first().map(|s| s.as_str()) == Some("repl") {
+        exit(if repl::repl().is_ok() { 0 } else { 1 });
+    }
     if positional.first().map(|s| s.as_str()) == Some("update") {
         exit(if driver::update().is_ok() { 0 } else { 1 });
     }

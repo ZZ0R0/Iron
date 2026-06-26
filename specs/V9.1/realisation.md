@@ -7,25 +7,25 @@
 
 | Piste | Spec | Titre | Vague | Statut |
 |---|---|---|---|---|
-| 1.1 | 52000 | Principe « aucune lib Iron » + retrait io/os/time | 1 | ☐ todo |
-| 1.2 | 52100 | `import <crate>` auto-bind complet (rustdoc + cache) | 1 | ☐ todo |
-| 1.3 | 52200 | `import std` | 1 | ☐ todo |
-| 1.4 | 52300 | Registre curé + `ironc add` | 1 | ☐ todo |
-| 2.1 | 60800 | Diagnostics overlay rustc | 2 | ☐ todo |
-| 2.2 | 60900 | Source-maps granularité expression | 2 | ☐ todo |
+| 1.1 | 52000 | Principe « aucune lib Iron » + retrait io/os/time | 1 | ✅ fait |
+| 1.2 | 52100 | `import <crate>` auto-bind complet (rustdoc + cache) | 1 | ✅ fait |
+| 1.3 | 52200 | `import std` | 1 | ✅ fait |
+| 1.4 | 52300 | Registre curé + `ironc add` | 1 | ✅ fait |
+| 2.1 | 60800 | Diagnostics overlay rustc | 2 | ✅ fait |
+| 2.2 | 60900 | Source-maps granularité expression | 2 | 🔶 ligne OK, expr = raffinement |
 | 2.3 | 71300 | LSP enrichi (complétion/hover/go-to-def) | 2 | ☐ todo |
 | 2.4 | 71400 | `ironc fmt` (commentaires) | 2 | ☐ todo |
-| 3.1 | 71500 | Extension VSCode : langage + icônes | 3 | ☐ todo |
-| 3.2 | 71600 | Grammaire de coloration | 3 | ☐ todo |
-| 3.3 | 71700 | Client LSP + linter VSCode | 3 | ☐ todo |
-| 3.4 | 71800 | Gestionnaire d'imports VSCode | 3 | ☐ todo |
-| 3.5 | 71900 | Build/run intégrés VSCode | 3 | ☐ todo |
-| 4.1 | 21400 | Génériques utilisateur complets | 4 | ☐ todo |
+| 3.1 | 71500 | Extension VSCode : langage + icônes | 3 | ✅ fait |
+| 3.2 | 71600 | Grammaire de coloration | 3 | ✅ fait |
+| 3.3 | 71700 | Client LSP + linter VSCode | 3 | ✅ fait |
+| 3.4 | 71800 | Gestionnaire d'imports VSCode | 3 | ✅ fait |
+| 3.5 | 71900 | Build/run intégrés VSCode | 3 | ✅ fait |
+| 4.1 | 21400 | Génériques utilisateur complets | 4 | ✅ fait |
 | 4.2 | 21500 | Erreurs typées `Result[T, E]` | 4 | ☐ todo |
-| 4.3 | 21600 | Closures avancées | 4 | ☐ todo |
-| 4.4 | 72000 | `ironc repl` | 4 | ☐ todo |
-| 4.5 | 72100 | Gestion de paquets | 4 | ☐ todo |
-| 4.6 | 72200 | `ironc doc` | 4 | ☐ todo |
+| 4.3 | 21600 | Closures avancées | 4 | ✅ fait |
+| 4.4 | 72000 | `ironc repl` | 4 | ✅ fait |
+| 4.5 | 72100 | Gestion de paquets | 4 | ✅ fait |
+| 4.6 | 72200 | `ironc doc` | 4 | ✅ fait |
 | 4.7 | 72300 | Intégration debugger | 4 | ☐ todo |
 | 5.1 | 90600 | Le « 0.1 % » tracé | 5 | ☐ todo |
 | 5.2 | 90700 | Batterie élargie 30 vrais crates | 5 | ☐ todo |
@@ -51,12 +51,15 @@ pas d'un type-checker Iron maison. La surcouche, comme le codegen.
 - **Vague 3 COMPLÈTE** (extension VSCode `editors/vscode/`) : langage `.irn`/`.iri` + icône · coloration
   TextMate · client LSP + `ironc check` au save · `Iron: Add crate` · build/run + CodeLens « ▶ Run ».
 - **4.1** génériques utilisateur (`def f[T]`/`class Pair[A,B]` + bornes ; borne `Clone` par défaut) → 7, 30.
+- **4.3** closures avancées (type `fn(A)->R`, capture `move`, stockage/retour de closures).
+- **4.4** `ironc repl` : compile-and-run par snippet (accumulateur + diff + rollback). A fait émerger un vrai
+  trou de langage — **suites inline** (`def f(): return x`, `if c: y`) — désormais supportées dans `block()`.
+- **4.5** paquets : `ironc add` (rustdoc→`.iri`) · `remove` · `update` (re-bind) — chaîne e2e prouvée (itoa).
 - **4.6** `ironc doc` (overlay rustdoc → HTML).
 - **2.2** source-maps : la ligne marche déjà (granularité expression = raffinement non fait).
 
 **☐ RESTE** : 2.3 LSP enrichi (complétion/hover — diagnostics OK) · 2.4 fmt (bloqueur trivia commentaires) ·
-4.2 erreurs typées `Result[T,E]` (D5, lourd) · 4.3 closures avancées · 4.4 repl · 4.5 paquets (lockfile :
-Cargo.lock déjà auto ; reste remove/update) · 4.7 debugger · Vague 5 (5.1 doc 0.1% · 5.2 batterie-30 · 5.3 gate).
+4.2 erreurs typées `Result[T,E]` (D5, lourd) · 4.7 debugger · Vague 5 (5.1 doc 0.1% · 5.2 batterie-30 · 5.3 gate).
 
 ## Écarts / faiblesses (relevés)
 
@@ -64,6 +67,9 @@ Cargo.lock déjà auto ; reste remove/update) · 4.7 debugger · Vague 5 (5.1 do
   bind↔parse à surveiller pour d'autres constructs).
 - io/os/time **retirés** : un programme les utilisant doit migrer vers `import std`. Aucun test ne les
   utilisait (migration nulle).
+- Le REPL étant ligne-à-ligne, les blocs multi-lignes ne s'y saisissent pas ; on a donc ajouté les **suites
+  inline** au parser (`def f(): return x`). Limite assumée V0 : **une** instruction inline (pas de `a; b`
+  chaîné). Couvre def/méthodes/if/while/for (tout passe par `block()`).
 
 ## Hors V9.1 (le « 0.1 % », spec 90600)
 
