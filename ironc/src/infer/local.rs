@@ -38,6 +38,14 @@ pub(crate) fn stmt(cx: &mut Inf, s: &Stmt, scope: &mut Scope) {
         }
         StmtKind::Assign { target, value } => {
             let vt = expr(cx, value, scope);
+            // Assignation à une variable simple : propage le type au scope (les locaux Iron sont hoistés →
+            // une 1ʳᵉ assignation arrive en `Assign`, pas `Let`). Indispensable pour suivre un type externe
+            // (`s = ctor()` puis `s.method()`, V8/21100).
+            if let ExprKind::Var(name) = &target.kind {
+                if !scope.contains_key(name) {
+                    scope.insert(name.clone(), vt.clone());
+                }
+            }
             expr(cx, target, scope);
             // Raffine un conteneur (souvent vide → Unit) depuis `d[k] = v` / `xs[i] = v` : indispensable
             // pour le pattern Python `counts = {}` puis `counts[w] = n` (sinon clé/valeur restent Unit).
@@ -252,6 +260,18 @@ pub(crate) fn expr(cx: &mut Inf, e: &Expr, scope: &Scope) -> Type {
                 },
                 _ => {
                     if let ExprKind::Field { base, name } = &callee.kind {
+                        // constructeur namespacé `Type.ctor(...)` (V8, 21100/51500) : `Regex.new(...)`.
+                        if let ExprKind::Var(tname) = &base.kind {
+                            if let Some(et) = cx.etypes.get(tname) {
+                                if let Some((_, f)) = et.ctors.iter().find(|(n, _)| n == name) {
+                                    let ret = f.ret.clone();
+                                    for a in args {
+                                        expr(cx, a, scope);
+                                    }
+                                    return cx.set(e.id, ret);
+                                }
+                            }
+                        }
                         // modules stdlib io/os/time (80300/80800) : types de retour.
                         if let ExprKind::Var(m) = &base.kind {
                             let s = Box::new(Type::Str);
@@ -289,6 +309,12 @@ pub(crate) fn expr(cx: &mut Inf, e: &Expr, scope: &Scope) -> Type {
                         if let Type::Struct(tn) = &bt {
                             if let Some(ret) = cx.methods.get(&(tn.clone(), name.clone())) {
                                 return cx.set(e.id, ret.clone());
+                            }
+                        }
+                        // méthode externe (V8, 21100) : `obj.m(...)` où `obj : Extern(nom Iron)`.
+                        if let Type::Extern(iron_name) = &bt {
+                            if let Some(ret) = cx.extern_method_ret(iron_name, name) {
+                                return cx.set(e.id, ret);
                             }
                         }
                         Type::Unit

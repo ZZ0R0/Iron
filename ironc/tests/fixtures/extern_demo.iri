@@ -1,0 +1,4 @@
+extern type IString = "String":
+    fn istr(s: str) -> IString = "String::from"
+    fn upper(self) -> str = "to_uppercase"
+    fn empty(self) -> bool = "is_empty"

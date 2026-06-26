@@ -1,0 +1,9 @@
+use "extern_demo.iri"
+
+def main():
+    s = istr("hello world")
+    print(s.upper())
+    if s.empty():
+        print("vide")
+    else:
+        print("non vide")

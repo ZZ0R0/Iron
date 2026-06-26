@@ -1,0 +1,15 @@
+use "regex.iri"
+
+def check(pattern: str, text: str) -> Result[bool]:
+    r = Regex.new(pattern)?
+    return ok(r.is_match(text))
+
+def main():
+    if check("[0-9]+", "abc123").unwrap_or(False):
+        print("match")
+    else:
+        print("no match")
+    if check("[a-z]+", "12345").unwrap_or(False):
+        print("alpha")
+    else:
+        print("no alpha")

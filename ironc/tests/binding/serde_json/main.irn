@@ -1,0 +1,9 @@
+use "serde.iri"
+
+def total(s: str) -> Result[i64]:
+    nums = parse_ints(s)?
+    return ok(sum(nums))
+
+def main():
+    print(total("[10, 20, 30]").unwrap_or(0))
+    print(total("[1, 2, 3, 4]").unwrap_or(0))

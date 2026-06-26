@@ -62,7 +62,7 @@ pub fn infer(ast: &Ast, bindings: &Bindings) -> TypeMap {
     for it in &ast.items {
         if let ItemKind::Fn { params, body, .. } = &it.kind {
             let mut scope: HashMap<String, Type> = params.iter().cloned().collect();
-            let mut cx = Inf { sigs: &sigs, structs: &structs, enums: &enums, methods: &methods_tbl, tm: &mut tm };
+            let mut cx = Inf { sigs: &sigs, structs: &structs, enums: &enums, methods: &methods_tbl, etypes: &bindings.etypes, tm: &mut tm };
             for s in body {
                 local::stmt(&mut cx, s, &mut scope);
             }
@@ -78,7 +78,7 @@ pub fn infer(ast: &Ast, bindings: &Bindings) -> TypeMap {
                     if m.self_param {
                         scope.insert("self".to_string(), Type::Struct(type_name.clone()));
                     }
-                    let mut cx = Inf { sigs: &sigs, structs: &structs, enums: &enums, methods: &methods_tbl, tm: &mut tm };
+                    let mut cx = Inf { sigs: &sigs, structs: &structs, enums: &enums, methods: &methods_tbl, etypes: &bindings.etypes, tm: &mut tm };
                     for s in body {
                         local::stmt(&mut cx, s, &mut scope);
                     }
@@ -95,6 +95,8 @@ pub(crate) struct Inf<'a> {
     pub structs: &'a Structs,
     pub enums: &'a Enums,
     pub methods: &'a Methods,
+    /// Types externes à API (V8, 21100) : nom Iron → `ExternType` (méthodes/ctors).
+    pub etypes: &'a HashMap<String, ExternType>,
     pub tm: &'a mut TypeMap,
 }
 
@@ -102,6 +104,13 @@ impl Inf<'_> {
     pub(crate) fn set(&mut self, id: NodeId, ty: Type) -> Type {
         self.tm.insert(id, ty.clone());
         ty
+    }
+    /// Type de retour d'une méthode externe (V8, 21100) : `obj.m(...)` où `obj : Extern(name)`.
+    pub(crate) fn extern_method_ret(&self, iron_name: &str, method: &str) -> Option<Type> {
+        self.etypes
+            .get(iron_name)
+            .and_then(|et| et.methods.iter().find(|(n, _)| n == method))
+            .map(|(_, f)| f.ret.clone())
     }
     pub(crate) fn field_type(&self, struct_name: &str, field: &str) -> Type {
         self.structs

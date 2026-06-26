@@ -1,0 +1,13 @@
+use "rb.iri"
+
+def insensitive_match(pat: str, text: str) -> Result[bool]:
+    b = RegexBuilder.new(pat)
+    b.case_insensitive(True)
+    r = b.build()?
+    return ok(r.is_match(text))
+
+def main():
+    if insensitive_match("abc", "XABCY").unwrap_or(False):
+        print("ci match")
+    else:
+        print("no")

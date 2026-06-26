@@ -111,6 +111,8 @@ fn load_bindings(imports: &[String], base_dir: &Path) -> CResult<Bindings> {
         let bb = crate::iri::parse(&src, 0)?;
         b.fns.extend(bb.fns);
         b.types.extend(bb.types);
+        b.etypes.extend(bb.etypes);
+        b.mods.extend(bb.mods);
         b.crates.extend(bb.crates);
     }
     Ok(b)

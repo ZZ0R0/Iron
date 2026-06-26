@@ -1,10 +1,13 @@
-//! [50300] Auto-génération de bindings `.iri` depuis `rustdoc --output-format json` (interop niveau 3).
+//! [50300/50900] Auto-génération de bindings `.iri` depuis `rustdoc --output-format json`.
 //!
-//! Best-effort : extrait les fonctions **publiques** dont la signature se **projette** vers le
-//! sous-ensemble Iron (I6) ; les autres (génériques, `unsafe`, types non mappables) sont **sautées et
-//! comptées**, jamais bindées à tort. Cible rustdoc-json **v57** (nightly) ; dégrade proprement.
+//! Best-effort (D5) : extrait les fonctions/méthodes/constructeurs **publics** dont la signature se
+//! **projette** vers le sous-ensemble Iron (I6) via `map_type` récursif (51000) ; les autres (génériques
+//! nus, `unsafe`, types non mappables) sont **sautés et comptés**, jamais bindés à tort. Extrait la POO
+//! (méthodes/ctors des `impl` inhérents, 51100) et reconnaît les idiomes builder/getter (51300).
+//! Cible rustdoc-json **v57** (nightly) ; dégrade proprement.
 
 use crate::ir::*;
+use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 use std::process::Command;
 
@@ -12,7 +15,6 @@ use std::process::Command;
 pub fn bind(crate_dir: &Path, pkg: Option<&str>) -> CResult<String> {
     let manifest = std::fs::read_to_string(crate_dir.join("Cargo.toml"))
         .map_err(|e| CompileError::msg(format!("lecture Cargo.toml : {e}")))?;
-    // Crate ciblée : `pkg` (dépendance) ou la crate locale.
     let target = match pkg {
         Some(p) => p.to_string(),
         None => pkg_name(&manifest).ok_or_else(|| CompileError::msg("nom de crate introuvable dans Cargo.toml"))?,
@@ -44,75 +46,309 @@ pub fn bind(crate_dir: &Path, pkg: Option<&str>) -> CResult<String> {
     let v: serde_json::Value = serde_json::from_str(&json)
         .map_err(|e| CompileError::msg(format!("JSON rustdoc invalide : {e}")))?;
 
-    emit(&v, &target)
+    emit(&v, &target.replace('-', "_"))
 }
 
-fn emit(v: &serde_json::Value, crate_name: &str) -> CResult<String> {
+type Json = serde_json::Value;
+
+/// Signature projetée d'une fn/méthode, ou `None` si non mappable.
+struct Sig {
+    /// `recv` éventuel (méthode) : `"self"` (ByRef), `"mut self"` (ByRefMut), `"own self"` (ByValue).
+    recv: Option<&'static str>,
+    /// `nom: type` Iron (sans le receveur).
+    params: Vec<String>,
+    ret: String,
+    idioms: Vec<&'static str>,
+}
+
+fn emit(v: &Json, crate_name: &str) -> CResult<String> {
     let index = v["index"]
         .as_object()
         .ok_or_else(|| CompileError::msg("rustdoc-json : `.index` absent (format inattendu)"))?;
+    let paths = &v["paths"];
     let version = v["crate_version"].as_str().unwrap_or("*");
-    let mut iri = format!(
-        "# bindings auto-générés depuis `{crate_name}` (ironc bind)\ncrate {crate_name} = \"{version}\"\n"
-    );
     let (mut bound, mut skipped) = (0usize, 0usize);
 
+    // --- POO : méthodes/ctors par type (51100) ---
+    let mut method_ids: HashSet<u64> = HashSet::new();
+    let mut types: BTreeMap<String, (Vec<String>, Vec<String>)> = BTreeMap::new(); // nom → (ctors, méthodes)
+    let mut seen: BTreeMap<String, HashSet<String>> = BTreeMap::new(); // dedup noms par type
+
     for item in index.values() {
-        let f = &item["inner"]["function"];
-        if !f.is_object() || item["visibility"].as_str() != Some("public") {
+        let imp = &item["inner"]["impl"];
+        if !imp.is_object() || !imp["trait"].is_null() {
+            continue; // inhérent seulement (51100 ; traits → V9)
+        }
+        if imp["is_synthetic"].as_bool() == Some(true) || !imp["blanket_impl"].is_null() {
+            continue;
+        }
+        let for_id = imp["for"]["resolved_path"]["id"].as_u64();
+        let tyname = match imp["for"]["resolved_path"]["path"].as_str() {
+            Some(n) => n.rsplit("::").next().unwrap_or(n).to_string(),
+            None => continue,
+        };
+        // type local à la crate (crate_id 0) — sinon on n'a pas son chemin public.
+        if !for_id.map_or(false, |id| is_local(paths, id)) {
+            continue;
+        }
+        for mid in imp["items"].as_array().into_iter().flatten() {
+            let Some(id) = mid.as_u64() else { continue };
+            method_ids.insert(id);
+            let Some(m) = index.get(&id.to_string()) else { continue };
+            if m["inner"]["function"].is_object() && m["visibility"].as_str() != Some("private") {
+                let name = m["name"].as_str().unwrap_or("");
+                // dedup par nom au sein du type (multi-`impl` → garder la 1ʳᵉ, 51100).
+                if !seen.entry(tyname.clone()).or_default().insert(name.to_string()) {
+                    continue;
+                }
+                match project(&m["inner"]["function"], &tyname) {
+                    Some(sig) => {
+                        let entry = types.entry(tyname.clone()).or_default();
+                        if sig.recv.is_some() {
+                            entry.1.push(render(name, &sig, None)); // méthode → nom court (syntaxe méthode)
+                        } else {
+                            // ctor → chemin complet `crate::Type::ctor`.
+                            let full = format!("{crate_name}::{tyname}::{name}");
+                            entry.0.push(render(name, &sig, Some(&full)));
+                        }
+                        bound += 1;
+                    }
+                    None => skipped += 1,
+                }
+            }
+        }
+    }
+
+    // --- fonctions libres (51000) ---
+    let mut free = Vec::new();
+    for (id, item) in index {
+        if id.parse::<u64>().map_or(false, |n| method_ids.contains(&n)) {
+            continue;
+        }
+        if !item["inner"]["function"].is_object() || item["visibility"].as_str() != Some("public") {
             continue;
         }
         let name = match item["name"].as_str() {
             Some(n) => n,
             None => continue,
         };
-        let has_generics = f["generics"]["params"].as_array().map_or(false, |a| !a.is_empty());
-        let is_unsafe = f["header"]["is_unsafe"].as_bool() == Some(true);
-        let inputs = f["sig"]["inputs"].as_array();
-        if has_generics || is_unsafe || inputs.is_none() {
-            skipped += 1;
-            continue;
-        }
-        let mut params = Vec::new();
-        let mut mappable = true;
-        for inp in inputs.unwrap() {
-            let pn = inp[0].as_str().unwrap_or("x");
-            match map_type(&inp[1]) {
-                Some(t) => params.push(format!("{pn}: {t}")),
-                None => {
-                    mappable = false;
-                    break;
-                }
-            }
-        }
-        let ret = match &f["sig"]["output"] {
-            serde_json::Value::Null => Some("unit".to_string()),
-            t => map_type(t),
-        };
-        match (mappable, ret) {
-            (true, Some(r)) => {
-                iri.push_str(&format!(
-                    "extern fn {name}({}) -> {r} = \"{crate_name}::{name}\"\n",
-                    params.join(", ")
-                ));
+        match project(&item["inner"]["function"], "") {
+            Some(sig) if sig.recv.is_none() => {
+                free.push(render(name, &sig, Some(&format!("{crate_name}::{name}"))));
                 bound += 1;
             }
             _ => skipped += 1,
         }
     }
 
-    iri.push_str(&format!("# {bound} fn(s) bindée(s), {skipped} item(s) non mappable(s) sauté(s)\n"));
+    // --- fermeture du graphe (51200) : déclarer en opaque tout type référencé non déjà typé ---
+    let mut referenced: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for (ctors, methods) in types.values() {
+        for line in ctors.iter().chain(methods) {
+            collect_type_refs(line, &mut referenced);
+        }
+    }
+    for line in &free {
+        collect_type_refs(line, &mut referenced);
+    }
+    let opaque: Vec<String> = referenced.into_iter().filter(|n| !types.contains_key(n)).collect();
+
+    // --- assemblage .iri ---
+    let mut iri = format!("# bindings auto-générés depuis `{crate_name}` (ironc bind)\ncrate {crate_name} = \"{version}\"\n");
+    for ty in &opaque {
+        iri.push_str(&format!("\nextern type {ty} = \"{crate_name}::{ty}\"\n")); // handle opaque (graphe fermé)
+    }
+    for (ty, (ctors, methods)) in &types {
+        if ctors.is_empty() && methods.is_empty() {
+            continue;
+        }
+        iri.push_str(&format!("\nextern type {ty} = \"{crate_name}::{ty}\":\n"));
+        for line in ctors.iter().chain(methods.iter()) {
+            iri.push_str(&format!("    {line}\n"));
+        }
+    }
+    if !free.is_empty() {
+        iri.push('\n');
+        for line in &free {
+            iri.push_str(&format!("extern {line}\n")); // fn libre au top-level → `extern fn …`
+        }
+    }
+    iri.push_str(&format!("\n# {bound} item(s) bindé(s), {skipped} non mappable(s) sauté(s)\n"));
     Ok(iri)
 }
 
-/// Projette un type rustdoc-json vers le sous-ensemble Iron (I6). Mapping **exact** (pas de
-/// widening : un `i32` mal mappé en `i64` produirait un binding faux).
-fn map_type(t: &serde_json::Value) -> Option<String> {
-    match t["primitive"].as_str() {
-        Some("i64") => Some("i64".to_string()),
-        Some("f64") => Some("f64".to_string()),
-        Some("bool") => Some("bool".to_string()),
+/// `true` si l'id de type appartient à la crate documentée (`crate_id == 0`).
+fn is_local(paths: &Json, id: u64) -> bool {
+    paths[id.to_string()]["crate_id"].as_u64() == Some(0)
+}
+
+/// Projette la signature d'une `function` rustdoc-json vers Iron. `owner` = type si méthode (résolution
+/// du receveur). `None` si non mappable (générique de fonction, `unsafe`, type non projetable).
+fn project(f: &Json, owner: &str) -> Option<Sig> {
+    if f["header"]["is_unsafe"].as_bool() == Some(true) {
+        return None;
+    }
+    // générique au niveau de la fonction → sauté (couche B / instance-pinning, 51400).
+    if f["generics"]["params"]
+        .as_array()
+        .map_or(false, |a| a.iter().any(|p| !p["kind"]["lifetime"].is_object()))
+    {
+        return None;
+    }
+    let inputs = f["sig"]["inputs"].as_array()?;
+    let mut recv = None;
+    let mut params = Vec::new();
+    let mut idioms = Vec::new();
+    for (i, inp) in inputs.iter().enumerate() {
+        let pn = inp[0].as_str().unwrap_or("x");
+        let ty = &inp[1];
+        if i == 0 && pn == "self" {
+            recv = Some(recv_kind(ty));
+            continue;
+        }
+        match map_type(ty) {
+            Some(t) => params.push(format!("{pn}: {t}")),
+            None => return None,
+        }
+    }
+    // retour + idiomes builder/getter (51300).
+    let out = &f["sig"]["output"];
+    let ret = if out.is_null() {
+        "unit".to_string()
+    } else if recv == Some("mut self") && is_self_or_owner(out, owner) {
+        // builder : `&mut self -> &mut Self`/`&mut Owner` → mutation en place, retour jeté.
+        idioms.push("builder");
+        "unit".to_string()
+    } else if let Some(inner) = borrowed_inner(out) {
+        // getter : retour emprunté `&T` → valeur possédée (clone, D4).
+        match map_type(inner) {
+            Some(t) => {
+                idioms.push("clone");
+                t
+            }
+            None => return None,
+        }
+    } else {
+        map_type(out)?
+    };
+    Some(Sig { recv, params, ret, idioms })
+}
+
+fn recv_kind(ty: &Json) -> &'static str {
+    if let Some(b) = ty.get("borrowed_ref") {
+        if b["is_mutable"].as_bool() == Some(true) {
+            return "mut self";
+        }
+        return "self";
+    }
+    "own self"
+}
+
+/// `&Self`/`&mut Self` ou `&mut Owner` (retour builder, chaînable).
+fn is_self_or_owner(t: &Json, owner: &str) -> bool {
+    borrowed_inner(t).map_or(false, |inner| {
+        inner["generic"].as_str() == Some("Self")
+            || inner["resolved_path"]["path"]
+                .as_str()
+                .map_or(false, |p| p.rsplit("::").next() == Some(owner))
+    })
+}
+
+/// Si `t` est `&T`/`&[T]`, renvoie l'intérieur emprunté.
+fn borrowed_inner(t: &Json) -> Option<&Json> {
+    t.get("borrowed_ref").map(|b| &b["type"])
+}
+
+fn render(name: &str, sig: &Sig, free_path: Option<&str>) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(r) = sig.recv {
+        parts.push(r.to_string());
+    }
+    parts.extend(sig.params.iter().cloned());
+    let params = parts.join(", ");
+    // chemin : fn libre → chemin complet fourni ; méthode → nom court (résolu par la lower) ; ctor → nom court.
+    let path = free_path.map(|p| p.to_string()).unwrap_or_else(|| name.to_string());
+    let idioms = if sig.idioms.is_empty() {
+        String::new()
+    } else {
+        format!(" [{}]", sig.idioms.join(", "))
+    };
+    format!("fn {name}({params}) -> {} = \"{path}\"{idioms}", sig.ret)
+}
+
+/// Projection récursive type-Rust → type-Iron (51000, D1). `None` si non mappable. **Aucun widening.**
+fn map_type(t: &Json) -> Option<String> {
+    if let Some(p) = t["primitive"].as_str() {
+        return map_prim(p);
+    }
+    if let Some(b) = t.get("borrowed_ref") {
+        return map_type(&b["type"]); // emprunt en entrée → intérieur (& réinjecté au lowering)
+    }
+    if let Some(s) = t.get("slice") {
+        return map_type(s).map(|x| format!("list[{x}]"));
+    }
+    if let Some(items) = t["tuple"].as_array() {
+        let parts: Option<Vec<String>> = items.iter().map(map_type).collect();
+        return parts.map(|p| format!("({})", p.join(", ")));
+    }
+    if let Some(rp) = t.get("resolved_path") {
+        let name = rp["path"].as_str()?.rsplit("::").next().unwrap_or("");
+        let targs: Vec<&Json> = rp["args"]["angle_bracketed"]["args"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|x| x.get("type")).collect())
+            .unwrap_or_default();
+        return map_named(name, &targs);
+    }
+    None // generic nu, dyn Trait, qualified_path, raw_pointer → couche B/C
+}
+
+fn map_named(name: &str, targs: &[&Json]) -> Option<String> {
+    let one = |i: usize| targs.get(i).and_then(|t| map_type(t));
+    match name {
+        "String" | "str" | "Cow" | "PathBuf" | "OsString" => Some("str".to_string()),
+        "Vec" | "VecDeque" => Some(format!("list[{}]", one(0)?)),
+        "Option" => Some(format!("Option[{}]", one(0)?)),
+        "Result" => Some(format!("Result[{}]", one(0)?)),
+        "HashMap" | "BTreeMap" => Some(format!("dict[{}, {}]", one(0)?, one(1)?)),
+        "HashSet" | "BTreeSet" => Some(format!("set[{}]", one(0)?)),
+        "Box" | "Rc" | "Arc" => one(0),
+        // struct/enum nommé (PascalCase) → réf de type externe (handle).
+        other if other.chars().next().map_or(false, |c| c.is_ascii_uppercase()) => Some(other.to_string()),
         _ => None,
+    }
+}
+
+fn map_prim(p: &str) -> Option<String> {
+    match p {
+        "bool" => Some("bool".to_string()),
+        "char" => Some("char".to_string()),
+        "str" => Some("str".to_string()),
+        "()" | "unit" => Some("unit".to_string()),
+        "i8" | "i16" | "i32" | "i64" | "i128" | "isize" | "u8" | "u16" | "u32" | "u64" | "u128"
+        | "usize" | "f32" | "f64" => Some(p.to_string()),
+        _ => None,
+    }
+}
+
+/// Extrait les noms de types externes (PascalCase) de la **signature** Iron (partie avant `=`),
+/// hors `Option`/`Result` (constructeurs Iron). Sert à fermer le graphe de types (51200).
+fn collect_type_refs(line: &str, out: &mut std::collections::BTreeSet<String>) {
+    let sig = line.split(" = ").next().unwrap_or(line);
+    let b = sig.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        if b[i].is_ascii_uppercase() {
+            let start = i;
+            while i < b.len() && (b[i].is_ascii_alphanumeric() || b[i] == b'_') {
+                i += 1;
+            }
+            let word = &sig[start..i];
+            if word != "Option" && word != "Result" {
+                out.insert(word.to_string());
+            }
+        } else {
+            i += 1;
+        }
     }
 }
 

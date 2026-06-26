@@ -429,20 +429,57 @@ pub enum ParamMode {
 /// `fn_name → modes de ses paramètres`.
 pub type ParamModes = HashMap<String, Vec<ParamMode>>;
 
-/// Fonction Rust externe importée via `.iri` (50200) : signature Iron + chemin Rust.
+/// Mode de réception d'une méthode externe (V8, 50900) : `self`/`&self`/`&mut self`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Recv {
+    ByValue,
+    ByRef,
+    ByRefMut,
+}
+
+/// Idiome Rust reconnu au binding (V8, 51300) ; la glue est émise par le lowering (40200).
+/// - `Builder` : recv `ByRefMut`, retour `&mut Self` jeté (mutation en place).
+/// - `Clone`   : retour emprunté `&T` → `.clone()`/`.cloned()` (getter, D4 ; warning perf I4).
+/// - `Collect` : retour itérateur → `.collect::<Vec<_>>()` → `list[T]`.
+/// - `Closure(idx)` : le paramètre `idx` est une closure (`Fn`-borné) → lambda Iron.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Idiom {
+    Builder,
+    Clone,
+    Collect,
+    Closure(usize),
+}
+
+/// Fonction Rust externe importée via `.iri` (50200, étendu V8 50900) : signature Iron + chemin Rust.
+/// `recv` = `None` pour une fn libre/constructeur, `Some(_)` pour une méthode.
 #[derive(Debug, Clone)]
 pub struct ExternFn {
     pub params: Vec<Type>,
     pub ret: Type,
     pub path: String,
+    pub recv: Option<Recv>,
+    pub idioms: Vec<Idiom>,
 }
 
-/// Bindings chargés depuis les `.iri` importés (50200).
+/// Type Rust externe à API (V8, 50900) : handle opaque + constructeurs + méthodes (D2).
+#[derive(Debug, Clone, Default)]
+pub struct ExternType {
+    pub rust_path: String,
+    pub ctors: Vec<(String, ExternFn)>,
+    pub methods: Vec<(String, ExternFn)>,
+}
+
+/// Bindings chargés depuis les `.iri` importés (50200, étendu V8 50900).
 #[derive(Debug, Clone, Default)]
 pub struct Bindings {
     pub fns: HashMap<String, ExternFn>,
+    /// Types opaques sans API (`extern type Name = "path"`, rétro-compat 50400) : nom → chemin Rust.
     pub types: HashMap<String, String>,
+    /// Types externes à API (`extern type Name = "path":` + bloc de méthodes/ctors, V8 50900).
+    pub etypes: HashMap<String, ExternType>,
     pub crates: Vec<(String, String)>,
+    /// Namespacing (V8, 51500) : nom de module → noms d'items qu'il regroupe.
+    pub mods: HashMap<String, Vec<String>>,
 }
 
 // ---------------------------------------------------------------- SourceMap (§4.6)

@@ -997,6 +997,18 @@ impl Cx<'_> {
                 }
             }
         }
+        // constructeur namespacé `Type.ctor(...)` (V8, 40200) : `Regex.new(...)` → `crate::Regex::new(...)`.
+        if let ExprKind::Field { base, name } = &callee.kind {
+            if let Some(ts) = self.try_extern_ctor(base, name, args) {
+                return ts;
+            }
+        }
+        // méthode externe (V8, 40200) : `obj.m(...)` où `obj : Extern(nom Iron)` — prime sur les built-ins.
+        if let ExprKind::Field { base, name } = &callee.kind {
+            if let Some(ts) = self.try_extern_method(base, name, args) {
+                return ts;
+            }
+        }
         // méthodes des types built-in (surface Python) : `xs.append(x)`, `s.upper()`, `d.keys()`.
         if let ExprKind::Field { base, name } = &callee.kind {
             if let Some(ts) = self.try_builtin_method(base, name, args) {
@@ -1223,12 +1235,18 @@ impl Cx<'_> {
                 _ => {}
             }
             }
-            // fonction externe (`.iri`) → chemin Rust (50200).
-            if let Some(ef) = self.bindings.fns.get(name) {
-                let path = TokenStream::from_str(&ef.path).unwrap_or_else(|_| quote! { () });
-                let a: Vec<TokenStream> = args.iter().map(|x| self.value(x)).collect();
-                let _ = ef;
-                return quote! { #path( #(#a),* ) };
+            // fonction externe (`.iri`) → chemin Rust (50200/40200).
+            if self.bindings.fns.contains_key(name) {
+                let path = TokenStream::from_str(&self.bindings.fns[name].path).unwrap_or_else(|_| quote! { () });
+                let is_result = matches!(self.bindings.fns[name].ret, Type::Result(_));
+                let a: Vec<TokenStream> = args.iter().map(|x| self.extern_arg(x)).collect();
+                let call = quote! { #path( #(#a),* ) };
+                // erreur du crate → `IronError` unifié (I13) pour que `?`/`try` propagent.
+                return if is_result {
+                    quote! { #call.map_err(|e| IronError(format!("{:?}", e))) }
+                } else {
+                    call
+                };
             }
         }
         // appel utilisateur : `&x` ByRef, `&mut x` InOut, valeur sinon ; + args par défaut (surface Python).
@@ -1259,6 +1277,83 @@ impl Cx<'_> {
 
     /// Méthodes des types built-in (surface Python, 80500) : `xs.append(x)`, `s.upper()`, `d.keys()`…
     /// `None` = pas une méthode built-in connue → l'appel retombe sur le chemin normal.
+    /// Argument d'un appel externe (40200) : réinjecte `&` pour `str`/collections (Rust attend `&str`/
+    /// `&[T]` ; Iron a `String`/`Vec` → `&String`/`&Vec` coercent par Deref). Scalaires par valeur.
+    fn extern_arg(&mut self, x: &Expr) -> TokenStream {
+        let ty = self.type_of(x);
+        let v = self.value(x);
+        match ty {
+            Type::Str | Type::List(_) | Type::Dict(_, _) | Type::Set(_) => quote! { &#v },
+            _ => v,
+        }
+    }
+
+    /// Constructeur externe namespacé (V8, 40200) : `Type.ctor(args)` → `crate::Type::ctor(args)`.
+    fn try_extern_ctor(&mut self, base: &Expr, name: &str, args: &[Expr]) -> Option<TokenStream> {
+        let tname = match &base.kind {
+            ExprKind::Var(n) => n.clone(),
+            _ => return None,
+        };
+        let ctor = self
+            .bindings
+            .etypes
+            .get(&tname)
+            .and_then(|et| et.ctors.iter().find(|(n, _)| n == name).map(|(_, f)| f.clone()))?;
+        let path = TokenStream::from_str(&ctor.path).unwrap_or_else(|_| quote! { () });
+        let a: Vec<TokenStream> = args.iter().map(|x| self.extern_arg(x)).collect();
+        let call = quote! { #path( #(#a),* ) };
+        Some(if matches!(ctor.ret, Type::Result(_)) {
+            quote! { #call.map_err(|e| IronError(format!("{:?}", e))) }
+        } else {
+            call
+        })
+    }
+
+    /// Méthode externe (V8, 40200) : `obj.m(args)` → `RustPath::m(<recv> obj, args)` + glue d'idiomes.
+    /// `recv` : `&self` (ByRef) → `&obj`, `&mut self` (ByRefMut) → `&mut obj`, `self` (ByValue) → `obj`.
+    fn try_extern_method(&mut self, base: &Expr, name: &str, args: &[Expr]) -> Option<TokenStream> {
+        let iron_name = match self.type_of(base) {
+            Type::Extern(n) => n,
+            _ => return None,
+        };
+        let ef = match self.bindings.etypes.get(&iron_name) {
+            Some(et) => match et.methods.iter().find(|(n, _)| n == name) {
+                Some((_, f)) => f.clone(),
+                None => return None,
+            },
+            None => return None,
+        };
+        // Syntaxe méthode `recv.rust_method(args)` : auto-ref/deref de Rust gère le `recv`
+        // (`&self`/`&mut self`/`self`) et les méthodes atteintes par `Deref` (ex. `str` sur `String`).
+        let method_name = ef.path.rsplit("::").next().unwrap_or(&ef.path);
+        let mid = format_ident!("{}", method_name);
+        let recv = self.place(base);
+        let a: Vec<TokenStream> = args.iter().map(|x| self.extern_arg(x)).collect();
+        let mut call = quote! { #recv.#mid( #(#a),* ) };
+        let _ = ef.recv;
+        for idiom in &ef.idioms {
+            match idiom {
+                // getter (D4) : retour emprunté → valeur possédée. `.cloned()` pour Option, `.clone()` sinon.
+                Idiom::Clone => {
+                    call = if matches!(ef.ret, Type::Option(_)) {
+                        quote! { #call.cloned() }
+                    } else {
+                        quote! { #call.clone() }
+                    };
+                    self.audit.push(base.span); // warning perf I4 (--audit)
+                }
+                Idiom::Collect => call = quote! { #call.collect::<Vec<_>>() },
+                Idiom::Builder => {} // `&mut Self` jeté ; la mutation en place a eu lieu
+                Idiom::Closure(_) => {}
+            }
+        }
+        // méthode renvoyant un Result du crate → `IronError` unifié (I13).
+        if matches!(ef.ret, Type::Result(_)) {
+            call = quote! { #call.map_err(|e| IronError(format!("{:?}", e))) };
+        }
+        Some(call)
+    }
+
     fn try_builtin_method(&mut self, base: &Expr, name: &str, args: &[Expr]) -> Option<TokenStream> {
         let bt = self.type_of(base);
         let arg = |s: &mut Self, i: usize| s.value(&args[i]);

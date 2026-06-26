@@ -1,0 +1,9 @@
+crate regex = "1.12.4"
+
+extern type RegexBuilder = "regex::RegexBuilder":
+    fn new(pattern: str) -> RegexBuilder = "regex::RegexBuilder::new"
+    fn case_insensitive(mut self, yes: bool) -> unit = "case_insensitive" [builder]
+    fn build(self) -> Result[Regex] = "build"
+
+extern type Regex = "regex::Regex":
+    fn is_match(self, text: str) -> bool = "is_match"
