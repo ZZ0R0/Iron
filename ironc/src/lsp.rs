@@ -288,16 +288,31 @@ fn word_at(text: &str, off: usize) -> Option<String> {
 
 // ----------------------------------------------------------------- diagnostics (V9, inchangé)
 
-/// Front-end Iron (lex+parse) → diagnostics `(line, char, message)`.
+/// Front-end Iron → diagnostics **live** `(line, char, message)`. Lex + parse (syntaxe), puis — best-effort,
+/// bindings vides — les passes de **types du moteur** (V11/DA-3) : conflits de primitives, champ/méthode
+/// inconnus, arité. Chaque erreur porte son span Iron (I8) → soulignée au bon endroit dans VSCode.
 fn check(text: &str) -> Vec<(usize, usize, String)> {
     let toks = match crate::lex::lex(text, 0) {
         Ok(t) => t,
         Err(e) => return vec![err_pos(text, &e)],
     };
-    match crate::parse::parse(toks) {
-        Ok(_) => Vec::new(),
-        Err(e) => vec![err_pos(text, &e)],
+    let mut ast = match crate::parse::parse(toks) {
+        Ok(a) => a,
+        Err(e) => return vec![err_pos(text, &e)],
+    };
+    // Diagnostics de types (best-effort, sans `.iri` : les externes manquants tombent dans le filet rustc).
+    let bindings = crate::ir::Bindings::default();
+    if crate::infer::engine::resolve_params(&mut ast, &bindings).is_err() {
+        return Vec::new(); // résolution incomplète → on n'affirme rien (pas de faux diagnostic)
     }
+    if let Err(e) = crate::infer::engine::check_types(&ast, &bindings) {
+        return vec![err_pos(text, &e)];
+    }
+    let tm = crate::infer::infer(&ast, &bindings);
+    if let Err(e) = crate::infer::check_shapes(&ast, &tm) {
+        return vec![err_pos(text, &e)];
+    }
+    Vec::new()
 }
 
 fn err_pos(text: &str, e: &CompileError) -> (usize, usize, String) {

@@ -14,7 +14,7 @@
 | 5.1 | 23500 | DC-4 | Surcharge d'opérateurs (`__dunder__` → `std::ops`) | 5 | ✅ fait |
 | 6.1 | 23000 | DA-1·2 | Inférence : enum-construction + scrutateur + anti-unification | 6 | ✅ fait |
 | 6.2 | 23200 | DA-4·5 | Flux Option/Result dans le moteur + retrait `flow.rs` + couverture | 6 | ✅ fait |
-| 6.3 | 23100 | DA-3 | Diagnostics de type riches (champ/méthode/arité/borne) | 6 ∥ | ☐ todo |
+| 6.3 | 23100 | DA-3 | Diagnostics de type riches (champ/méthode/arité) | 6 ∥ | ✅ fait |
 | **7.1** | 90900 | — | **Gate V11** — fixtures + comparaison-test + verdict | 7 | ☐ todo |
 
 ## Couverture des décisions (TOUT planifié)
@@ -53,3 +53,10 @@ maison (rustc filet) · HM-global pur (le « 0.1 % »). Constantes globales **im
   en v0 ; hétérogènes (`Vec2 * i64`) post-v0.
 - **Traits : classe multi-base avec méthodes réparties = limite v0.** `class C(A, B)` met les méthodes dans
   le 1ᵉʳ trait ; les autres bases reçoivent un impl vide (OK si méthodes par défaut). `rustc` filet sinon.
+- **DA-3 — borne de trait non signalée nativement.** Des 4 catégories du spec, 3 sont livrées (champ inconnu,
+  méthode inconnue, arité) avec **zéro faux-positif** (n'agissent que sur un `Struct` Iron résolu). La 4ᵉ
+  (« borne de trait non satisfaite ») est laissée au filet `rustc` : la trancher sans faux-positif exige une
+  résolution de trait complète (risque > bénéfice) — choix conservateur assumé (priorité zéro-faux-positif).
+- **DA-3 — diagnostics live dans VSCode.** Le LSP (`ironc lsp`) lance désormais les passes de types
+  (best-effort, bindings vides) en plus de lex+parse → erreurs de type **soulignées live**. `ironc check`
+  rend le span en `fichier:ligne:col:` (regex `checkOnSave`). Les deux chemins du checker bénéficient de DA-3.

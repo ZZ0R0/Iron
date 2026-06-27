@@ -8,7 +8,7 @@ pub(crate) mod engine; // [V10] moteur d'inférence constraint-based — résout
 mod local;
 
 use crate::ir::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Signatures de fonctions : nom → (types des params, type de retour **déclaré**).
 pub(crate) type Sigs = HashMap<String, (Vec<Type>, Type)>;
@@ -192,5 +192,259 @@ pub(crate) fn element_of(t: &Type) -> Type {
         Type::Set(e) => (**e).clone(),
         Type::Dict(k, _) => (**k).clone(), // itère les clés
         _ => Type::Unit,
+    }
+}
+
+// ───────────────────────── Diagnostics de forme (V11, DA-3 / 23100) ─────────────────────────
+//
+// Au-delà des conflits de primitives (`engine::check_types`), Iron signale **lui-même**, sur la ligne
+// Iron et avant `rustc` (filet, I2), trois familles d'erreurs **sur un type concret connu** :
+// champ inconnu · méthode inconnue · arité d'appel. **Règle stricte zéro faux-positif** : on ne diagnostique
+// QUE lorsque le receveur résout à un `Struct` **Iron connu** (sinon → `rustc`). L'ensemble des méthodes
+// d'un struct **inclut celles des traits qu'il implémente** (sinon `dog.shout()` d'une méthode par défaut
+// serait un faux-positif).
+
+struct ShapeCx<'a> {
+    structs: &'a Structs,
+    /// struct → noms de méthodes disponibles (inhérentes + méthodes des traits implémentés).
+    struct_methods: &'a HashMap<String, HashSet<String>>,
+    /// fn → (args **obligatoires**, args **totaux**) ; `None` par défaut = obligatoire.
+    fn_arity: &'a HashMap<String, (usize, usize)>,
+    types: &'a TypeMap,
+}
+
+/// Diagnostic de forme (DA-3). Construit les tables, puis marche les corps. Première erreur = stop.
+pub fn check_shapes(ast: &Ast, types: &TypeMap) -> Result<(), CompileError> {
+    let mut structs: Structs = HashMap::new();
+    let mut trait_methods: HashMap<String, HashSet<String>> = HashMap::new();
+    let mut fn_arity: HashMap<String, (usize, usize)> = HashMap::new();
+    for it in &ast.items {
+        match &it.kind {
+            ItemKind::Struct { name, fields, .. } => {
+                structs.insert(name.clone(), fields.clone());
+            }
+            ItemKind::Trait { name, methods } => {
+                trait_methods.insert(name.clone(), methods.iter().map(|m| m.name.clone()).collect());
+            }
+            ItemKind::Fn { name, params, defaults, .. } => {
+                let required = defaults.iter().filter(|d| d.is_none()).count();
+                fn_arity.insert(name.clone(), (required, params.len()));
+            }
+            _ => {}
+        }
+    }
+    // Méthodes par struct : inhérentes + celles de chaque trait implémenté (`impl Trait for S`).
+    let mut struct_methods: HashMap<String, HashSet<String>> = HashMap::new();
+    for it in &ast.items {
+        if let ItemKind::Impl { trait_name, type_name, methods } = &it.kind {
+            let set = struct_methods.entry(type_name.clone()).or_default();
+            for m in methods {
+                set.insert(m.name.clone());
+            }
+            if let Some(tm) = trait_methods.get(trait_name) {
+                set.extend(tm.iter().cloned());
+            }
+        }
+    }
+    let cx = ShapeCx { structs: &structs, struct_methods: &struct_methods, fn_arity: &fn_arity, types };
+    for it in &ast.items {
+        match &it.kind {
+            ItemKind::Fn { body, .. } => cx.block(body)?,
+            ItemKind::Impl { methods, .. } => {
+                for m in methods {
+                    if let Some(b) = &m.body {
+                        cx.block(b)?;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+impl ShapeCx<'_> {
+    fn block(&self, stmts: &[Stmt]) -> Result<(), CompileError> {
+        for s in stmts {
+            self.stmt(s)?;
+        }
+        Ok(())
+    }
+
+    fn stmt(&self, s: &Stmt) -> Result<(), CompileError> {
+        match &s.kind {
+            StmtKind::Let { value, .. } | StmtKind::Yield(value) | StmtKind::ExprStmt(value)
+            | StmtKind::Raise { value } => self.expr(value),
+            StmtKind::Assign { target, value } => {
+                self.expr(target)?;
+                self.expr(value)
+            }
+            StmtKind::Return { value } => value.as_ref().map_or(Ok(()), |e| self.expr(e)),
+            StmtKind::If { cond, then, elifs, els } => {
+                self.expr(cond)?;
+                self.block(then)?;
+                for (c, b) in elifs {
+                    self.expr(c)?;
+                    self.block(b)?;
+                }
+                self.block(els)
+            }
+            StmtKind::While { cond, body, els } => {
+                self.expr(cond)?;
+                self.block(body)?;
+                self.block(els)
+            }
+            StmtKind::For { iter, body, els, .. } => {
+                self.expr(iter)?;
+                self.block(body)?;
+                self.block(els)
+            }
+            StmtKind::Match { scrutinee, arms } => {
+                self.expr(scrutinee)?;
+                for a in arms {
+                    if let Some(g) = &a.guard {
+                        self.expr(g)?;
+                    }
+                    self.block(&a.body)?;
+                }
+                Ok(())
+            }
+            StmtKind::Assert { cond, msg } => {
+                self.expr(cond)?;
+                msg.as_ref().map_or(Ok(()), |m| self.expr(m))
+            }
+            StmtKind::Destructure { value, .. } => self.expr(value),
+            StmtKind::TryExcept { body, handler, .. } => {
+                self.block(body)?;
+                self.block(handler)
+            }
+            StmtKind::Seq(ss) => self.block(ss),
+            StmtKind::Break | StmtKind::Continue | StmtKind::Pass | StmtKind::RustBlock(_) => Ok(()),
+        }
+    }
+
+    fn expr(&self, e: &Expr) -> Result<(), CompileError> {
+        match &e.kind {
+            ExprKind::Call { callee, args } => {
+                // Appel de méthode `base.m(args)` : méthode inconnue sur un struct connu.
+                if let ExprKind::Field { base, name } = &callee.kind {
+                    self.expr(base)?;
+                    if let Some(Type::Struct(s)) = self.types.get(&base.id) {
+                        if self.structs.contains_key(s)
+                            && !self.struct_methods.get(s).is_some_and(|ms| ms.contains(name))
+                        {
+                            return Err(CompileError {
+                                span: Some(e.span),
+                                msg: format!("type : `{s}` n'a pas de méthode `{name}`"),
+                            });
+                        }
+                    }
+                } else {
+                    // Appel nommé `f(args)` : arité d'une fn connue (hors builtins/HOF, absents de la table).
+                    if let ExprKind::Var(f) = &callee.kind {
+                        if let Some((req, tot)) = self.fn_arity.get(f) {
+                            let n = args.len();
+                            if n < *req || n > *tot {
+                                return Err(CompileError {
+                                    span: Some(e.span),
+                                    msg: format!(
+                                        "type : `{f}` attend {} argument(s), {n} fourni(s)",
+                                        if req == tot { format!("{tot}") } else { format!("{req} à {tot}") }
+                                    ),
+                                });
+                            }
+                        }
+                    }
+                    self.expr(callee)?;
+                }
+                for a in args {
+                    self.expr(a)?;
+                }
+                Ok(())
+            }
+            ExprKind::Field { base, name } => {
+                self.expr(base)?;
+                // champ inconnu sur un struct connu (hors index de tuple `t.0`, hors référence de méthode).
+                if name.parse::<usize>().is_err() {
+                    if let Some(Type::Struct(s)) = self.types.get(&base.id) {
+                        if let Some(fields) = self.structs.get(s) {
+                            let is_field = fields.iter().any(|(n, _)| n == name);
+                            let is_method = self.struct_methods.get(s).is_some_and(|ms| ms.contains(name));
+                            if !is_field && !is_method {
+                                return Err(CompileError {
+                                    span: Some(e.span),
+                                    msg: format!("type : `{s}` n'a pas de champ `{name}`"),
+                                });
+                            }
+                        }
+                    }
+                }
+                Ok(())
+            }
+            ExprKind::Index { base, idx } => {
+                self.expr(base)?;
+                self.expr(idx)
+            }
+            ExprKind::Unary { expr, .. } => self.expr(expr),
+            ExprKind::Try { inner } => self.expr(inner),
+            ExprKind::Await(inner) => self.expr(inner),
+            ExprKind::Binary { lhs, rhs, .. } => {
+                self.expr(lhs)?;
+                self.expr(rhs)
+            }
+            ExprKind::StructLit { fields, .. } => {
+                for (_, v) in fields {
+                    self.expr(v)?;
+                }
+                Ok(())
+            }
+            ExprKind::ListLit { items } | ExprKind::Tuple(items) => {
+                for it in items {
+                    self.expr(it)?;
+                }
+                Ok(())
+            }
+            ExprKind::DictLit { pairs } => {
+                for (k, v) in pairs {
+                    self.expr(k)?;
+                    self.expr(v)?;
+                }
+                Ok(())
+            }
+            ExprKind::Lambda { body, .. } => self.expr(body),
+            ExprKind::Closure { body, .. } => self.block(body),
+            ExprKind::Ternary { cond, then, els } => {
+                self.expr(cond)?;
+                self.expr(then)?;
+                self.expr(els)
+            }
+            ExprKind::Slice { base, lo, hi } => {
+                self.expr(base)?;
+                if let Some(l) = lo {
+                    self.expr(l)?;
+                }
+                if let Some(h) = hi {
+                    self.expr(h)?;
+                }
+                Ok(())
+            }
+            ExprKind::Comp { body, iter, cond, .. } => {
+                self.expr(body)?;
+                self.expr(iter)?;
+                if let Some(c) = cond {
+                    self.expr(c)?;
+                }
+                Ok(())
+            }
+            ExprKind::FString(parts) => {
+                for p in parts {
+                    if let FStringPart::Expr(ex) = p {
+                        self.expr(ex)?;
+                    }
+                }
+                Ok(())
+            }
+            _ => Ok(()),
+        }
     }
 }

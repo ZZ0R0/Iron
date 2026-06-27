@@ -96,6 +96,9 @@ pub fn compile(src: &str, file: FileId, base_dir: &Path) -> CResult<Compiled> {
     // `rustc` (qui reste le filet pour le reste, D7). Conservateur (zéro faux-positif sur le corpus).
     infer::engine::check_types(&ast, &bindings)?;
     let types = infer::infer(&ast, &bindings);
+    // Diagnostics de forme (V11, DA-3) : champ/méthode inconnus + arité, sur type concret connu, avant
+    // `rustc` (filet). Zéro faux-positif (n'agit que sur un `Struct` Iron résolu).
+    infer::check_shapes(&ast, &types)?;
     let (own, param_modes) = resolve::resolve(&ast, &types);
     let (ts, sm, audit) = lower::lower(&ast, &types, &own, &param_modes, &bindings);
 
@@ -291,7 +294,9 @@ pub fn check(input: &Path) -> CResult<()> {
     let src = std::fs::read_to_string(input)
         .map_err(|e| CompileError::msg(format!("lecture {} : {e}", input.display())))?;
     let base_dir = input.parent().unwrap_or(Path::new("."));
-    let compiled = compile(&src, 0, base_dir)?; // niveau rapide : erreurs Iron
+    // niveau rapide : erreurs Iron (front-end). On rend le span en `fichier:ligne:col:` pour que le
+    // checkOnSave de VSCode le souligne au bon endroit (I8) — comme la remontée rustc.
+    let compiled = compile(&src, 0, base_dir).map_err(|e| located(e, &src, input))?;
     let out_dir = out_dir_for(input);
     emit_project(&out_dir, &compiled.rust_src, &compiled.crates)
         .map_err(|e| CompileError::msg(format!("émission projet : {e}")))?;
@@ -596,6 +601,18 @@ fn line_col(src: &str, byte: u32) -> (u32, u32) {
         }
     }
     (line, col)
+}
+
+/// Rend une `CompileError` front-end avec un `Span` sous la forme `fichier:ligne:col: msg` (I8) — pour le
+/// CLI et le regex `checkOnSave` de VSCode. Sans span : message inchangé.
+fn located(e: CompileError, src: &str, input: &Path) -> CompileError {
+    match e.span {
+        Some(sp) => {
+            let (l, c) = line_col(src, sp.start);
+            CompileError { span: Some(sp), msg: format!("{}:{}:{}: {}", input.display(), l, c, e.msg) }
+        }
+        None => e,
+    }
 }
 
 pub fn out_dir_for(input: &Path) -> PathBuf {

@@ -1,0 +1,8 @@
+# DA-3 : méthode inconnue sur un struct connu → diagnostic Iron natif.
+class Point:
+    x: i64
+    def show(self) -> i64:
+        return self.x
+def main():
+    p = Point(x=1)
+    print(p.scale(2))
