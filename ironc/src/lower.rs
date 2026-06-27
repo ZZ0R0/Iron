@@ -475,10 +475,27 @@ impl Cx<'_> {
             }
             ItemKind::Impl { trait_name, type_name, methods } => {
                 let ty = format_ident!("{}", type_name);
-                let ms: Vec<TokenStream> = methods.iter().map(|m| self.lower_method(m)).collect();
                 if trait_name.is_empty() {
-                    quote! { impl #ty { #(#ms)* } } // impl inhérent (méthodes sans trait)
+                    // impl inhérent : les dunders bénis (V11, DC-4) sont extraits en `impl std::ops::*`
+                    // (+ un éventuel helper inhérent) ; le reste forme l'impl inhérent normal.
+                    let mut normal: Vec<TokenStream> = Vec::new();
+                    let mut dunders: Vec<TokenStream> = Vec::new();
+                    for m in methods {
+                        if is_blessed_dunder(&m.name) {
+                            let (helper, trait_impl) = self.dunder_impl(type_name, m);
+                            if let Some(h) = helper {
+                                normal.push(h);
+                            }
+                            dunders.push(trait_impl);
+                        } else {
+                            normal.push(self.lower_method(m));
+                        }
+                    }
+                    let inherent =
+                        if normal.is_empty() { quote! {} } else { quote! { impl #ty { #(#normal)* } } };
+                    quote! { #inherent #(#dunders)* }
                 } else {
+                    let ms: Vec<TokenStream> = methods.iter().map(|m| self.lower_method(m)).collect();
                     let tid = format_ident!("{}", trait_name);
                     quote! { impl #tid for #ty { #(#ms)* } }
                 }
@@ -549,27 +566,115 @@ impl Cx<'_> {
         };
         match &m.body {
             None => quote! { fn #mid( #sig_params ) #ret_ts; },
-            Some(body) => {
-                let param_names: HashSet<String> = m.params.iter().map(|(n, _)| n.clone()).collect();
-                self.inout_params =
-                    m.params.iter().filter_map(|(n, t)| matches!(t, Type::Ref(_)).then(|| n.clone())).collect();
-                let mut locals: Vec<(String, Type)> = Vec::new();
-                collect_locals(body, &param_names, self.types, &mut locals);
-                let decls: Vec<TokenStream> = locals
-                    .iter()
-                    .map(|(n, t)| {
-                        let id = format_ident!("{}", n);
-                        if is_annotatable(t) {
-                            let ty = lower_type(t);
-                            quote! { let mut #id: #ty; }
-                        } else {
-                            quote! { let mut #id; }
-                        }
-                    })
-                    .collect();
-                let stmts: Vec<TokenStream> = body.iter().map(|s| self.stmt(s)).collect();
-                quote! { fn #mid( #sig_params ) #ret_ts { #(#decls)* #(#stmts)* } }
+            Some(_) => {
+                let block = self.method_body_block(m);
+                quote! { fn #mid( #sig_params ) #ret_ts #block }
             }
+        }
+    }
+
+    /// Bloc `{ decls; stmts }` d'un corps de méthode (locaux hoistés + statements). Partagé par
+    /// `lower_method` et le désucrage des dunders (V11, DC-4), qui forgent leur propre signature.
+    fn method_body_block(&mut self, m: &Method) -> TokenStream {
+        let body = m.body.as_ref().expect("method_body_block sur méthode sans corps");
+        let param_names: HashSet<String> = m.params.iter().map(|(n, _)| n.clone()).collect();
+        self.inout_params =
+            m.params.iter().filter_map(|(n, t)| matches!(t, Type::Ref(_)).then(|| n.clone())).collect();
+        let mut locals: Vec<(String, Type)> = Vec::new();
+        collect_locals(body, &param_names, self.types, &mut locals);
+        let decls: Vec<TokenStream> = locals
+            .iter()
+            .map(|(n, t)| {
+                let id = format_ident!("{}", n);
+                if is_annotatable(t) {
+                    let ty = lower_type(t);
+                    quote! { let mut #id: #ty; }
+                } else {
+                    quote! { let mut #id; }
+                }
+            })
+            .collect();
+        let stmts: Vec<TokenStream> = body.iter().map(|s| self.stmt(s)).collect();
+        quote! { { #(#decls)* #(#stmts)* } }
+    }
+
+    /// Désucre un dunder béni (V11, DC-4) en `(helper inhérent optionnel, impl de trait std)`.
+    /// Convention v0 : opérateurs **homogènes** (Rhs = Self). `__getitem__` est différé (retour `&Output`,
+    /// incompatible avec la sémantique par valeur sans analyse de durée de vie).
+    fn dunder_impl(&mut self, type_name: &str, m: &Method) -> (Option<TokenStream>, TokenStream) {
+        let ty = format_ident!("{}", type_name);
+        let block = self.method_body_block(m);
+        let rhs_name = m.params.first().map(|(n, _)| n.clone()).unwrap_or_else(|| "rhs".to_string());
+        let rhs = format_ident!("{}", rhs_name);
+        match m.name.as_str() {
+            // Arithmétiques : `self`/`rhs` par valeur, `type Output` = retour annoté (sinon Self).
+            "__add__" | "__sub__" | "__mul__" | "__div__" => {
+                let (trait_id, meth) = match m.name.as_str() {
+                    "__add__" => ("Add", "add"),
+                    "__sub__" => ("Sub", "sub"),
+                    "__mul__" => ("Mul", "mul"),
+                    _ => ("Div", "div"),
+                };
+                let trait_id = format_ident!("{}", trait_id);
+                let meth = format_ident!("{}", meth);
+                let out = match &m.ret {
+                    Type::Unit => quote! { #ty },
+                    t => lower_type(t),
+                };
+                let trait_impl = quote! {
+                    impl std::ops::#trait_id for #ty {
+                        type Output = #out;
+                        fn #meth(self, #rhs: #ty) -> #out #block
+                    }
+                };
+                (None, trait_impl)
+            }
+            // Égalité : `fn eq(&self, o: &Self) -> bool`.
+            "__eq__" => {
+                let trait_impl = quote! {
+                    impl PartialEq for #ty {
+                        fn eq(&self, #rhs: &#ty) -> bool #block
+                    }
+                };
+                (None, trait_impl)
+            }
+            // Ordre : helper inhérent `__lt` + `partial_cmp` dérivé (nécessite `__eq__` pour le sur-trait
+            // PartialEq). `__lt` appelé dans les deux sens → Less/Greater/Equal.
+            "__lt__" => {
+                let helper = quote! {
+                    fn __lt(&self, #rhs: &#ty) -> bool #block
+                };
+                let trait_impl = quote! {
+                    impl PartialOrd for #ty {
+                        fn partial_cmp(&self, other: &#ty) -> Option<std::cmp::Ordering> {
+                            if self.__lt(other) {
+                                Some(std::cmp::Ordering::Less)
+                            } else if other.__lt(self) {
+                                Some(std::cmp::Ordering::Greater)
+                            } else {
+                                Some(std::cmp::Ordering::Equal)
+                            }
+                        }
+                    }
+                };
+                (Some(helper), trait_impl)
+            }
+            // Affichage : helper inhérent `__str` (→ String) + `Display` qui délègue.
+            "__str__" => {
+                let helper = quote! {
+                    fn __str(&self) -> String #block
+                };
+                let trait_impl = quote! {
+                    impl std::fmt::Display for #ty {
+                        fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                            write!(f, "{}", self.__str())
+                        }
+                    }
+                };
+                (Some(helper), trait_impl)
+            }
+            // tout autre dunder béni non encore désucré → méthode inhérente normale (filet : pas d'opérateur).
+            _ => (Some(self.lower_method(m)), quote! {}),
         }
     }
 
@@ -1934,6 +2039,12 @@ fn is_annotatable(t: &Type) -> bool {
     // Seuls les primitifs (fixe l'ambiguïté `{float}`) ; le reste — structs (génériques !), collections,
     // enums, Option/Result — est laissé à l'inférence Rust (annoter casserait `let mut p: Pair;`).
     matches!(t, Type::I64 | Type::F64 | Type::Bool | Type::Str | Type::Num(_) | Type::Char)
+}
+
+/// Dunders bénis surchargeables (V11, DC-4) — désucrés en `impl std::ops`/`PartialEq`/`PartialOrd`/`Display`.
+/// `__getitem__` (→ `Index`) différé (retour `&Output`). Hors de cet ensemble : méthode inhérente normale.
+fn is_blessed_dunder(name: &str) -> bool {
+    matches!(name, "__add__" | "__sub__" | "__mul__" | "__div__" | "__eq__" | "__lt__" | "__str__")
 }
 
 fn lower_generics(gens: &Generics) -> TokenStream {

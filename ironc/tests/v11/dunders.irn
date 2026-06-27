@@ -1,0 +1,27 @@
+# V11 vague 5 — surcharge d'opérateurs via dunders (DC-4, 23500).
+class Vec2:
+    x: i64
+    y: i64
+    def __add__(self, o) -> Vec2:
+        return Vec2(x=self.x + o.x, y=self.y + o.y)
+    def __sub__(self, o) -> Vec2:
+        return Vec2(x=self.x - o.x, y=self.y - o.y)
+    def __mul__(self, o) -> Vec2:
+        return Vec2(x=self.x * o.x, y=self.y * o.y)
+    def __eq__(self, o) -> bool:
+        return self.x == o.x and self.y == o.y
+    def __lt__(self, o) -> bool:
+        return self.x < o.x
+    def __str__(self) -> str:
+        return "vec"
+
+def main():
+    a = Vec2(x=1, y=2)
+    b = Vec2(x=3, y=4)
+    print((a + b).x)
+    print((b - a).y)
+    print((a * b).x)
+    print(a == b)
+    print(a == a)
+    print(a < b)
+    print(str(a))
