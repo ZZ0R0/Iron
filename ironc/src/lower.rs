@@ -401,7 +401,7 @@ impl Cx<'_> {
                 };
                 // Chute → `None` pour une fn flux-Option qui ne retourne pas sur tous les chemins.
                 let tail = if self.flow_wrap == Some(FlowWrap::Some_)
-                    && !crate::infer::flow::definitely_returns(body)
+                    && !crate::infer::engine::flux::definitely_returns(body)
                 {
                     quote! { None }
                 } else {
@@ -870,7 +870,7 @@ impl Cx<'_> {
                 // les chemins), le post-bloc n'est atteint **que** via le `break` du `?` ⇒ `__try_err` est
                 // forcément `Some`. On rend alors le `if let` total (`else unreachable!`) pour qu'une fn qui
                 // renvoie une valeur (try/except au tail) compile — sinon `rustc` voit une chute non typée.
-                let total = crate::infer::flow::definitely_returns(body);
+                let total = crate::infer::engine::flux::definitely_returns(body);
                 let else_arm = if total {
                     quote! { else { unreachable!("le corps du `try` retourne sur le chemin sans erreur") } }
                 } else {

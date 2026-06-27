@@ -14,6 +14,7 @@ pub mod subst;
 
 mod assume;
 mod diag;
+pub mod flux; // [V11/DA-4] retour effectif Option/Result par le flux (ex-`infer/flow.rs`)
 mod gen;
 mod generalize;
 mod promote;
@@ -165,4 +166,63 @@ pub fn check_types(ast: &Ast, bindings: &Bindings) -> Result<(), CompileError> {
 
 fn is_primitive(t: &Type) -> bool {
     matches!(t, Type::I64 | Type::F64 | Type::Str | Type::Bool | Type::Char)
+}
+
+/// **Couverture du moteur** (DA-5) — mesurée sur l'AST **après** `resolve_params`. Compte les emplacements
+/// de **signature** (params + retour de valeur) de chaque fn/méthode et combien sont **résolus concrets**
+/// (le moteur a fait son travail : ni sentinelle d'inférence, ni `Var` résiduelle). Sur du code **zéro
+/// annotation**, un ratio 100 % prouve que le moteur type seul toutes les signatures.
+///
+/// **Reliquat `local.rs` (documenté, DA-5)** : `local.rs` n'est **pas** retiré car il produit la `TypeMap`
+/// **par expression** que `lower` consomme (type de *chaque* nœud), là où le moteur ne résout que les
+/// **signatures**. Les deux couches sont **complémentaires**, pas redondantes — retrait à l'aveugle refusé.
+pub fn coverage(ast: &Ast) -> (usize, usize) {
+    let mut total = 0usize;
+    let mut resolved = 0usize;
+    let mut tally = |t: &Type| {
+        total += 1;
+        if is_resolved(t) {
+            resolved += 1;
+        }
+    };
+    for it in &ast.items {
+        match &it.kind {
+            ItemKind::Fn { params, ret, body, .. } => {
+                for (_, t) in params {
+                    tally(t);
+                }
+                if assume::has_value_return(body) {
+                    tally(ret);
+                }
+            }
+            ItemKind::Impl { methods, .. } => {
+                for m in methods {
+                    for (_, t) in &m.params {
+                        tally(t);
+                    }
+                    if m.body.as_deref().is_some_and(assume::has_value_return) {
+                        tally(&m.ret);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    (resolved, total)
+}
+
+/// Type de signature **résolu concret** ? (ni sentinelle d'inférence non comblée, ni métavariable résiduelle).
+/// Un `Generic` issu d'une promotion compte comme résolu (le moteur a tranché : polymorphe).
+fn is_resolved(t: &Type) -> bool {
+    match t {
+        Type::Var(_) => false,
+        Type::Generic(n) => n != crate::ir::INFER_SENTINEL,
+        Type::Option(x) | Type::Result(x) | Type::List(x) | Type::Set(x) | Type::Shared(x)
+        | Type::SharedSync(x) | Type::Weak(x) | Type::Ref(x) => is_resolved(x),
+        Type::ResultE(x, e) => is_resolved(x) && is_resolved(e),
+        Type::Dict(k, v) => is_resolved(k) && is_resolved(v),
+        Type::Tuple(xs) | Type::App(_, xs) => xs.iter().all(is_resolved),
+        Type::Fn(ps, r) => ps.iter().all(is_resolved) && is_resolved(r),
+        _ => true,
+    }
 }

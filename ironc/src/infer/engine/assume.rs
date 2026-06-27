@@ -92,7 +92,7 @@ fn ret_var_if_infer(t: &Type, body: &[Stmt], subst: &mut Subst) -> Type {
 }
 
 /// La fn renvoie-t-elle une valeur quelque part (`return <expr>`) ?
-fn has_value_return(body: &[Stmt]) -> bool {
+pub(crate) fn has_value_return(body: &[Stmt]) -> bool {
     body.iter().any(|s| match &s.kind {
         StmtKind::Return { value } => value.is_some(),
         StmtKind::If { then, elifs, els, .. } => {

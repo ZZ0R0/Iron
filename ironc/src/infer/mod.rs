@@ -5,7 +5,6 @@
 //! `Option`/`Result`) est couvert. Vérification d'annotations : incrément ultérieur.
 
 pub(crate) mod engine; // [V10] moteur d'inférence constraint-based — résout params/retours non annotés
-pub(crate) mod flow;
 mod local;
 
 use crate::ir::*;
@@ -31,7 +30,7 @@ pub fn infer(ast: &Ast, bindings: &Bindings) -> TypeMap {
     for it in &ast.items {
         match &it.kind {
             ItemKind::Fn { name, params, ret, body, .. } => {
-                let eff = flow::effective_ret(ret, body);
+                let eff = engine::flux::effective_ret(ret, body);
                 sigs.insert(name.clone(), (params.iter().map(|(_, t)| t.clone()).collect(), eff.clone()));
                 fn_effs.push((it.id, eff));
             }

@@ -16,6 +16,8 @@ pub struct Compiled {
     pub mappings: Vec<sourcemap::Mapping>,
     pub audit: Vec<Span>,
     pub crates: Vec<(String, String, Vec<String>)>,
+    /// Couverture du moteur d'inférence (DA-5) : (signatures résolues, total). Reportée sous `--audit`.
+    pub coverage: (usize, usize),
 }
 
 impl Compiled {
@@ -88,6 +90,8 @@ pub fn compile(src: &str, file: FileId, base_dir: &Path) -> CResult<Compiled> {
     // V10 (21700+) : moteur d'inférence — résout les types de params/retours non annotés (par contraintes,
     // lit les bindings). Réécrit l'AST avant inférence locale (subsume l'ancienne pré-passe `params`).
     infer::engine::resolve_params(&mut ast, &bindings)?;
+    // Couverture du moteur (DA-5) mesurée sur l'AST résolu : signatures concrètes / total.
+    let coverage = infer::engine::coverage(&ast);
     // Diagnostic de type Iron natif (D8/22200) : conflits de primitives signalés sur la ligne Iron, avant
     // `rustc` (qui reste le filet pour le reste, D7). Conservateur (zéro faux-positif sur le corpus).
     infer::engine::check_types(&ast, &bindings)?;
@@ -100,7 +104,7 @@ pub fn compile(src: &str, file: FileId, base_dir: &Path) -> CResult<Compiled> {
     let rust_src = prettyplease::unparse(&syn_file);
     let mappings = sourcemap::resolve(&rust_src, &sm);
 
-    Ok(Compiled { rust_src, source_map: sm, mappings, audit, crates: bindings.crates })
+    Ok(Compiled { rust_src, source_map: sm, mappings, audit, crates: bindings.crates, coverage })
 }
 
 /// Charge récursivement un module Iron `name.irn` et fusionne ses items/imports (à plat) dans le
@@ -464,6 +468,9 @@ pub fn build(input: &Path, audit: bool) -> CResult<PathBuf> {
             let (l, c) = line_col(&src, span.start);
             eprintln!("{}:{}:{}: perf: clone-fallback (I4, --audit)", input.display(), l, c);
         }
+        let (res, tot) = compiled.coverage;
+        let pct = if tot == 0 { 100.0 } else { 100.0 * res as f64 / tot as f64 };
+        eprintln!("couverture moteur d'inférence : {res}/{tot} signatures résolues ({pct:.0} %) [DA-5]");
     }
     let out_dir = out_dir_for(input);
     emit_project(&out_dir, &compiled.rust_src, &compiled.crates)

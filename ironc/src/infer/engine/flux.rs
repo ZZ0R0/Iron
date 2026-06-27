@@ -1,9 +1,14 @@
-//! [20200 / 20400] Inférence Option/Result depuis le flux (I11, V6/2.1).
+//! [20200 / 20400 → V11/23200] Type de retour **effectif** Option/Result par le flux (I11).
 //!
-//! `effective_ret` déduit le type de retour réel d'une fonction : une fn qui **chute** (ne retourne pas
-//! sur tous les chemins) + a un `return <valeur>` → `Option<T>` ; une fn utilisant `?` → `Result<T>`.
-//! L'annotation explicite `Option[T]`/`Result[T]` prime. `definitely_returns` doit classer un `match`
-//! exhaustif tous-bras-`return` comme retournant (sinon régression du corpus).
+//! V11/DA-4 : porté de `infer/flow.rs` dans le **moteur** — celui-ci est désormais la source unique du
+//! système de types. La classification reste, par nature, une analyse de **flux de contrôle** (chute /
+//! `?` / retour-sur-tous-les-chemins) et non une contrainte d'unification : la coder en `Eq` serait
+//! artificiel. Le moteur l'**possède** (effectif → `TypeMap[fn.id]`) ; `lower` compare déclaré (AST) vs
+//! effectif (`TypeMap`) pour décider l'emballage `Some`/`Ok` (inchangé).
+//!
+//! `effective_ret` : fn qui **chute** (ne retourne pas sur tous les chemins) + `return <valeur>` →
+//! `Option<T>` ; fn utilisant `?` → `Result<T>`. L'annotation explicite `Option[T]`/`Result[T]` prime.
+//! `definitely_returns` classe un `match` exhaustif tous-bras-`return` comme retournant.
 
 use crate::ir::*;
 
