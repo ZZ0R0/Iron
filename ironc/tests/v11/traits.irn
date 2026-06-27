@@ -1,0 +1,22 @@
+# V11 vague 4 — class(Trait) → impl (DC-1) · méthode par défaut (DC-3) · générique borné (DC-2).
+trait Show:
+    fn show(self) -> str
+    fn shout(self) -> str:
+        return self.show() + "!"
+
+class Dog(Show):
+    name: str
+    def show(self) -> str:
+        return self.name
+
+class Cat(Show):
+    nick: str
+    def show(self) -> str:
+        return self.nick
+
+def announce[T: Show](x: T):
+    print(x.shout())
+
+def main():
+    announce(Dog(name="Rex"))
+    announce(Cat(nick="Tom"))

@@ -1,0 +1,26 @@
+# V11 vagues 1-2 — or-patterns (DB-1) + range patterns (DB-2).
+def grade(n):
+    match n:
+        0 | 1 | 2:
+            return "bas"
+        3 | 4 | 5:
+            return "moyen"
+        _:
+            return "haut"
+
+def band(n):
+    match n:
+        0..10:
+            return "petit"
+        10..=20:
+            return "moyen"
+        _:
+            return "grand"
+
+def main():
+    print(grade(1))
+    print(grade(4))
+    print(grade(9))
+    print(band(5))
+    print(band(15))
+    print(band(99))

@@ -159,12 +159,10 @@ impl Parser {
             }
             if matches!(self.cur(), TokenKind::Ident(s) if s == "class") {
                 // `class Name:` (surface Python) → struct + impl inhérent.
-                let (st, im) = self.class_item()?;
+                let (st, ims) = self.class_item()?;
                 attr_target(st.id, &mut item_attrs, &attrs); // attributs sur la struct (51900)
                 items.push(st);
-                if let Some(im) = im {
-                    items.push(im);
-                }
+                items.extend(ims); // 0+ impls (inhérent, ou un `impl Trait for Class` par base — DC-1)
                 continue;
             }
             if matches!(self.cur(), TokenKind::Ident(s) if s == "extern") {
@@ -312,11 +310,22 @@ impl Parser {
     }
 
     /// `class Name:` (surface Python, P.3) → désucré en `struct` (champs) + `impl` inhérent (méthodes `def`).
-    fn class_item(&mut self) -> CResult<(Item, Option<Item>)> {
+    fn class_item(&mut self) -> CResult<(Item, Vec<Item>)> {
         let start = self.i;
         self.adv(); // class
         let name = self.ident()?;
         let generics = self.parse_generics()?;
+        // bases = traits implémentés (V11, DC-1) : `class Dog(Show, Ord):`.
+        let mut bases = Vec::new();
+        if self.eat(&TokenKind::LParen) {
+            while !self.is(&TokenKind::RParen) {
+                bases.push(self.ident()?);
+                if !self.eat(&TokenKind::Comma) {
+                    break;
+                }
+            }
+            self.expect(&TokenKind::RParen, "`)`")?;
+        }
         self.expect(&TokenKind::Colon, "`:`")?;
         self.expect(&TokenKind::Newline, "fin de ligne")?;
         self.expect(&TokenKind::Indent, "bloc indenté")?;
@@ -348,13 +357,25 @@ impl Parser {
         let sid = self.fresh();
         let struct_item =
             self.node(start, sid, ItemKind::Struct { name: name.clone(), generics, fields });
-        let impl_item = if methods.is_empty() {
-            None
+        // Impls : sans base → impl inhérent (méthodes propres) ; avec base(s) → un `impl Trait for Class`
+        // par trait, contenant les méthodes (rustc vérifie l'adéquation au trait — DC-1).
+        let mut impls = Vec::new();
+        if bases.is_empty() {
+            if !methods.is_empty() {
+                let iid = self.fresh();
+                impls.push(self.node(start, iid, ItemKind::Impl { trait_name: String::new(), type_name: name.clone(), methods }));
+            }
         } else {
-            let iid = self.fresh();
-            Some(self.node(start, iid, ItemKind::Impl { trait_name: String::new(), type_name: name, methods }))
-        };
-        Ok((struct_item, impl_item))
+            for (k, base) in bases.iter().enumerate() {
+                let iid = self.fresh();
+                // les méthodes vont au 1ᵉʳ trait (cas courant : une classe implémente un trait) ; les autres
+                // bases reçoivent un impl vide (traits à méthodes par défaut). Multi-trait avec méthodes
+                // réparties = limite v0 (rustc filet).
+                let ms = if k == 0 { methods.clone() } else { Vec::new() };
+                impls.push(self.node(start, iid, ItemKind::Impl { trait_name: base.clone(), type_name: name.clone(), methods: ms }));
+            }
+        }
+        Ok((struct_item, impls))
     }
 
     fn enum_item(&mut self) -> CResult<Item> {
@@ -457,7 +478,9 @@ impl Parser {
         } else {
             Type::Unit
         };
-        let body = if with_body {
+        // `with_body` (impl) → toujours un corps. Sinon (trait) : `:` ⇒ méthode par défaut (DC-3),
+        // pas de `:` ⇒ signature abstraite.
+        let body = if with_body || self.is(&TokenKind::Colon) {
             Some(self.block()?)
         } else {
             self.stmt_end()?;

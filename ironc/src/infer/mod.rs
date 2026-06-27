@@ -41,7 +41,14 @@ pub fn infer(ast: &Ast, bindings: &Bindings) -> TypeMap {
             ItemKind::Enum { name, variants, .. } => {
                 enums.insert(name.clone(), variants.clone());
             }
-            ItemKind::Trait { .. } | ItemKind::Const { .. } => {}
+            // Méthodes de trait (V11, DC-3) : enregistrées sous le nom du trait comme « type » de `self`
+            // → l'inférence des corps par défaut résout `self.m()`.
+            ItemKind::Trait { name, methods } => {
+                for m in methods {
+                    methods_tbl.insert((name.clone(), m.name.clone()), m.ret.clone());
+                }
+            }
+            ItemKind::Const { .. } => {}
             ItemKind::Impl { type_name, methods, .. } => {
                 for m in methods {
                     methods_tbl.insert((type_name.clone(), m.name.clone()), m.ret.clone());
@@ -69,19 +76,23 @@ pub fn infer(ast: &Ast, bindings: &Bindings) -> TypeMap {
         }
     }
 
-    // Corps des méthodes d'`impl` (self : le type implémenté).
+    // Corps des méthodes d'`impl` (self : le type implémenté) ET corps par défaut des traits
+    // (self : le trait lui-même, dont les méthodes vivent dans `methods_tbl` sous son nom — DC-3).
     for it in &ast.items {
-        if let ItemKind::Impl { type_name, methods, .. } = &it.kind {
-            for m in methods {
-                if let Some(body) = &m.body {
-                    let mut scope: HashMap<String, Type> = m.params.iter().cloned().collect();
-                    if m.self_param {
-                        scope.insert("self".to_string(), Type::Struct(type_name.clone()));
-                    }
-                    let mut cx = Inf { sigs: &sigs, structs: &structs, enums: &enums, methods: &methods_tbl, etypes: &bindings.etypes, tm: &mut tm };
-                    for s in body {
-                        local::stmt(&mut cx, s, &mut scope);
-                    }
+        let (self_ty, methods) = match &it.kind {
+            ItemKind::Impl { type_name, methods, .. } => (type_name.clone(), methods),
+            ItemKind::Trait { name, methods } => (name.clone(), methods),
+            _ => continue,
+        };
+        for m in methods {
+            if let Some(body) = &m.body {
+                let mut scope: HashMap<String, Type> = m.params.iter().cloned().collect();
+                if m.self_param {
+                    scope.insert("self".to_string(), Type::Struct(self_ty.clone()));
+                }
+                let mut cx = Inf { sigs: &sigs, structs: &structs, enums: &enums, methods: &methods_tbl, etypes: &bindings.etypes, tm: &mut tm };
+                for s in body {
+                    local::stmt(&mut cx, s, &mut scope);
                 }
             }
         }

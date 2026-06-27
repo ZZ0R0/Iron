@@ -469,7 +469,9 @@ impl Cx<'_> {
             ItemKind::Trait { name, methods } => {
                 let tid = format_ident!("{}", name);
                 let ms: Vec<TokenStream> = methods.iter().map(|m| self.lower_method(m)).collect();
-                quote! { trait #tid { #(#ms)* } }
+                // `pub` : un trait privé borné sur une `pub fn` déclenche `private_bounds` (cohérent avec
+                // struct/fn publics).
+                quote! { pub trait #tid { #(#ms)* } }
             }
             ItemKind::Impl { trait_name, type_name, methods } => {
                 let ty = format_ident!("{}", type_name);
@@ -1209,7 +1211,11 @@ impl Cx<'_> {
             // DX2 (30400) : `return p.a` où `p` est possédé (pas ByRef ni Shared) et `a` non-Copy →
             // move-hors-struct (move partiel sûr car le `return` quitte la fn → pas de borne Clone).
             ExprKind::Field { base, name } => {
-                let owned_base = matches!(&base.kind, ExprKind::Var(bn) if !self.byref_params.contains(bn));
+                // `self` est toujours emprunté (`&self`/`&mut self`, jamais possédé) → on ne peut pas
+                // move-hors-`self` : `return self.f` non-Copy ⇒ clone-fallback (via `value`). Sinon, base
+                // possédée (param ByValue) ⇒ move partiel sûr (le `return` quitte la fn).
+                let owned_base =
+                    matches!(&base.kind, ExprKind::Var(bn) if bn != "self" && !self.byref_params.contains(bn));
                 if owned_base && !is_copy(&self.type_of(e)) && !matches!(self.type_of(base), Type::Shared(_)) {
                     let b = self.place(base);
                     let f = format_ident!("{}", name);
