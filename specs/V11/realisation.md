@@ -1,7 +1,8 @@
 # V11 — Réalisation (tracker)
 
-> **État : réalisation EN COURS** (vagues 1-6.2 faites ; reste 6.3 + gate 7.1). 9 pistes · 7
-> vagues · combler **tous** les trous de l'audit + finir le moteur. Gate final = comparaison-test utilisateur.
+> **État : réalisation FAITE — GATE V11 VERT (24/24).** 9 pistes · 7 vagues · tous les trous de l'audit
+> comblés + moteur fini. Reste **un seul** point ouvert : la **comparaison-test fournie par l'utilisateur**
+> (slot `tests/comparison/` prêt — déposer `.irn` + `.expected`, le gate la valide automatiquement).
 
 ## Avancement des pistes
 
@@ -15,7 +16,15 @@
 | 6.1 | 23000 | DA-1·2 | Inférence : enum-construction + scrutateur + anti-unification | 6 | ✅ fait |
 | 6.2 | 23200 | DA-4·5 | Flux Option/Result dans le moteur + retrait `flow.rs` + couverture | 6 | ✅ fait |
 | 6.3 | 23100 | DA-3 | Diagnostics de type riches (champ/méthode/arité) | 6 ∥ | ✅ fait |
-| **7.1** | 90900 | — | **Gate V11** — fixtures + comparaison-test + verdict | 7 | ☐ todo |
+| **7.1** | 90900 | — | **Gate V11** — fixtures + verdict (comparaison-test : slot prêt) | 7 | ✅ fait |
+
+## Verdict V11 — GATE VERT (24/24)
+
+`tests/gate-v11.sh` : non-régression (gate V10.1 : corpus 50 · binding 30 · vitrine · zero-annot · métrique ·
+diag natifs) + **5 fixtures de comblement** (patterns · surface · traits · dunders · infer_enum) avec oracle +
+**12 comportements** de l'audit + **3 diagnostics négatifs** (champ/méthode/arité) + audit (couverture moteur
+**100 %** · `flow.rs` retiré · **0 unsafe**). **Comparaison-test utilisateur** : slot `tests/comparison/` prêt
+(⏸️ en attente du programme fourni — le gate la valide dès dépôt de `.irn` + `.expected`).
 
 ## Couverture des décisions (TOUT planifié)
 

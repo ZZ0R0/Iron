@@ -62,6 +62,14 @@ Décisions verrouillées au cadrage. **Aucune spec ne peut les contredire.** Tou
   (D0) : zéro annotation **en pratique** ; restent explicites la **déclaration** d'un générique `[T]` et le
   **type d'une closure renvoyée**. `rustc` reste le filet (I2) ; Iron diagnostique lui-même les conflits de
   primitives sur la ligne Iron (I8), avant `rustc`.
+  **Complété en V11 (23000/23100/23200) :** construction de variante d'enum typée + scrutateur de `match`
+  informant son type ; **anti-unification** (généralisation à la position de divergence : `list[i64]` ∧
+  `list[str]` → `list[T]`, pas le param entier) ; **retour effectif Option/Result par le flux** porté dans
+  le moteur (source unique ; `flow.rs` retiré → `engine/flux.rs`) ; **diagnostics riches** au-delà des
+  primitives — **champ inconnu · méthode inconnue · arité** sur un `Struct` concret connu, **zéro
+  faux-positif** (sinon `rustc` filet), surfacés **live** par le LSP et par `ironc check` (I8). Le reliquat
+  `local.rs` (`TypeMap` par expression) est conservé, **complémentaire** du moteur (signatures) — mesuré
+  (couverture **100 %** des signatures sur le corpus, `--audit`), non retiré à l'aveugle (DA-5).
 
 > **Le « 0.1 % » — hors-périmètre irréductible (V9.1, spec 90600 ; révisé V10).** Liste **stable** de ce
 > qu'Iron ne fait **pas** ; chaque cas a une **issue orientée** :
