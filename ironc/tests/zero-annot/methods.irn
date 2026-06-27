@@ -1,0 +1,17 @@
+# Méthodes de classe sans annotation : retours inférés (comparaison → bool, struct → Contact).
+class Contact:
+    name: str
+    age: i64
+
+    def is_adult(self):
+        return self.age >= 18
+
+    def older(self):
+        return Contact(name=self.name, age=self.age + 1)
+
+def main():
+    a = Contact(name="Alice", age=17)
+    b = a.older()
+    print(a.is_adult())
+    print(b.is_adult())
+    print(b.age)

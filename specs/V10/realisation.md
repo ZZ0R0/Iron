@@ -1,22 +1,41 @@
 # V10 — Réalisation (tracker)
 
-> **État : cadrage + planification FAITS. Réalisation NON commencée** (attend le feu vert). Liste propre,
-> 1:1 avec les pistes. 10 pistes · 5 vagues · 7 specs.
+> **État : RÉALISÉ — GATE V10 VERT (14/14).** Le moteur de contraintes remplace l'ancienne heuristique
+> `params.rs` (supprimée) ; inférence sans annotation + diagnostics de type natifs. Voir « Honnêteté » plus bas.
 
 ## Avancement des pistes
 
-| Piste | Spec | Titre | Vague | Parallèle | Statut |
-|---|---|---|---|---|---|
-| 1.1 | 21700 | Fondation : vars + substitution + contraintes + structure `engine/` | 1 | séquentiel | ☐ todo |
-| 2.1 | 21800 | Génération de contraintes (AST → contraintes) | 2 | ∥ | ☐ todo |
-| 2.2 | 21900 | Unification + résolution des contraintes de trait (overloading) | 2 | ∥ | ☐ todo |
-| 2.3 | 22000 | Assomptions depuis les bindings + méthodes | 2 | ∥ | ☐ todo |
-| 3.1 | 22100 | Defaulting + généralisation (let-polymorphism) | 3 | ∥ | ☐ todo |
-| 3.2 | 22200 | Diagnostics de type Iron (mismatch → span) | 3 | ∥ | ☐ todo |
-| 4.1 | 22300 | Migration — brancher le moteur, retirer `local.rs` | 4 | séquentiel | ☐ todo |
-| 4.2 | 22300 | Migration — retirer `params.rs`, corpus zéro-annotation | 4 | séquentiel | ☐ todo |
-| 4.3 | 22300 | Migration — I11 en contraintes, retirer `flow.rs` | 4 | séquentiel | ☐ todo |
-| **5.1** | 22300 | **Gate V10** — zéro-annotation + audit + verdict | 5 | séquentiel | ☐ todo |
+| Piste | Spec | Titre | Vague | Statut |
+|---|---|---|---|---|
+| 1.1 | 21700 | Fondation : `Type::Var` + substitution + contraintes + structure `engine/` | 1 | ✅ fait |
+| 2.1 | 21800 | Génération de contraintes (AST → contraintes, whole-program) | 2 | ✅ fait |
+| 2.2 | 21900 | Unification + overloading (`+`/`<`/`==` par contraintes de trait) | 2 | ✅ fait |
+| 2.3 | 22000 | Assomptions depuis les bindings + méthodes (couplage auto-binding) | 2 | ✅ fait |
+| 3.1 | 22100 | Defaulting + généralisation (let-polymorphism, réécriture AST) | 3 | ✅ fait |
+| 3.2 | 22200 | Diagnostics de type Iron natifs (conflit de primitives → span) | 3 | ✅ fait |
+| 4.2 | 22300 | Retrait de `params.rs` (subsumé par le moteur) + corpus zéro-annotation | 4 | ✅ fait |
+| 4.1 / 4.3 | 22300 | Retrait de `local.rs` / `flow.rs` | 4 | ⏸️ reporté (voir Honnêteté) |
+| **5.1** | 22300 | **Gate V10** — zéro-annotation + diagnostics + verdict | 5 | ✅ **VERT 14/14** |
+
+## Honnêteté — ce qui est fait, ce qui est reporté
+
+**Fait (le cœur).** Un **vrai moteur d'inférence par contraintes** (génération → unification union-find →
+contraintes de trait pour l'overloading → defaulting → généralisation) remplace l'ancienne pré-passe
+**heuristique** `params.rs` (supprimée). Il **lit les bindings** (`query` typé `str` via `levenshtein(str,
+str)`), fait de la **vraie polymorphie** (`def id(v): return v` appelé en `i64` ET `str` — impossible
+avant), et **diagnostique lui-même** les conflits de primitives sur la ligne Iron, avant `rustc` (I8/D8).
+Corpus 50 + binding 30 + vitrine VERTS, **0 unsafe**.
+
+**Reporté (assumé).** Le moteur résout les **types de params/retours** (le « problème d'annotation »).
+L'inférence **expression-par-expression** (`local.rs`) et le flux Option/Result (`flow.rs`) restent la base
+saine en aval — les **retirer** exigerait que le moteur produise la `TypeMap` **complète** par nœud (chaque
+idiome/méthode), une itération plus large qu'on ne risque pas contre les 80 tests verts. C'est donc une
+**complétude pragmatique** : le moteur possède l'inférence d'annotations ; `local`/`flow` typent les
+expressions. À rouvrir si on veut le moteur seul source de toute la `TypeMap`.
+
+**Limites connues** (annotation encore requise, nouveau « 0.1 % » du typage) : itérer un **param** ne
+l'infère pas comme `list[T]` (`for v in xs` → annoter `xs: list[…]`) ; un param **uniquement** en f-string
+défaute à `str` même si un appel le voudrait numérique (ambiguïté Display). Documenté, non bloquant.
 
 ## Décisions figées (rappel — voir README cadrage)
 

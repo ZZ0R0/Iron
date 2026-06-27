@@ -1,0 +1,12 @@
+# Polymorphisme inféré (let-polymorphism) : `id` appelé à plusieurs types, ZÉRO annotation.
+def id(v):
+    return v
+
+def fst(a, b):
+    return a
+
+def main():
+    print(id(7))
+    print(id("hi"))
+    print(fst(1, 2))
+    print(fst("x", 99))

@@ -1,0 +1,16 @@
+# Accumulateur + range + retour de variable locale, tout inféré sans annotation.
+def range_sum(lo, hi):
+    total = 0
+    for i in range(lo, hi + 1):
+        total = total + i
+    return total
+
+def factorial(n):
+    acc = 1
+    for i in range(1, n + 1):
+        acc = acc * i
+    return acc
+
+def main():
+    print(range_sum(1, 100))
+    print(factorial(5))

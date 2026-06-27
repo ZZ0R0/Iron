@@ -1,0 +1,14 @@
+# Zéro annotation sur des chaînes : f-string et concaténation infèrent `str`.
+def greet(name):
+    return f"Bonjour, {name} !"
+
+def shout(s):
+    return s + "!"
+
+def join2(a, b):
+    return f"{a}-{b}"
+
+def main():
+    print(greet("Iron"))
+    print(shout("hi"))
+    print(join2("x", "y"))

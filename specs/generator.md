@@ -53,10 +53,18 @@ Décisions verrouillées au cadrage. **Aucune spec ne peut les contredire.** Tou
   annotation (l'annotation est le opt-in). Cf. [[I11]].
 - **I14 — Extensions.** Source `.irn`, bindings `.iri`.
 
-> **Le « 0.1 % » — hors-périmètre irréductible (V9.1, spec 90600).** Liste **stable** de ce qu'Iron ne fait
-> **pas** (coûteux/recherche, hors ambition « langage utilisable ») ; chaque cas a une **issue orientée** :
-> - **Inférence Hindley-Milner globale** : Iron reste **local + dirigé par l'usage** → certaines annotations
->   restent nécessaires (sinon `rustc` réclame le type, message remonté en Span Iron).
+- **I15 — Inférence par contraintes (V10, 21700+).** Les types de params/retours non annotés sont résolus
+  par un **moteur de contraintes** (unification + contraintes de trait pour l'overloading + lecture des
+  bindings `.iri`), avec **let-polymorphism** (un même `def f(x): return x` s'utilise à plusieurs types).
+  Ambition **complète-pragmatique** (D0) : zéro annotation **en pratique** ; restent explicites par
+  conception la **déclaration** d'un générique `[T]` et le **type d'une closure renvoyée**. `rustc` reste le
+  filet (I2). Iron diagnostique lui-même les conflits de primitives (I8), avant `rustc`.
+
+> **Le « 0.1 % » — hors-périmètre irréductible (V9.1, spec 90600 ; révisé V10).** Liste **stable** de ce
+> qu'Iron ne fait **pas** ; chaque cas a une **issue orientée** :
+> - **Inférence Hindley-Milner *globale pure*** (inférer les **déclarations** de génériques elles-mêmes) :
+>   hors-périmètre. Le moteur V10 (I15) est **complet-pragmatique** — il infère params/retours/locaux/
+>   overloading sans annotation, mais la *déclaration* `[T]` et les closures renvoyées restent explicites.
 > - **Auto-hébergement** : `ironc` est en **Rust**, pas en Iron. Pas de bootstrap.
 > - **Async exotique** (`select!`, pinning, streams, async-traits) → `rust { }`.
 > - **Générateurs/coroutines complexes** (lazy/infini, `yield from`, `send`) → `rust { }` (le `yield` eager

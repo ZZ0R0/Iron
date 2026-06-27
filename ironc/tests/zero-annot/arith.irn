@@ -1,0 +1,23 @@
+# Zéro annotation : tout s'infère (params + retours), surface Python.
+def double(x):
+    return x * 2
+
+def add(a, b):
+    return a + b
+
+def area(w, h):
+    return w * h
+
+def classify(n):
+    if n > 0:
+        return "pos"
+    if n < 0:
+        return "neg"
+    return "zero"
+
+def main():
+    print(double(21))
+    print(add(20, 22))
+    print(area(3, 14))
+    print(classify(5))
+    print(classify(-3))
