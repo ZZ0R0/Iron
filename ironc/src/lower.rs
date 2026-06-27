@@ -73,6 +73,8 @@ pub fn lower(
         cur_err: None,
         try_break: None,
         try_counter: 0,
+        loop_else: None,
+        loop_else_counter: 0,
         audit: Vec::new(),
     };
     let items: Vec<TokenStream> = ast.items.iter().map(|it| cx.item(it)).collect();
@@ -137,6 +139,10 @@ struct Cx<'a> {
     /// au lieu de `?` — les assignations du `try` touchent les locaux hoistés (pas de capture non-init).
     try_break: Option<u32>,
     try_counter: u32,
+    /// Boucle `for/while … else` en cours (V11, DD-2) : un `break` y met le drapeau `__brokeN` à vrai (et
+    /// le `else` ne s'exécute qu'à `false`). `None` hors d'une telle boucle ; sauvé/restauré sur imbrication.
+    loop_else: Option<u32>,
+    loop_else_counter: u32,
     audit: Vec<Span>,
 }
 
@@ -261,7 +267,7 @@ impl Cx<'_> {
                     .or_else(|| self.caught_err_ty(then))
                     .or_else(|| elifs.iter().find_map(|(c, b)| self.q_err(c).or_else(|| self.caught_err_ty(b))))
                     .or_else(|| self.caught_err_ty(els)),
-                StmtKind::While { cond, body } => self.q_err(cond).or_else(|| self.caught_err_ty(body)),
+                StmtKind::While { cond, body, .. } => self.q_err(cond).or_else(|| self.caught_err_ty(body)),
                 StmtKind::For { iter, body, .. } => self.q_err(iter).or_else(|| self.caught_err_ty(body)),
                 StmtKind::Match { scrutinee, arms } => {
                     self.q_err(scrutinee).or_else(|| arms.iter().find_map(|a| self.caught_err_ty(&a.body)))
@@ -475,6 +481,29 @@ impl Cx<'_> {
                     quote! { impl #tid for #ty { #(#ms)* } }
                 }
             }
+            // Constante globale immuable (V11, DD-bonus) → `const NAME: T = <littéral>;`. Les chaînes →
+            // `&str` (une `String` n'est pas constructible en contexte `const`).
+            ItemKind::Const { name, ty, value } => {
+                let id = format_ident!("{}", name);
+                match &value.kind {
+                    ExprKind::Lit(Lit::Str(s)) => quote! { const #id: &str = #s; },
+                    ExprKind::Lit(Lit::Int(n)) => {
+                        let n = proc_macro2::Literal::i64_unsuffixed(*n);
+                        quote! { const #id: i64 = #n; }
+                    }
+                    ExprKind::Lit(Lit::Float(f)) => {
+                        let f = proc_macro2::Literal::f64_unsuffixed(*f);
+                        quote! { const #id: f64 = #f; }
+                    }
+                    ExprKind::Lit(Lit::Bool(b)) => quote! { const #id: bool = #b; },
+                    ExprKind::Lit(Lit::Char(c)) => quote! { const #id: char = #c; },
+                    _ => {
+                        let t = lower_type(ty);
+                        let v = self.value(value);
+                        quote! { const #id: #t = #v; }
+                    }
+                }
+            }
         }
     }
 
@@ -600,18 +629,38 @@ impl Cx<'_> {
                 }
                 chain
             }
-            StmtKind::While { cond, body } => {
+            StmtKind::While { cond, body, els } => {
                 let c = self.value(cond);
-                let b: Vec<TokenStream> = body.iter().map(|s| self.stmt(s)).collect();
-                quote! { while #c { #(#b)* } }
+                let (b, els_ts, flag) = self.lower_loop_body(body, els);
+                match flag {
+                    Some(fl) => quote! { let mut #fl = false; while #c { #(#b)* } if !#fl { #(#els_ts)* } },
+                    None => quote! { while #c { #(#b)* } },
+                }
             }
-            StmtKind::For { var, iter, body } => {
+            StmtKind::For { var, iter, body, els } => {
                 let vid = format_ident!("{}", var);
                 let it = self.for_iter(iter);
-                let b: Vec<TokenStream> = body.iter().map(|s| self.stmt(s)).collect();
-                quote! { for #vid in #it { #(#b)* } }
+                let (b, els_ts, flag) = self.lower_loop_body(body, els);
+                match flag {
+                    Some(fl) => quote! { let mut #fl = false; for #vid in #it { #(#b)* } if !#fl { #(#els_ts)* } },
+                    None => quote! { for #vid in #it { #(#b)* } },
+                }
             }
-            StmtKind::Break => quote! { break; },
+            // `Seq` (désucrage, V11) : statements en séquence, pas de portée bloc (locaux hoistés).
+            StmtKind::Seq(stmts) => {
+                let ss: Vec<TokenStream> = stmts.iter().map(|s| self.stmt(s)).collect();
+                quote! { #(#ss)* }
+            }
+            StmtKind::Break => {
+                // dans une boucle `… else`, un `break` lève le drapeau (et saute le `else`).
+                match self.loop_else {
+                    Some(n) => {
+                        let fl = format_ident!("__broke{}", n);
+                        quote! { { #fl = true; break; } }
+                    }
+                    None => quote! { break; },
+                }
+            }
             StmtKind::Continue => quote! { continue; },
             StmtKind::Return { value } => match value {
                 Some(e) if matches!(&e.kind, ExprKind::Var(n) if n == "none" || n == "None") => {
@@ -743,6 +792,30 @@ impl Cx<'_> {
             }
         };
         quote! { __irn_mark!(#mark); #body }
+    }
+
+    /// Lowering du corps d'une boucle + son `else` (V11, DD-2). Sauve/restaure `loop_else` → les `break` du
+    /// corps lèvent le drapeau de CETTE boucle (si `else`), pas celui d'une boucle englobante ; une boucle
+    /// imbriquée sans `else` remet `loop_else = None` (ses `break` sont de simples `break`).
+    fn lower_loop_body(
+        &mut self,
+        body: &[Stmt],
+        els: &[Stmt],
+    ) -> (Vec<TokenStream>, Vec<TokenStream>, Option<proc_macro2::Ident>) {
+        let prev = self.loop_else;
+        let flag = if els.is_empty() {
+            self.loop_else = None;
+            None
+        } else {
+            let n = self.loop_else_counter;
+            self.loop_else_counter += 1;
+            self.loop_else = Some(n);
+            Some(format_ident!("__broke{}", n))
+        };
+        let b: Vec<TokenStream> = body.iter().map(|s| self.stmt(s)).collect();
+        self.loop_else = prev; // l'`else` s'exécute hors de la boucle → contexte englobant
+        let els_ts: Vec<TokenStream> = els.iter().map(|s| self.stmt(s)).collect();
+        (b, els_ts, flag)
     }
 
     fn for_iter(&mut self, iter: &Expr) -> TokenStream {
@@ -1048,6 +1121,12 @@ impl Cx<'_> {
                 let ps: Vec<proc_macro2::Ident> = params.iter().map(|p| format_ident!("{}", p)).collect();
                 let b = self.value(body);
                 quote! { move | #(#ps),* | #b }
+            }
+            // Closure à corps de bloc (V11, DD-1) : fonction imbriquée → `move |params| { stmts }`.
+            ExprKind::Closure { params, body } => {
+                let ps: Vec<proc_macro2::Ident> = params.iter().map(|p| format_ident!("{}", p)).collect();
+                let b: Vec<TokenStream> = body.iter().map(|s| self.stmt(s)).collect();
+                quote! { move | #(#ps),* | { #(#b)* } }
             }
             // V7 — tuple/f-string/ternaire : lowering réel ; comp/slice : raffinés en 2.7/2.5.
             ExprKind::Tuple(items) => {
@@ -1743,8 +1822,14 @@ fn collect_locals(body: &[Stmt], params: &HashSet<String>, types: &TypeMap, out:
                 }
                 collect_locals(els, params, types, out);
             }
-            StmtKind::While { body, .. } => collect_locals(body, params, types, out),
-            StmtKind::For { body, .. } => collect_locals(body, params, types, out),
+            StmtKind::While { body, els, .. } => {
+                collect_locals(body, params, types, out);
+                collect_locals(els, params, types, out);
+            }
+            StmtKind::For { body, els, .. } => {
+                collect_locals(body, params, types, out);
+                collect_locals(els, params, types, out);
+            }
             StmtKind::Match { arms, .. } => {
                 for arm in arms {
                     collect_locals(&arm.body, params, types, out);
@@ -1754,6 +1839,9 @@ fn collect_locals(body: &[Stmt], params: &HashSet<String>, types: &TypeMap, out:
                 collect_locals(body, params, types, out);
                 collect_locals(handler, params, types, out);
             }
+            // séquence désucrée (affectation chaînée…) : ses Let sont des locaux de la fonction (hoistés).
+            StmtKind::Seq(ss) => collect_locals(ss, params, types, out),
+            // PAS de descente dans une `Closure` : ses locaux sont à elle (déclarés dans son corps Rust).
             _ => {}
         }
     }

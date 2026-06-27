@@ -51,7 +51,9 @@ fn has_value_return(stmts: &[Stmt]) -> bool {
         StmtKind::If { then, elifs, els, .. } => {
             has_value_return(then) || elifs.iter().any(|(_, b)| has_value_return(b)) || has_value_return(els)
         }
-        StmtKind::While { body, .. } | StmtKind::For { body, .. } => has_value_return(body),
+        StmtKind::While { body, els, .. } | StmtKind::For { body, els, .. } => {
+            has_value_return(body) || has_value_return(els)
+        }
         StmtKind::Match { arms, .. } => arms.iter().any(|a| has_value_return(&a.body)),
         _ => false,
     })
@@ -72,8 +74,8 @@ fn stmt_uses_q(s: &Stmt) -> bool {
                 || elifs.iter().any(|(c, b)| expr_uses_q(c) || uses_question(b))
                 || uses_question(els)
         }
-        StmtKind::While { cond, body } => expr_uses_q(cond) || uses_question(body),
-        StmtKind::For { iter, body, .. } => expr_uses_q(iter) || uses_question(body),
+        StmtKind::While { cond, body, els } => expr_uses_q(cond) || uses_question(body) || uses_question(els),
+        StmtKind::For { iter, body, els, .. } => expr_uses_q(iter) || uses_question(body) || uses_question(els),
         StmtKind::Match { scrutinee, arms } => expr_uses_q(scrutinee) || arms.iter().any(|a| uses_question(&a.body)),
         _ => false,
     }

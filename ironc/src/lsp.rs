@@ -109,6 +109,9 @@ fn symbols(text: &str) -> Vec<Sym> {
             ItemKind::Trait { name, .. } => {
                 out.push(Sym { name: name.clone(), kind: 8, detail: format!("trait {name}"), span: it.span });
             }
+            ItemKind::Const { name, .. } => {
+                out.push(Sym { name: name.clone(), kind: 14, detail: format!("const {name}"), span: it.span });
+            }
             ItemKind::Impl { type_name, methods, .. } => {
                 for m in methods {
                     let recv = if m.self_param { "self, " } else { "" };

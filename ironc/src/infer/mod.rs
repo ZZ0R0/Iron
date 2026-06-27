@@ -41,7 +41,7 @@ pub fn infer(ast: &Ast, bindings: &Bindings) -> TypeMap {
             ItemKind::Enum { name, variants, .. } => {
                 enums.insert(name.clone(), variants.clone());
             }
-            ItemKind::Trait { .. } => {}
+            ItemKind::Trait { .. } | ItemKind::Const { .. } => {}
             ItemKind::Impl { type_name, methods, .. } => {
                 for m in methods {
                     methods_tbl.insert((type_name.clone(), m.name.clone()), m.ret.clone());

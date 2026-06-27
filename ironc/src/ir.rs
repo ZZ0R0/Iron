@@ -253,6 +253,9 @@ pub enum ItemKind {
     Trait { name: String, methods: Vec<Method> },
     /// `impl T for Ty:` — définitions de méthodes (V3, 20300).
     Impl { trait_name: String, type_name: String, methods: Vec<Method> },
+    /// Constante globale immuable `NAME = <littéral>` (V11) → `const`/`static` Rust. Mutable global =
+    /// hors-périmètre (I2). `ty` inféré du littéral.
+    Const { name: String, ty: Type, value: Expr },
 }
 
 /// Méthode de trait/impl (V3) : `body = None` = signature (trait), `Some` = définition (impl).
@@ -280,8 +283,8 @@ pub enum StmtKind {
         elifs: Vec<(Expr, Vec<Stmt>)>,
         els: Vec<Stmt>,
     },
-    While { cond: Expr, body: Vec<Stmt> },
-    For { var: String, iter: Expr, body: Vec<Stmt> },
+    While { cond: Expr, body: Vec<Stmt>, els: Vec<Stmt> },
+    For { var: String, iter: Expr, body: Vec<Stmt>, els: Vec<Stmt> },
     Break,
     Continue,
     Return { value: Option<Expr> },
@@ -289,6 +292,9 @@ pub enum StmtKind {
     /// `yield e` (V9, 10900) : générateur → accumulé dans un Vec (eager), la fn renvoie `list[T]`.
     Yield(Expr),
     Pass,
+    /// Séquence de statements traitée comme un seul (désucrage, V11 — ex. affectation chaînée). Les locaux
+    /// sont hoistés au niveau fonction (comme partout) → pas de portée bloc.
+    Seq(Vec<Stmt>),
     /// Bloc `rust { … }` : Rust verbatim (interop niveau 1, 50100).
     RustBlock(String),
     /// `match e:` + bras (V3, 20300).
@@ -390,6 +396,9 @@ pub enum ExprKind {
     /// Closure (V6, 20700) : `lambda x, y: expr`. Corps mono-expression ; types des params
     /// laissés à l'inférence Rust (I2).
     Lambda { params: Vec<String>, body: Box<Expr> },
+    /// Closure à **corps de bloc** (V11) : fonction imbriquée désucrée → `|params| { stmts }`. Types des
+    /// params inférés par rustc (comme une closure).
+    Closure { params: Vec<String>, body: Vec<Stmt> },
     /// Tuple `(a, b, …)` (V7, 10400).
     Tuple(Vec<Expr>),
     /// f-string `f"…{e}…"` (V7, 10500).

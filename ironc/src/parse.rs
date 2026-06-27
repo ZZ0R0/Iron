@@ -30,6 +30,18 @@ fn same(a: &TokenKind, b: &TokenKind) -> bool {
     std::mem::discriminant(a) == std::mem::discriminant(b)
 }
 
+/// Type d'une constante globale d'après son littéral (V11, DD-bonus).
+fn const_lit_type(e: &Expr) -> Type {
+    match &e.kind {
+        ExprKind::Lit(Lit::Int(_)) => Type::I64,
+        ExprKind::Lit(Lit::Float(_)) => Type::F64,
+        ExprKind::Lit(Lit::Str(_)) => Type::Str,
+        ExprKind::Lit(Lit::Bool(_)) => Type::Bool,
+        ExprKind::Lit(Lit::Char(_)) => Type::Char,
+        _ => Type::I64,
+    }
+}
+
 /// Opérateur d'une affectation augmentée `op=` (10700) → `BinOp` ; `None` sinon.
 fn aug_op(t: &TokenKind) -> Option<BinOp> {
     Some(match t {
@@ -171,6 +183,18 @@ impl Parser {
                 self.adv();
                 self.stmt_end()?;
                 self.extern_types.push((name, path));
+                continue;
+            }
+            // Constante globale `NAME = <littéral>` (V11, DD-bonus) : `Ident` suivi de `=` au top-level.
+            if matches!(self.cur(), TokenKind::Ident(_)) && matches!(self.nth(1), TokenKind::Assign) {
+                let start = self.i;
+                let name = self.ident()?;
+                self.expect(&TokenKind::Assign, "`=`")?;
+                let value = self.expr()?;
+                self.stmt_end()?;
+                let ty = const_lit_type(&value);
+                let id = self.fresh();
+                items.push(self.node(start, id, ItemKind::Const { name, ty, value }));
                 continue;
             }
             let it = self.item()?;
@@ -620,7 +644,39 @@ impl Parser {
 
     // ---------------------------------------------------------------- statements
 
+    /// Fonction imbriquée (V11, DD-1) : `def inner(p1, p2): block` → `let inner = move |p1, p2| { block }`.
+    /// Types des params/retour inférés par rustc (closure). Annotations tolérées mais ignorées.
+    fn nested_fn(&mut self) -> CResult<Stmt> {
+        let start = self.i;
+        let id = self.fresh();
+        self.adv(); // def/fn
+        let name = self.ident()?;
+        self.expect(&TokenKind::LParen, "`(`")?;
+        let mut params = Vec::new();
+        while !self.is(&TokenKind::RParen) {
+            params.push(self.ident()?);
+            if self.eat(&TokenKind::Colon) {
+                let _ = self.parse_type()?; // annotation tolérée, ignorée (rustc infère)
+            }
+            if !self.eat(&TokenKind::Comma) {
+                break;
+            }
+        }
+        self.expect(&TokenKind::RParen, "`)`")?;
+        if self.eat(&TokenKind::Arrow) {
+            let _ = self.parse_type()?; // `-> T` toléré, ignoré
+        }
+        let body = self.block()?;
+        let cid = self.fresh();
+        let closure = self.node(start, cid, ExprKind::Closure { params, body });
+        Ok(self.node(start, id, StmtKind::Let { name, value: closure }))
+    }
+
     fn stmt(&mut self) -> CResult<Stmt> {
+        // Fonction imbriquée `def inner(...): …` (V11, DD-1) → `let inner = <closure>`.
+        if self.is(&TokenKind::Fn) {
+            return self.nested_fn();
+        }
         if let TokenKind::RustVerbatim(s) = self.cur() {
             let s = s.clone();
             let start = self.i;
@@ -769,13 +825,24 @@ impl Parser {
         Ok(self.node(start, id, StmtKind::If { cond, then, elifs, els }))
     }
 
+    /// Clause `else:` optionnelle d'une boucle (V11, DD-2) : exécutée si la boucle finit **sans `break`**.
+    fn parse_loop_else(&mut self) -> CResult<Vec<Stmt>> {
+        if self.is(&TokenKind::Else) {
+            self.adv();
+            self.block()
+        } else {
+            Ok(Vec::new())
+        }
+    }
+
     fn while_stmt(&mut self) -> CResult<Stmt> {
         let start = self.i;
         let id = self.fresh();
         self.adv(); // while
         let cond = self.expr()?;
         let body = self.block()?;
-        Ok(self.node(start, id, StmtKind::While { cond, body }))
+        let els = self.parse_loop_else()?;
+        Ok(self.node(start, id, StmtKind::While { cond, body, els }))
     }
 
     fn for_stmt(&mut self) -> CResult<Stmt> {
@@ -790,9 +857,10 @@ impl Parser {
         self.expect(&TokenKind::In, "`in`")?;
         let iter = self.expr()?;
         let body = self.block()?;
+        let els = self.parse_loop_else()?;
         if names.len() == 1 {
             let var = names.pop().unwrap();
-            return Ok(self.node(start, id, StmtKind::For { var, iter, body }));
+            return Ok(self.node(start, id, StmtKind::For { var, iter, body, els }));
         }
         // désucre `for a, b in it` → `for __fvN in it: a, b = __fvN`.
         let tmp = format!("__fv{}", id.0);
@@ -802,7 +870,7 @@ impl Parser {
         let destr = self.node(start, did, StmtKind::Destructure { targets: names, value: tvar });
         let mut new_body = vec![destr];
         new_body.extend(body);
-        Ok(self.node(start, id, StmtKind::For { var: tmp, iter, body: new_body }))
+        Ok(self.node(start, id, StmtKind::For { var: tmp, iter, body: new_body, els }))
     }
 
     fn match_stmt(&mut self) -> CResult<Stmt> {
@@ -1001,16 +1069,35 @@ impl Parser {
             return Ok(self.node(start, id, kind));
         }
         if self.eat(&TokenKind::Assign) {
-            let value = self.expr()?;
+            // affectation, éventuellement **chaînée** `a = b = expr` (V11, DD-3).
+            let mut targets = vec![lhs];
+            let mut value = self.expr()?;
+            while self.eat(&TokenKind::Assign) {
+                targets.push(value);
+                value = self.expr()?;
+            }
             self.stmt_end()?;
-            let kind = match lhs.kind {
-                ExprKind::Var(name) => StmtKind::Let { name, value },
-                ExprKind::Field { .. } | ExprKind::Index { .. } => {
-                    StmtKind::Assign { target: lhs, value }
-                }
-                _ => return Err(self.err("cible d'affectation invalide")),
+            let assign_kind = |this: &mut Self, t: Expr, v: Expr| match t.kind {
+                ExprKind::Var(name) => Ok(StmtKind::Let { name, value: v }),
+                ExprKind::Field { .. } | ExprKind::Index { .. } => Ok(StmtKind::Assign { target: t, value: v }),
+                _ => Err(this.err("cible d'affectation invalide".to_string())),
             };
-            Ok(self.node(start, id, kind))
+            if targets.len() == 1 {
+                let kind = assign_kind(self, targets.pop().unwrap(), value)?;
+                return Ok(self.node(start, id, kind));
+            }
+            // chaîne → `__chainN = expr ; cible1 = __chainN ; …` (expr évaluée une fois, gauche→droite).
+            let tmp = format!("__chain{}", id.0);
+            let tid = self.fresh();
+            let mut stmts = vec![self.node(start, tid, StmtKind::Let { name: tmp.clone(), value })];
+            for t in targets {
+                let vid = self.fresh();
+                let tv = self.node(start, vid, ExprKind::Var(tmp.clone()));
+                let sid = self.fresh();
+                let kind = assign_kind(self, t, tv)?;
+                stmts.push(self.node(start, sid, kind));
+            }
+            Ok(self.node(start, id, StmtKind::Seq(stmts)))
         } else {
             self.stmt_end()?;
             Ok(self.node(start, id, StmtKind::ExprStmt(lhs)))

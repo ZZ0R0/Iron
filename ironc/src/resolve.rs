@@ -78,13 +78,15 @@ fn creads_stmt(s: &Stmt, in_loop: bool, out: &mut Vec<(String, NodeId, bool)>) {
             }
             els.iter().for_each(|s| creads_stmt(s, in_loop, out));
         }
-        StmtKind::While { cond, body } => {
+        StmtKind::While { cond, body, els } => {
             creads(cond, Pos::Borrow, in_loop, out);
             body.iter().for_each(|s| creads_stmt(s, true, out));
+            els.iter().for_each(|s| creads_stmt(s, in_loop, out));
         }
-        StmtKind::For { iter, body, .. } => {
+        StmtKind::For { iter, body, els, .. } => {
             creads(iter, Pos::Borrow, in_loop, out);
             body.iter().for_each(|s| creads_stmt(s, true, out));
+            els.iter().for_each(|s| creads_stmt(s, in_loop, out));
         }
         StmtKind::Return { value } => {
             if let Some(e) = value {
@@ -113,6 +115,7 @@ fn creads_stmt(s: &Stmt, in_loop: bool, out: &mut Vec<(String, NodeId, bool)>) {
             handler.iter().for_each(|s| creads_stmt(s, in_loop, out));
         }
         StmtKind::Raise { value } => creads(value, Pos::Value, in_loop, out),
+        StmtKind::Seq(ss) => ss.iter().for_each(|s| creads_stmt(s, in_loop, out)),
         StmtKind::Break | StmtKind::Continue | StmtKind::Pass | StmtKind::RustBlock(_) => {}
     }
 }
@@ -157,6 +160,7 @@ fn creads(e: &Expr, pos: Pos, in_loop: bool, out: &mut Vec<(String, NodeId, bool
         ExprKind::Await(inner) => creads(inner, Pos::Value, in_loop, out),
         // Closure (20700) : capture par référence → position Borrow (jamais un move de capture).
         ExprKind::Lambda { body, .. } => creads(body, Pos::Borrow, in_loop, out),
+        ExprKind::Closure { body, .. } => body.iter().for_each(|s| creads_stmt(s, in_loop, out)),
         ExprKind::Tuple(items) => items.iter().for_each(|e| creads(e, Pos::Value, in_loop, out)),
         ExprKind::FString(parts) => parts.iter().for_each(|p| {
             if let FStringPart::Expr(e) = p {
@@ -215,13 +219,13 @@ fn visit_stmt(s: &Stmt, esc: &mut HashSet<String>) {
             }
             els.iter().for_each(|s| visit_stmt(s, esc));
         }
-        StmtKind::While { cond, body } => {
+        StmtKind::While { cond, body, els } => {
             visit(cond, Pos::Borrow, esc);
-            body.iter().for_each(|s| visit_stmt(s, esc));
+            body.iter().chain(els).for_each(|s| visit_stmt(s, esc));
         }
-        StmtKind::For { iter, body, .. } => {
+        StmtKind::For { iter, body, els, .. } => {
             visit(iter, Pos::Borrow, esc); // `for x in p` → p.iter() emprunte
-            body.iter().for_each(|s| visit_stmt(s, esc));
+            body.iter().chain(els).for_each(|s| visit_stmt(s, esc));
         }
         StmtKind::Return { value } => {
             if let Some(e) = value {
@@ -259,6 +263,7 @@ fn visit_stmt(s: &Stmt, esc: &mut HashSet<String>) {
             handler.iter().for_each(|s| visit_stmt(s, esc));
         }
         StmtKind::Raise { value } => visit(value, Pos::Value, esc),
+        StmtKind::Seq(ss) => ss.iter().for_each(|s| visit_stmt(s, esc)),
         StmtKind::Break | StmtKind::Continue | StmtKind::Pass | StmtKind::RustBlock(_) => {}
     }
 }
@@ -301,6 +306,7 @@ fn visit(e: &Expr, pos: Pos, esc: &mut HashSet<String>) {
         ExprKind::Await(inner) => visit(inner, Pos::Value, esc),
         // Closure (20700) : un param capturé peut s'échapper → position Value (conservateur, sûr).
         ExprKind::Lambda { body, .. } => visit(body, Pos::Value, esc),
+        ExprKind::Closure { body, .. } => body.iter().for_each(|s| visit_stmt(s, esc)),
         ExprKind::Tuple(items) => items.iter().for_each(|e| visit(e, Pos::Value, esc)),
         ExprKind::FString(parts) => parts.iter().for_each(|p| {
             if let FStringPart::Expr(e) = p {

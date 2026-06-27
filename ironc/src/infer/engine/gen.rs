@@ -118,15 +118,17 @@ impl<'a> Gen<'a> {
                 }
                 self.block(scope, ret, els);
             }
-            StmtKind::While { cond, body } => {
+            StmtKind::While { cond, body, els } => {
                 let tc = self.expr(scope, cond);
                 self.eq(tc, Type::Bool, cond.span);
                 self.block(scope, ret, body);
+                self.block(scope, ret, els);
             }
-            StmtKind::For { var, iter, body } => {
+            StmtKind::For { var, iter, body, els } => {
                 let elem = self.iter_elem(scope, iter);
                 scope.entry(var.clone()).or_insert(elem);
                 self.block(scope, ret, body);
+                self.block(scope, ret, els);
             }
             StmtKind::Match { scrutinee, arms } => {
                 self.expr(scope, scrutinee);
@@ -147,6 +149,11 @@ impl<'a> Gen<'a> {
             }
             StmtKind::Raise { value } => {
                 self.expr(scope, value);
+            }
+            StmtKind::Seq(ss) => {
+                for s in ss {
+                    self.stmt(scope, ret, s);
+                }
             }
             StmtKind::Break | StmtKind::Continue | StmtKind::Pass | StmtKind::RustBlock(_) => {}
         }
@@ -292,6 +299,19 @@ impl<'a> Gen<'a> {
                 }
             }
             ExprKind::Await(inner) => self.expr(scope, inner),
+            // closure imbriquée (V11) : params frais (rustc inférera), corps typé pour propager les
+            // contraintes des variables capturées ; type résultat = fonction.
+            ExprKind::Closure { params, body } => {
+                let pvars: Vec<Type> = params.iter().map(|_| self.fresh()).collect();
+                for (p, v) in params.iter().zip(&pvars) {
+                    scope.insert(p.clone(), v.clone());
+                }
+                let ret = self.fresh();
+                for s in body {
+                    self.stmt(scope, &ret, s);
+                }
+                Type::Fn(pvars, Box::new(ret))
+            }
             ExprKind::Lambda { params, body } => {
                 let pvars: Vec<Type> = params.iter().map(|_| self.fresh()).collect();
                 for (p, v) in params.iter().zip(&pvars) {

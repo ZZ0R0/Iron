@@ -71,13 +71,15 @@ fn collect(stmts: &[Stmt], assigned: &mut HashMap<String, Span>, read: &mut Hash
                 }
                 collect(els, assigned, read);
             }
-            StmtKind::While { cond, body } => {
+            StmtKind::While { cond, body, els } => {
                 reads(cond, read);
                 collect(body, assigned, read);
+                collect(els, assigned, read);
             }
-            StmtKind::For { iter, body, .. } => {
+            StmtKind::For { iter, body, els, .. } => {
                 reads(iter, read);
                 collect(body, assigned, read);
+                collect(els, assigned, read);
             }
             StmtKind::Match { scrutinee, arms } => {
                 reads(scrutinee, read);

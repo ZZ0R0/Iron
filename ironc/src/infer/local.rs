@@ -78,16 +78,16 @@ pub(crate) fn stmt(cx: &mut Inf, s: &Stmt, scope: &mut Scope) {
                 stmt(cx, s, scope);
             }
         }
-        StmtKind::While { cond, body } => {
+        StmtKind::While { cond, body, els } => {
             expr(cx, cond, scope);
-            for s in body {
+            for s in body.iter().chain(els) {
                 stmt(cx, s, scope);
             }
         }
-        StmtKind::For { var, iter, body } => {
+        StmtKind::For { var, iter, body, els } => {
             let it = expr(cx, iter, scope);
             scope.insert(var.clone(), element_of(&it));
-            for s in body {
+            for s in body.iter().chain(els) {
                 stmt(cx, s, scope);
             }
         }
@@ -146,6 +146,11 @@ pub(crate) fn stmt(cx: &mut Inf, s: &Stmt, scope: &mut Scope) {
         }
         StmtKind::Raise { value } => {
             expr(cx, value, scope);
+        }
+        StmtKind::Seq(ss) => {
+            for s in ss {
+                stmt(cx, s, scope);
+            }
         }
         StmtKind::Break | StmtKind::Continue | StmtKind::Pass | StmtKind::RustBlock(_) => {}
     }
@@ -427,6 +432,17 @@ pub(crate) fn expr(cx: &mut Inf, e: &Expr, scope: &Scope) -> Type {
             }
             let bt = expr(cx, body, &mut inner);
             Type::Fn(params.iter().map(|_| Type::Unit).collect(), Box::new(bt))
+        }
+        // closure imbriquée (V11) : params/corps laissés à rustc ; on annote le corps.
+        ExprKind::Closure { params, body } => {
+            let mut inner = scope.clone();
+            for p in params {
+                inner.insert(p.clone(), Type::Unit);
+            }
+            for s in body {
+                stmt(cx, s, &mut inner);
+            }
+            Type::Fn(params.iter().map(|_| Type::Unit).collect(), Box::new(Type::Unit))
         }
         ExprKind::Tuple(items) => {
             let ts: Vec<Type> = items.iter().map(|it| expr(cx, it, scope)).collect();
