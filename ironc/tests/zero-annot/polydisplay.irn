@@ -1,0 +1,22 @@
+# [V10.1] Promotion (polymorphie auto) + générique borné Display (R2) — ZÉRO annotation.
+
+# appelé à deux types → promu générique
+def id(v):
+    return v
+
+# `n` en f-string ET appelé à deux types → générique `T: Display`
+def label(prefix, n):
+    return f"{prefix}={n}"
+
+# récursion (whole-program, pas de tri SCC)
+def fact(n):
+    if n <= 1:
+        return 1
+    return n * fact(n - 1)
+
+def main():
+    print(id(7))
+    print(id("hi"))
+    print(label("x", 42))
+    print(label("a", "b"))
+    print(fact(5))

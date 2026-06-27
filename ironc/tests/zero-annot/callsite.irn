@@ -1,0 +1,27 @@
+# [V10.1] Inférence pilotée par les sites d'appel — ZÉRO annotation, déterminé par l'usage.
+class Point:
+    x: i64
+    name: str
+
+# param `xs` typé par l'appel (itération seule ne suffisait pas avant V10.1)
+def count(xs):
+    c = 0
+    for v in xs:
+        c = c + 1
+    return c
+
+# param `p` + retour `p.name` résolus via l'appel (résolution structurelle incrémentale)
+def get_name(p):
+    return p.name
+
+# ordre supérieur : `g` appelé, typé par la fonction passée
+def apply2(g, v):
+    return g(v)
+
+def triple(n):
+    return n * 3
+
+def main():
+    print(count([3, 1, 4, 1, 5]))
+    print(get_name(Point(x=1, name="iron")))
+    print(apply2(triple, 14))

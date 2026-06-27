@@ -53,12 +53,15 @@ Décisions verrouillées au cadrage. **Aucune spec ne peut les contredire.** Tou
   annotation (l'annotation est le opt-in). Cf. [[I11]].
 - **I14 — Extensions.** Source `.irn`, bindings `.iri`.
 
-- **I15 — Inférence par contraintes (V10, 21700+).** Les types de params/retours non annotés sont résolus
-  par un **moteur de contraintes** (unification + contraintes de trait pour l'overloading + lecture des
-  bindings `.iri`), avec **let-polymorphism** (un même `def f(x): return x` s'utilise à plusieurs types).
-  Ambition **complète-pragmatique** (D0) : zéro annotation **en pratique** ; restent explicites par
-  conception la **déclaration** d'un générique `[T]` et le **type d'une closure renvoyée**. `rustc` reste le
-  filet (I2). Iron diagnostique lui-même les conflits de primitives (I8), avant `rustc`.
+- **I15 — Inférence par contraintes, pilotée par les sites d'appel (V10/V10.1, 21700+).** Les types de
+  params/retours non annotés sont résolus par un **moteur de contraintes** (unification + contraintes de
+  trait pour l'overloading + lecture des bindings `.iri`), **piloté par les sites d'appel** : Iron compilant
+  le programme entier, le type d'un param = **ce avec quoi on l'appelle** (monomorphe par défaut, boucle de
+  point fixe avec résolution structurelle incrémentale). La **polymorphie n'apparaît que sur conflit**
+  (promotion en générique — **coût runtime nul** par monomorphisation Rust). Ambition **complète-pragmatique**
+  (D0) : zéro annotation **en pratique** ; restent explicites la **déclaration** d'un générique `[T]` et le
+  **type d'une closure renvoyée**. `rustc` reste le filet (I2) ; Iron diagnostique lui-même les conflits de
+  primitives sur la ligne Iron (I8), avant `rustc`.
 
 > **Le « 0.1 % » — hors-périmètre irréductible (V9.1, spec 90600 ; révisé V10).** Liste **stable** de ce
 > qu'Iron ne fait **pas** ; chaque cas a une **issue orientée** :
