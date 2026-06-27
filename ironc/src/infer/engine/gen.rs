@@ -7,6 +7,7 @@
 
 use super::assume::{Env, FnSig};
 use super::constraint::{Constraint, TraitBound};
+use super::promote::Promoted;
 use super::subst::Subst;
 use crate::ir::*;
 use std::collections::HashMap;
@@ -16,12 +17,15 @@ type Scope = HashMap<String, Type>;
 pub struct Gen<'a> {
     env: &'a Env,
     subst: &'a mut Subst,
+    /// Vars de params **promues** en génériques (V10.1) : seules celles-ci (+ les génériques déclarés) sont
+    /// freshisées à l'appel. Les autres params sont **monomorphes** (unifiés avec les vrais).
+    promoted: &'a Promoted,
     pub cs: Vec<Constraint>,
 }
 
 impl<'a> Gen<'a> {
-    pub fn new(env: &'a Env, subst: &'a mut Subst) -> Self {
-        Gen { env, subst, cs: Vec::new() }
+    pub fn new(env: &'a Env, subst: &'a mut Subst, promoted: &'a Promoted) -> Self {
+        Gen { env, subst, promoted, cs: Vec::new() }
     }
 
     fn fresh(&mut self) -> Type {

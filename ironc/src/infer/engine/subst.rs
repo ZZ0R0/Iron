@@ -19,6 +19,13 @@ impl Subst {
         Subst::default()
     }
 
+    /// Substitution vide dont le compteur de fraîches **démarre à `k`** : les ids `< k` sont réservés aux
+    /// vars de params/retours (alloués une fois par `build_env`), stables d'un tour de boucle à l'autre
+    /// (V10.1, point fixe). `fresh()` ne renvoie donc jamais un id de param.
+    pub fn with_next(k: u32) -> Self {
+        Subst { next: k, map: HashMap::new() }
+    }
+
     /// Alloue une métavariable fraîche.
     pub fn fresh(&mut self) -> Type {
         let v = self.next;

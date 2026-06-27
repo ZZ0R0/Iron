@@ -16,6 +16,7 @@ mod assume;
 mod diag;
 mod gen;
 mod generalize;
+mod promote;
 mod solve;
 
 use crate::ir::*;
@@ -25,17 +26,35 @@ use std::collections::HashSet;
 /// `params.rs`). Mute l'AST (remplit les sentinelles) ; `local`/`flow`/`lower` tournent ensuite inchangés.
 /// Pipeline : `build_env` → `gen` (contraintes) → `solve` (unification) → defaulting → `writeback`.
 pub fn resolve_params(ast: &mut Ast, bindings: &Bindings) -> Result<(), CompileError> {
-    let mut subst = subst::Subst::new();
-    let env = assume::build_env(ast, bindings, &mut subst);
+    // `build_env` alloue les vars de params/retours une fois → ids `< boundary` **stables** d'un tour à
+    // l'autre. Chaque tour repart d'une `Subst` neuve (`with_next(boundary)`), seule la promotion persiste.
+    let mut counter = subst::Subst::new();
+    let env = assume::build_env(ast, bindings, &mut counter);
+    let boundary = counter.vars();
 
-    let cs = {
-        let mut g = gen::Gen::new(&env, &mut subst);
-        g.program(ast);
-        g.cs
-    };
+    // Boucle de point fixe (V10.1, D-g/D-a) : génère → unifie → détecte les conflits de params → promeut →
+    // recommence, jusqu'à stabilité. Bornée (garde-fou anti-boucle ; converge car la promotion ne fait que
+    // relâcher). En vague 1 : `gen` freshise tout (V10) → aucun conflit → un seul tour.
+    let mut promoted = promote::Promoted::new();
+    let (mut subst, mut cs);
+    let mut guard = 0;
+    loop {
+        subst = subst::Subst::with_next(boundary);
+        cs = {
+            let mut g = gen::Gen::new(&env, &mut subst, &promoted);
+            g.program(ast);
+            g.cs
+        };
+        let conflicts = promote::solve_and_detect(&cs, &mut subst, boundary);
+        let fresh_conflicts: Vec<u32> = conflicts.into_iter().filter(|v| !promoted.contains(v)).collect();
+        guard += 1;
+        if fresh_conflicts.is_empty() || guard > 1000 {
+            break;
+        }
+        promoted.extend(fresh_conflicts);
+    }
 
-    solve::solve(&cs, &mut subst); // best-effort (rustc reste le filet, D7) ; diagnostics stricts = `check`
-
+    // Defaulting **en dernier** (D-j), après convergence.
     let used: HashSet<u32> = (0..subst.vars()).collect();
     generalize::default_free_vars(&cs, &mut subst, &used, &env.ret_vars);
     generalize::writeback(ast, &env, &subst);
@@ -48,8 +67,9 @@ pub fn resolve_params(ast: &mut Ast, bindings: &Bindings) -> Result<(), CompileE
 pub fn check_types(ast: &Ast, bindings: &Bindings) -> Result<(), CompileError> {
     let mut subst = subst::Subst::new();
     let env = assume::build_env(ast, bindings, &mut subst);
+    let empty = promote::Promoted::new();
     let cs = {
-        let mut g = gen::Gen::new(&env, &mut subst);
+        let mut g = gen::Gen::new(&env, &mut subst, &empty);
         g.program(ast);
         g.cs
     };
