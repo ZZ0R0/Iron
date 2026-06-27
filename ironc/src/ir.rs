@@ -85,6 +85,10 @@ pub enum TokenKind {
     Semicolon,
     Comma,
     Dot,
+    /// `..` (range exclusif) / `..=` (inclusif) / `|` (or-pattern) — V11, 11000.
+    DotDot,
+    DotDotEq,
+    Pipe,
     Colon,
     Arrow,
     Assign,
@@ -318,6 +322,10 @@ pub enum Pattern {
     Tuple(Vec<Pattern>),
     /// `Some(x)`, `None`, `Shape.Circle(r)` — `path` joint en `::`, `sub` = sous-motifs.
     Variant { path: Vec<String>, sub: Vec<Pattern> },
+    /// or-pattern `p1 | p2 | …` (V11, 11000).
+    Or(Vec<Pattern>),
+    /// range pattern `lo..hi` (exclusif) / `lo..=hi` (inclusif) (V11, 11000).
+    Range(Box<Expr>, Box<Expr>, bool),
 }
 
 #[derive(Debug, Clone)]

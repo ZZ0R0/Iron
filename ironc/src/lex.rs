@@ -480,7 +480,18 @@ impl<'a> Lexer<'a> {
             }
             (b';', _) => one!(TokenKind::Semicolon),
             (b',', _) => one!(TokenKind::Comma),
+            // `..` / `..=` (range patterns, V11) — avant `.` mono-caractère.
+            (b'.', Some(b'.')) => {
+                self.pos += 2;
+                if self.peek() == Some(b'=') {
+                    self.pos += 1;
+                    self.push(TokenKind::DotDotEq, start);
+                } else {
+                    self.push(TokenKind::DotDot, start);
+                }
+            }
             (b'.', _) => one!(TokenKind::Dot),
+            (b'|', _) => one!(TokenKind::Pipe), // or-pattern (V11)
             (b':', _) => one!(TokenKind::Colon),
             (b'?', _) => one!(TokenKind::Question),
             (b'{', _) => {

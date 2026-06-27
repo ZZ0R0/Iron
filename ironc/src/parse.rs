@@ -831,11 +831,72 @@ impl Parser {
         Ok(self.node(start, id, StmtKind::Match { scrutinee, arms }))
     }
 
+    /// Motif complet : `parse_pattern_single` (motif ou range) éventuellement joint par `|` (or-pattern).
     fn parse_pattern(&mut self) -> CResult<Pattern> {
+        let first = self.parse_pattern_single()?;
+        if self.is(&TokenKind::Pipe) {
+            let mut alts = vec![first];
+            while self.eat(&TokenKind::Pipe) {
+                alts.push(self.parse_pattern_single()?);
+            }
+            return Ok(Pattern::Or(alts));
+        }
+        Ok(first)
+    }
+
+    /// Motif de base, éventuellement suivi de `..`/`..=` → range pattern (V11, 11000).
+    fn parse_pattern_single(&mut self) -> CResult<Pattern> {
+        let start = self.i;
+        let base = self.parse_pattern_base()?;
+        if self.is(&TokenKind::DotDot) || self.is(&TokenKind::DotDotEq) {
+            let inclusive = matches!(self.cur(), TokenKind::DotDotEq);
+            self.adv(); // `..` ou `..=`
+            let lo = self.pattern_bound_expr(base, start)?;
+            let hi = self.range_high_expr(start)?;
+            return Ok(Pattern::Range(Box::new(lo), Box::new(hi), inclusive));
+        }
+        Ok(base)
+    }
+
+    /// Borne basse d'un range, depuis le motif déjà parsé (doit être un littéral ou un nom de const).
+    fn pattern_bound_expr(&mut self, p: Pattern, start: usize) -> CResult<Expr> {
+        let id = self.fresh();
+        match p {
+            Pattern::Lit(l) => Ok(self.node(start, id, ExprKind::Lit(l))),
+            Pattern::Var(n) => Ok(self.node(start, id, ExprKind::Var(n))),
+            _ => Err(self.err("borne de range invalide (littéral ou nom attendu)".to_string())),
+        }
+    }
+
+    /// Borne haute d'un range (littéral int/char ou nom de const).
+    fn range_high_expr(&mut self, start: usize) -> CResult<Expr> {
+        let id = self.fresh();
+        match self.cur().clone() {
+            TokenKind::Int(n) => {
+                self.adv();
+                Ok(self.node(start, id, ExprKind::Lit(Lit::Int(n))))
+            }
+            TokenKind::Char(c) => {
+                self.adv();
+                Ok(self.node(start, id, ExprKind::Lit(Lit::Char(c))))
+            }
+            TokenKind::Ident(n) => {
+                self.adv();
+                Ok(self.node(start, id, ExprKind::Var(n)))
+            }
+            other => Err(self.err(format!("borne haute de range attendue, trouvé {other:?}"))),
+        }
+    }
+
+    fn parse_pattern_base(&mut self) -> CResult<Pattern> {
         match self.cur().clone() {
             TokenKind::Int(n) => {
                 self.adv();
                 Ok(Pattern::Lit(Lit::Int(n)))
+            }
+            TokenKind::Char(c) => {
+                self.adv();
+                Ok(Pattern::Lit(Lit::Char(c)))
             }
             TokenKind::Bool(b) => {
                 self.adv();

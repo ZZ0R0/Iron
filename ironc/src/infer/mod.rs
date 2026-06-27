@@ -163,6 +163,14 @@ impl Inf<'_> {
                     self.bind_pattern(sp, &et, scope);
                 }
             }
+            // or-pattern : chaque alternative lie les mêmes variables (mêmes types) → suffit de la 1ʳᵉ.
+            Pattern::Or(alts) => {
+                if let Some(first) = alts.first() {
+                    self.bind_pattern(first, ty, scope);
+                }
+            }
+            // range pattern : aucune variable liée.
+            Pattern::Range(..) => {}
         }
     }
 }

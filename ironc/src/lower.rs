@@ -1790,6 +1790,42 @@ fn lower_pattern(p: &Pattern) -> TokenStream {
             let ps: Vec<TokenStream> = subs.iter().map(lower_pattern).collect();
             quote! { ( #(#ps),* ) }
         }
+        // or-pattern `p1 | p2 | …` (V11, 11000).
+        Pattern::Or(alts) => {
+            let ps: Vec<TokenStream> = alts.iter().map(lower_pattern).collect();
+            quote! { #(#ps)|* }
+        }
+        // range pattern (V11, 11000). Les ranges **exclusifs** étant instables en Rust stable, on émet
+        // toujours de l'**inclusif** : `lo..=hi` (inclusif) ; `lo..hi` (exclusif, entier) → `lo..=(hi-1)`.
+        Pattern::Range(lo, hi, inclusive) => {
+            let l = lower_range_bound(lo);
+            if *inclusive {
+                let h = lower_range_bound(hi);
+                quote! { #l..=#h }
+            } else if let ExprKind::Lit(Lit::Int(n)) = &hi.kind {
+                let h = proc_macro2::Literal::i64_unsuffixed(*n - 1);
+                quote! { #l..=#h }
+            } else {
+                let h = lower_range_bound(hi); // char/const exclusif (rare) → best-effort inclusif
+                quote! { #l..=#h }
+            }
+        }
+    }
+}
+
+/// Borne d'un range pattern → token Rust (littéral int/char ou nom de const).
+fn lower_range_bound(e: &Expr) -> TokenStream {
+    match &e.kind {
+        ExprKind::Lit(Lit::Int(n)) => {
+            let n = proc_macro2::Literal::i64_unsuffixed(*n);
+            quote! { #n }
+        }
+        ExprKind::Lit(Lit::Char(c)) => quote! { #c },
+        ExprKind::Var(n) => {
+            let id = format_ident!("{}", n);
+            quote! { #id }
+        }
+        _ => quote! { _ },
     }
 }
 
