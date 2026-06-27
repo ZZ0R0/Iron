@@ -1828,6 +1828,9 @@ fn lower_generics(gens: &Generics) -> TokenStream {
 
 fn lower_type(t: &Type) -> TokenStream {
     match t {
+        // D2 (V10) : aucune métavariable ne doit atteindre le lowering. Garde-fou : si une `Var` arrive,
+        // l'inférence n'a pas clos (defaulting/erreur) — bug du moteur, pas du programme utilisateur.
+        Type::Var(_) => unreachable!("Type::Var atteint le lowering — invariant D2 violé (inférence non close)"),
         Type::I64 => quote! { i64 },
         Type::F64 => quote! { f64 },
         Type::Bool => quote! { bool },

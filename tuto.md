@@ -4,12 +4,14 @@
 > qui **transpile vers Rust** et compile via `cargo`. Pas de GC, pas de runtime lourd, et Iron **n'émet
 > jamais d'`unsafe`** : le pire cas est une erreur `rustc` remontée sur ta ligne Iron.
 >
-> Principe directeur : **zéro bibliothèque Iron**. Les primitives du langage sont intégrées ; *tout le
-> reste* (fichiers, JSON, HTTP, regex, crypto…) se fait en **important un crate Rust**. L'écosystème
-> d'Iron, c'est **crates.io**.
+> Deux principes :
+> - **Inférence locale** : tu n'annotes **que ce qui n'est pas déductible**. La plupart des fonctions
+>   s'écrivent sans aucune annotation, comme en Python.
+> - **Zéro bibliothèque Iron** : les primitives du langage sont intégrées ; *tout le reste* (fichiers, JSON,
+>   HTTP, regex, crypto…) se fait en **important un crate Rust**. L'écosystème d'Iron, c'est **crates.io**.
 
-Fil rouge de ce tuto : on construit un petit **annuaire de contacts**, feature par feature. Chaque extrait
-est exécutable tel quel — les sorties affichées sont réelles.
+Fil rouge : on construit un petit **annuaire de contacts**, feature par feature. Chaque extrait est
+exécutable tel quel — les sorties affichées sont réelles.
 
 ---
 
@@ -30,12 +32,12 @@ Fichiers : **`.irn`** = source · **`.iri`** = binding (interface vers un crate 
 
 ---
 
-## 1. Les bases
+## 1. Les bases — sans annotation
 
 `hello.irn` :
 
 ```python
-def greet(name: str) -> str:
+def greet(name):
     return f"Bonjour, {name} !"
 
 def main():
@@ -52,17 +54,17 @@ Bonjour, Iron !
 4
 ```
 
-À retenir : indentation significative, annotations de type `name: str`, f-strings `f"...{x}..."`,
-compréhensions, et `len` qui compte des **caractères** Unicode (pas des octets).
+Aucune annotation : Iron déduit que `name` est une chaîne (utilisée dans une f-string) et que `greet`
+renvoie une chaîne. `len` compte des **caractères** Unicode, pas des octets.
 
-> Astuce : une fonction d'une ligne s'écrit `def carre(n: i64) -> i64: return n * n`.
+> Astuce : une fonction d'une ligne s'écrit `def carre(n): return n * n`.
 
 ---
 
 ## 2. Classes et sémantique par valeur
 
 Une `class` regroupe des champs et des méthodes. **Tout est copié par valeur** : pas d'alias surprise,
-pas de mutation à distance.
+pas de mutation à distance. Seuls les **champs** sont annotés (comme un `dataclass` Python).
 
 `contact.irn` :
 
@@ -71,10 +73,10 @@ class Contact:
     name: str
     age: i64
 
-    def is_adult(self) -> bool:
-        return self.age >= 18
+    def is_adult(self):
+        return self.age >= 18           # comparaison → bool (inféré)
 
-    def birthday(self) -> Contact:
+    def birthday(self):
         return Contact(name=self.name, age=self.age + 1)
 
 def main():
@@ -91,8 +93,8 @@ Alice: 17 (adulte? false)
 Alice: 18 (adulte? true)
 ```
 
-`birthday()` renvoie un **nouveau** `Contact` ; l'original reste intact. (Sous le capot, Iron emprunte
-quand c'est sûr et ne clone que si nécessaire — sans jamais d'`unsafe`.)
+Les méthodes ne sont pas annotées : Iron déduit `is_adult → bool` et `birthday → Contact`. `birthday()`
+renvoie un **nouveau** `Contact` ; l'original reste intact.
 
 ---
 
@@ -111,13 +113,10 @@ $ ironc add strsim
 ```python
 import strsim
 
-def closest(query: str, names: list[str]) -> str:
+def closest(query: str, names: list[str]):
     best = names[0]
-    best_d = levenshtein(query, best)
     for n in names:
-        d = levenshtein(query, n)
-        if d < best_d:
-            best_d = d
+        if levenshtein(query, n) < levenshtein(query, best):
             best = n
     return best
 
@@ -133,15 +132,17 @@ Alice
 Bob
 ```
 
-`levenshtein` vient de la **crate Rust `strsim`**, compilée par `cargo`. Iron a juste généré l'appel —
-zéro code de bibliothèque Iron. Même `import std` (fichiers, env) marche de cette façon.
+`levenshtein` vient de la **crate Rust `strsim`**, compilée par `cargo`. Ici on annote `query: str` et
+`names: list[str]` : `query` n'est consommé que par une fonction externe (Iron ne lit pas sa signature),
+et le **type d'élément** d'une liste-paramètre n'est pas déductible localement. Le retour `best`, lui,
+s'infère (`names[0]` est un `str`).
 
 ---
 
 ## 4. Des erreurs typées : `Result[T, E]`
 
-Pour valider une entrée, on déclare un `enum` d'erreur et on renvoie `Result[T, E]`. On lève avec `raise`,
-on propage avec `?`, on récupère avec `try`/`except`.
+Pour signaler un échec, on déclare un `enum` d'erreur et on renvoie `Result[T, E]`. On lève avec `raise`,
+on récupère avec `.unwrap_or(...)` (ou `?` / `try`/`except`).
 
 `validate.irn` :
 
@@ -150,39 +151,30 @@ enum ValidationError:
     EmptyName
     TooYoung
 
-def validate(name: str, age: i64) -> Result[str, ValidationError]:
+def validate(name: str, age) -> Result[str, ValidationError]:
     if len(name) == 0:
         raise ValidationError.EmptyName
-    if age < 18:
+    if age < 18:                        # `age` inféré i64 (comparé à un nombre)
         raise ValidationError.TooYoung
     return ok(name)
 
-def describe(name: str, age: i64) -> str:
-    try:
-        v = validate(name, age)?        # `?` propage l'erreur typée
-        return f"OK: {v}"
-    except e:                           # `e` est de type ValidationError
-        match e:
-            ValidationError.EmptyName:
-                return "refusé: nom vide"
-            ValidationError.TooYoung:
-                return "refusé: mineur"
-
 def main():
-    print(describe("Alice", 25))
-    print(describe("", 25))
-    print(describe("Bob", 15))
+    print(validate("Alice", 25).unwrap_or("refusé"))
+    print(validate("", 25).unwrap_or("refusé"))
+    print(validate("Bob", 15).unwrap_or("refusé"))
 ```
 
 ```sh
 $ ironc run validate.irn
-OK: Alice
-refusé: nom vide
-refusé: mineur
+Alice
+refusé
+refusé
 ```
 
-`Result[str, ValidationError]` porte un type d'erreur **concret** ; `?` et `try/except` le propagent.
-(Sans annotation, `Result[T]` reste un fourre-tout `IronError` — l'erreur typée est un opt-in.)
+`age` est inféré (`age < 18`). On annote `name: str` (utilisé via `len`, ambigu sinon) et le retour
+`Result[str, ValidationError]` : le **type d'erreur concret est explicite par choix** — c'est ce qui
+permet à `?`/`try`/`except` de propager exactement cette erreur. (Sans annotation, `Result[T]` reste un
+fourre-tout `IronError`.)
 
 ---
 
@@ -191,22 +183,22 @@ refusé: mineur
 `capstone.irn` :
 
 ```python
-# Générique utilisateur : marche pour n'importe quel T
-def pair_of[T](x: T) -> list[T]:
+# Générique : `[T]` déclaré, `x: T`
+def pair_of[T](x: T):
     return [x, x]
 
-# Closure renvoyée puis stockée
+# Closure renvoyée → on annote le type fonction (sinon non déductible)
 def multiplier(factor: i64) -> fn(i64) -> i64:
     return lambda x: x * factor
 
-# Parallélisme natif : somme 1..n sur deux threads
-def range_sum(lo: i64, hi: i64) -> i64:
+# Parallélisme — aucune annotation : tout s'infère
+def range_sum(lo, hi):
     total = 0
     for i in range(lo, hi + 1):
         total = total + i
     return total
 
-def parallel_sum(n: i64) -> i64:
+def parallel_sum(n):
     mid = n / 2
     h1 = thread.spawn(lambda: range_sum(1, mid))
     h2 = thread.spawn(lambda: range_sum(mid + 1, n))
@@ -226,8 +218,9 @@ $ ironc run capstone.irn
 5050
 ```
 
-Génériques (`[T]`), closures de 1ʳᵉ classe (`fn(i64) -> i64`, `lambda`) et threads (`thread.spawn`/
-`.join()`) — le tout transpilé en Rust idiomatique, **0 `unsafe`**.
+`range_sum`/`parallel_sum` n'ont **aucune** annotation (accumulateur, `range`, division → tout numérique).
+On annote là où l'inférence locale ne suffit pas : le paramètre d'un **générique** (`x: T`) et le **type
+d'une closure renvoyée** (`fn(i64) -> i64`).
 
 ---
 
@@ -238,11 +231,11 @@ Génériques (`[T]`), closures de 1ʳᵉ classe (`fn(i64) -> i64`, `lambda`) et 
 
 ```python
 # bug.irn
-def add(a: i64, b: i64) -> i64:
+def add(a, b):
     return a + b
 
 def main():
-    print(add(1, "deux"))   # str au lieu de i64
+    print(add(1, "deux"))   # str au lieu d'un nombre
 ```
 
 ```sh
@@ -257,7 +250,7 @@ $ ironc repl
 >>> x = 21
 >>> x * 2
 42
->>> def sq(n: i64) -> i64: return n * n
+>>> def sq(n): return n * n
 >>> sq(x)
 441
 ```
@@ -281,21 +274,41 @@ langage (diagnostics live, complétion, hover, go-to-définition), et expose les
 
 ---
 
-## 7. Récap
+## 7. Quand faut-il annoter ?
+
+Iron infère **localement** (à partir de l'usage dans le corps). Il n'y a **pas** d'inférence globale
+Hindley-Milner : certaines annotations restent nécessaires. La règle pratique :
+
+| Tu écris… | Annotation requise ? |
+|---|---|
+| arithmétique / comparaison à un nombre (`x * 2`, `age < 18`) | **non** — inféré `i64` |
+| f-string / concaténation (`f"{x}"`, `s + "!"`) | **non** — inféré `str` |
+| retour d'un calcul, d'une liste, d'une struct, d'un index | **non** — inféré |
+| **champ** de `class` | **oui** (`name: str`) — comme un dataclass |
+| **générique** | **oui** (`def f[T](x: T)`) |
+| **erreur typée** `Result[T, E]` | **oui** — c'est l'opt-in qui rend `E` concret |
+| **closure renvoyée** | **oui** (`-> fn(i64) -> i64`) |
+| param passé **seulement** à une fonction externe / élément d'une liste-paramètre | **oui** (`query: str`, `names: list[str]`) |
+
+En cas de doute : écris sans annotation, lance `ironc run`. Si Iron ne peut pas déduire, `rustc` te le dit
+**sur ta ligne** — tu ajoutes l'annotation pile où il faut.
+
+---
+
+## 8. Récap
 
 | Tu veux… | En Iron |
 |---|---|
-| une fonction | `def f(x: i64) -> i64:` |
-| un type produit | `class C:` (sémantique par valeur) |
+| une fonction | `def f(x):` (annote si non déductible) |
+| un type produit | `class C:` (champs typés, sémantique par valeur) |
 | un type somme | `enum E:` |
 | une bibliothèque | `ironc add <crate>` puis `import <crate>` — **jamais** de lib Iron |
 | gérer l'échec | `Result[T, E]` + `raise` / `?` / `try`/`except` |
-| du générique | `def f[T](...)`, `class Box[T]:` |
+| du générique | `def f[T](x: T)` |
 | une fonction-valeur | `lambda x: ...`, type `fn(A) -> R` |
 | du parallélisme | `thread.spawn(lambda: ...)` / `.join()` |
 
-**Le réflexe Iron** : tu écris en syntaxe Python, tu penses en valeurs, et dès qu'il te faut une lib, tu
-`import` un crate Rust. Iron génère du Rust sûr, `cargo` le compile.
+**Le réflexe Iron** : tu écris en syntaxe Python *avec un minimum d'annotations*, tu penses en valeurs, et
+dès qu'il te faut une lib, tu `import` un crate Rust. Iron génère du Rust sûr, `cargo` le compile.
 
-Pour aller plus loin : `tests/vitrine-v9.1/` est un projet multi-fichiers qui combine tout ce tuto en un
-seul programme.
+Pour aller plus loin : `tests/vitrine-v9.1/` est un projet multi-fichiers qui combine tout ce tuto.

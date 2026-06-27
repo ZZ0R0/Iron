@@ -158,6 +158,7 @@ fn ty(t: &Type) -> String {
         Type::Tuple(xs) => format!("({})", xs.iter().map(ty).collect::<Vec<_>>().join(", ")),
         Type::Fn(ps, r) => format!("fn({}) -> {}", ps.iter().map(ty).collect::<Vec<_>>().join(", "), ty(r)),
         Type::Num(k) => num_name(*k).into(),
+        Type::Var(n) => format!("?{n}"), // métavariable d'inférence (V10) — affichée si non résolue
     }
 }
 

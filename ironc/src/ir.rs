@@ -164,6 +164,10 @@ pub enum Type {
     Set(Box<Type>),
     /// Numériques élargis hors `i64`/`f64` (V7, 20800) ; les défauts restent `I64`/`F64`.
     Num(NumKind),
+    /// **Métavariable d'inférence** (V10, 21700) : trou de type à résoudre par le moteur de contraintes.
+    /// Invariant de sortie (D2) : **aucune `Var` ne subsiste** après inférence (defaulting ou erreur).
+    /// Les composants en aval (`lower`/`resolve`) n'en voient jamais.
+    Var(u32),
     /// Caractère Unicode `char` (V7, 20800).
     Char,
     /// Référence faible `Weak` (V7, 30600).
