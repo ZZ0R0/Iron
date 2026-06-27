@@ -26,6 +26,11 @@ impl Subst {
         Type::Var(v)
     }
 
+    /// Nombre de métavariables allouées (les ids vont de `0` à `vars()-1`).
+    pub fn vars(&self) -> u32 {
+        self.next
+    }
+
     /// Lie `Var(v)` à `ty` (suppose `v` non encore lié et `occurs_check` déjà fait par l'appelant).
     pub fn bind(&mut self, v: u32, ty: Type) {
         self.map.insert(v, ty);

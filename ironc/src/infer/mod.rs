@@ -4,10 +4,9 @@
 //! Best-effort : annote tout `Expr` joignable ; ce que `lower` exige (type des bases d'index,
 //! `Option`/`Result`) est couvert. Vérification d'annotations : incrément ultérieur.
 
-pub(crate) mod engine; // [V10] moteur d'inférence constraint-based (en construction, non branché)
+pub(crate) mod engine; // [V10] moteur d'inférence constraint-based — résout params/retours non annotés
 pub(crate) mod flow;
 mod local;
-pub(crate) mod params;
 
 use crate::ir::*;
 use std::collections::HashMap;

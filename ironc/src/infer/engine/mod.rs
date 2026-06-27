@@ -19,12 +19,25 @@ mod generalize;
 mod solve;
 
 use crate::ir::*;
-use std::collections::HashMap;
+use std::collections::HashSet;
 
-/// Entrée du moteur (D1) : AST + bindings → `TypeMap` complète, ou erreur de type Iron (D8).
-/// Stub en vague 1 (non appelé) ; orchestré en vague 4.
-#[allow(dead_code)]
-pub fn infer_types(ast: &Ast, bindings: &Bindings) -> Result<TypeMap, CompileError> {
-    let _ = (ast, bindings);
-    Ok(HashMap::new())
+/// **Résolution des types de params/retours non annotés** par le moteur de contraintes (subsume
+/// `params.rs`). Mute l'AST (remplit les sentinelles) ; `local`/`flow`/`lower` tournent ensuite inchangés.
+/// Pipeline : `build_env` → `gen` (contraintes) → `solve` (unification) → defaulting → `writeback`.
+pub fn resolve_params(ast: &mut Ast, bindings: &Bindings) -> Result<(), CompileError> {
+    let mut subst = subst::Subst::new();
+    let env = assume::build_env(ast, bindings, &mut subst);
+
+    let cs = {
+        let mut g = gen::Gen::new(&env, &mut subst);
+        g.program(ast);
+        g.cs
+    };
+
+    solve::solve(&cs, &mut subst); // best-effort (rustc reste le filet, D7) ; diagnostics stricts = `check`
+
+    let used: HashSet<u32> = (0..subst.vars()).collect();
+    generalize::default_free_vars(&cs, &mut subst, &used, &env.ret_vars);
+    generalize::writeback(ast, &env, &subst);
+    Ok(())
 }

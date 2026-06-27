@@ -73,8 +73,6 @@ pub fn compile(src: &str, file: FileId, base_dir: &Path) -> CResult<Compiled> {
         )));
     }
     ast.extern_types = ext;
-    // 20500 : résoudre les types de paramètres non annotés (pré-passe, réécrit l'AST) avant tout le reste.
-    infer::params::resolve_param_types(&mut ast);
     let mut bindings = load_bindings(&ast.imports, base_dir)?;
     // fusion du registre curé (std…).
     bindings.fns.extend(curated.fns);
@@ -87,6 +85,9 @@ pub fn compile(src: &str, file: FileId, base_dir: &Path) -> CResult<Compiled> {
     if has_async && !bindings.crates.iter().any(|(n, _, _)| n == "tokio") {
         bindings.crates.push(("tokio".to_string(), "1".to_string(), vec!["full".to_string()]));
     }
+    // V10 (21700+) : moteur d'inférence — résout les types de params/retours non annotés (par contraintes,
+    // lit les bindings). Réécrit l'AST avant inférence locale (subsume l'ancienne pré-passe `params`).
+    infer::engine::resolve_params(&mut ast, &bindings)?;
     let types = infer::infer(&ast, &bindings);
     let (own, param_modes) = resolve::resolve(&ast, &types);
     let (ts, sm, audit) = lower::lower(&ast, &types, &own, &param_modes, &bindings);
