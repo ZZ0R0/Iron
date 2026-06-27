@@ -29,13 +29,67 @@ pub fn resolve_params(ast: &mut Ast, bindings: &Bindings) -> Result<(), CompileE
     // `build_env` alloue les vars de params/retours une fois → ids `< boundary` **stables** d'un tour à
     // l'autre. Chaque tour repart d'une `Subst` neuve (`with_next(boundary)`), seule la promotion persiste.
     let mut counter = subst::Subst::new();
-    let env = assume::build_env(ast, bindings, &mut counter);
+    let mut env = assume::build_env(ast, bindings, &mut counter);
+    let pre_boundary = counter.vars();
+
+    let mut promoted = promote::Promoted::new();
+
+    // Pré-passe DA-2 (anti-unification) : avant de figer `boundary`, on collecte par var de param ses types
+    // d'appel et on anti-unifie. Deux instances structurellement semblables divergeant à une position
+    // (`list[i64]`/`list[str]`) → la **shape** `list[T]` est injectée dans l'env (la var `T` promue) ; le
+    // param n'est plus promu entier mais **généralisé à la position**. Conflit à plat (`i64`/`str`) → shape
+    // = var nue → laissé à la promotion-entière de la boucle.
+    {
+        let mut pre = subst::Subst::with_next(pre_boundary);
+        let pre_cs = {
+            let mut g = gen::Gen::new(&env, &mut pre, &promoted);
+            g.program(ast);
+            g.cs
+        };
+        let _ = promote::solve_and_detect(&pre_cs, &mut pre, pre_boundary);
+        let mut inst: std::collections::HashMap<u32, Vec<Type>> = std::collections::HashMap::new();
+        for c in &pre_cs {
+            if let constraint::Constraint::Eq(a, b, _) = c {
+                if let Type::Var(v) = a {
+                    if *v < pre_boundary {
+                        inst.entry(*v).or_default().push(pre.apply(b));
+                    }
+                }
+                if let Type::Var(v) = b {
+                    if *v < pre_boundary {
+                        inst.entry(*v).or_default().push(pre.apply(a));
+                    }
+                }
+            }
+        }
+        for (v, types) in inst {
+            let mut distinct: Vec<Type> = Vec::new();
+            for t in types {
+                if !distinct.contains(&t) {
+                    distinct.push(t);
+                }
+            }
+            if distinct.len() < 2 {
+                continue;
+            }
+            let mut fresh = Vec::new();
+            let mut shape = distinct[0].clone();
+            for t in &distinct[1..] {
+                shape = promote::anti_unify(&shape, t, &mut counter, &mut fresh);
+            }
+            // structuré (constructeur partagé + ≥1 position généralisée) → injecter ; sinon promotion entière.
+            if !matches!(shape, Type::Var(_)) && !fresh.is_empty() {
+                env.replace_param_var(v, &shape);
+                promoted.extend(fresh);
+            }
+        }
+    }
+
     let boundary = counter.vars();
 
     // Boucle de point fixe (V10.1, D-g/D-a) : génère → unifie → détecte les conflits de params → promeut →
     // recommence, jusqu'à stabilité. Bornée (garde-fou anti-boucle ; converge car la promotion ne fait que
     // relâcher). En vague 1 : `gen` freshise tout (V10) → aucun conflit → un seul tour.
-    let mut promoted = promote::Promoted::new();
     let (mut subst, mut cs);
     let mut guard = 0;
     loop {

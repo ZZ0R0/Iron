@@ -34,6 +34,54 @@ pub fn solve_and_detect(cs: &[Constraint], subst: &mut Subst, boundary: u32) -> 
     conflicts
 }
 
+/// Anti-unification (LGG, DA-2) de deux types : positions **communes** conservées, positions **divergentes**
+/// → une var fraîche (allouée via `subst`, id poussé dans `fresh`). Constructeurs différents (ou arités
+/// différentes) → généralisation **totale** à cette position (var fraîche). Best-effort, structurel.
+/// `list[i64]` ∧ `list[str]` = `list[T]` ; `i64` ∧ `str` = `T` (bare) ; `list[i64]` ∧ `list[i64]` = `list[i64]`.
+pub fn anti_unify(a: &Type, b: &Type, subst: &mut Subst, fresh: &mut Vec<u32>) -> Type {
+    use Type::*;
+    if a == b {
+        return a.clone();
+    }
+    let au = |x: &Type, y: &Type, subst: &mut Subst, fresh: &mut Vec<u32>| {
+        Box::new(anti_unify(x, y, subst, fresh))
+    };
+    match (a, b) {
+        (List(x), List(y)) => List(au(x, y, subst, fresh)),
+        (Set(x), Set(y)) => Set(au(x, y, subst, fresh)),
+        (Option(x), Option(y)) => Option(au(x, y, subst, fresh)),
+        (Result(x), Result(y)) => Result(au(x, y, subst, fresh)),
+        (Ref(x), Ref(y)) => Ref(au(x, y, subst, fresh)),
+        (Shared(x), Shared(y)) => Shared(au(x, y, subst, fresh)),
+        (SharedSync(x), SharedSync(y)) => SharedSync(au(x, y, subst, fresh)),
+        (Weak(x), Weak(y)) => Weak(au(x, y, subst, fresh)),
+        (ResultE(x1, e1), ResultE(x2, e2)) => {
+            let t = au(x1, x2, subst, fresh);
+            let e = au(e1, e2, subst, fresh);
+            ResultE(t, e)
+        }
+        (Dict(k1, v1), Dict(k2, v2)) => {
+            let k = au(k1, k2, subst, fresh);
+            let v = au(v1, v2, subst, fresh);
+            Dict(k, v)
+        }
+        (Tuple(xs), Tuple(ys)) if xs.len() == ys.len() => {
+            Tuple(xs.iter().zip(ys).map(|(x, y)| anti_unify(x, y, subst, fresh)).collect())
+        }
+        (App(n1, xs), App(n2, ys)) if n1 == n2 && xs.len() == ys.len() => {
+            App(n1.clone(), xs.iter().zip(ys).map(|(x, y)| anti_unify(x, y, subst, fresh)).collect())
+        }
+        // constructeurs incompatibles → position entièrement généralisée.
+        _ => {
+            let f = subst.fresh();
+            if let Type::Var(id) = f {
+                fresh.push(id);
+            }
+            f
+        }
+    }
+}
+
 /// Vars de params (`id < boundary`) apparaissant **syntaxiquement** dans un type (avant résolution).
 fn param_vars_of(t: &Type, boundary: u32) -> Vec<u32> {
     let mut out = Vec::new();

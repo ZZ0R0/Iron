@@ -32,6 +32,45 @@ pub struct Env {
     pub ret_vars: HashSet<u32>,
 }
 
+impl Env {
+    /// DA-2 : remplace la var de param `v` par sa **shape** anti-unifiée (`list[T]`…) partout dans les
+    /// signatures (params **et** retours — un retour structurel partage la var). Appelé avant la boucle de
+    /// point fixe ; les vars fraîches de la shape sont promues → freshisées par appel.
+    pub fn replace_param_var(&mut self, v: u32, shape: &Type) {
+        for sig in self.fns.values_mut() {
+            sig.params.iter_mut().for_each(|p| replace_var(p, v, shape));
+            replace_var(&mut sig.ret, v, shape);
+        }
+        for sig in self.methods.values_mut() {
+            sig.params.iter_mut().for_each(|p| replace_var(p, v, shape));
+            replace_var(&mut sig.ret, v, shape);
+        }
+    }
+}
+
+/// Substitue `Var(v)` → `shape` dans un type (récursif, toutes positions).
+fn replace_var(t: &mut Type, v: u32, shape: &Type) {
+    match t {
+        Type::Var(id) if *id == v => *t = shape.clone(),
+        Type::Option(x) | Type::Result(x) | Type::List(x) | Type::Set(x) | Type::Shared(x)
+        | Type::SharedSync(x) | Type::Weak(x) | Type::Ref(x) => replace_var(x, v, shape),
+        Type::ResultE(x, e) => {
+            replace_var(x, v, shape);
+            replace_var(e, v, shape);
+        }
+        Type::Dict(k, val) => {
+            replace_var(k, v, shape);
+            replace_var(val, v, shape);
+        }
+        Type::Tuple(xs) | Type::App(_, xs) => xs.iter_mut().for_each(|x| replace_var(x, v, shape)),
+        Type::Fn(ps, r) => {
+            ps.iter_mut().for_each(|x| replace_var(x, v, shape));
+            replace_var(r, v, shape);
+        }
+        _ => {}
+    }
+}
+
 /// Type non annoté ? (sentinelle param) → métavariable fraîche. Sinon → garde le type déclaré.
 fn var_if_infer(t: &Type, subst: &mut Subst) -> Type {
     match t {

@@ -131,8 +131,12 @@ impl<'a> Gen<'a> {
                 self.block(scope, ret, els);
             }
             StmtKind::Match { scrutinee, arms } => {
-                self.expr(scope, scrutinee);
+                let st = self.expr(scope, scrutinee);
                 for a in arms {
+                    self.pat_constrain(scope, &st, &a.pattern, scrutinee.span); // DA-1 : motif informe le scrutateur
+                    if let Some(g) = &a.guard {
+                        self.expr(scope, g);
+                    }
                     self.block(scope, ret, &a.body);
                 }
             }
@@ -156,6 +160,56 @@ impl<'a> Gen<'a> {
                 }
             }
             StmtKind::Break | StmtKind::Continue | StmtKind::Pass | StmtKind::RustBlock(_) => {}
+        }
+    }
+
+    /// DA-1 : un motif de variante **informe** le scrutateur (`Eq(scrut, Enum)`) et lie ses sous-motifs aux
+    /// types des champs de la variante (`r ← i64` dans `Shape.Circle(r)`). Some/Ok/Err (chemin à 1 segment)
+    /// laissés au flux/`local`. Best-effort : variante non résolue → sous-vars fraîches.
+    fn pat_constrain(&mut self, scope: &mut Scope, scrut: &Type, p: &Pattern, sp: Span) {
+        match p {
+            Pattern::Var(n) => {
+                scope.insert(n.clone(), scrut.clone());
+            }
+            Pattern::Variant { path, sub } => {
+                let fields: Option<Vec<Type>> = match path.as_slice() {
+                    [en, var] if self.env.enums.contains_key(en) => {
+                        self.eq(scrut.clone(), Type::Enum(en.clone()), sp);
+                        self.env
+                            .enums
+                            .get(en)
+                            .and_then(|vs| vs.iter().find(|(v, _)| v == var))
+                            .map(|(_, f)| f.clone())
+                    }
+                    _ => None,
+                };
+                match fields {
+                    Some(fts) => {
+                        for (sp_pat, ft) in sub.iter().zip(fts.iter()) {
+                            self.pat_constrain(scope, ft, sp_pat, sp);
+                        }
+                    }
+                    None => {
+                        for sp_pat in sub {
+                            let f = self.fresh();
+                            self.pat_constrain(scope, &f, sp_pat, sp);
+                        }
+                    }
+                }
+            }
+            Pattern::Tuple(subs) => {
+                for sp_pat in subs {
+                    let f = self.fresh();
+                    self.pat_constrain(scope, &f, sp_pat, sp);
+                }
+            }
+            // or-pattern : alternatives liant les mêmes vars (mêmes types) → la 1ʳᵉ suffit.
+            Pattern::Or(alts) => {
+                if let Some(first) = alts.first() {
+                    self.pat_constrain(scope, scrut, first, sp);
+                }
+            }
+            Pattern::Wild | Pattern::Lit(_) | Pattern::Range(..) => {}
         }
     }
 
@@ -240,6 +294,12 @@ impl<'a> Gen<'a> {
                 Type::Struct(name.clone())
             }
             ExprKind::Field { base, name } => {
+                // DA-1 : variante nullaire d'enum `Enum.Variant` (base = nom d'enum connu) → type `Enum`.
+                if let ExprKind::Var(bn) = &base.kind {
+                    if self.env.enums.get(bn).is_some_and(|vs| vs.iter().any(|(v, _)| v == name)) {
+                        return Type::Enum(bn.clone());
+                    }
+                }
                 let tb = self.expr(scope, base);
                 match self.subst.apply(&tb) {
                     Type::Struct(s) => self
@@ -396,6 +456,24 @@ impl<'a> Gen<'a> {
     fn call(&mut self, scope: &mut Scope, callee: &Expr, args: &[Expr], sp: Span) -> Type {
         // Méthode : `base.m(args)`
         if let ExprKind::Field { base, name } = &callee.kind {
+            // DA-1 : `Enum.Variant(args)` (base = nom d'un enum connu, `name` = variante) → **construction**,
+            // typée `Enum` + args unifiés aux champs de la variante. Distinction d'avec `obj.method(...)` :
+            // la base est le **nom d'un enum** connu (sinon → méthode). Cloné pour libérer l'emprunt de `env`.
+            if let ExprKind::Var(bn) = &base.kind {
+                let variant_fields = self
+                    .env
+                    .enums
+                    .get(bn)
+                    .and_then(|vs| vs.iter().find(|(v, _)| v == name))
+                    .map(|(_, f)| f.clone());
+                if let Some(fields) = variant_fields {
+                    let arg_ts: Vec<Type> = args.iter().map(|a| self.expr(scope, a)).collect();
+                    for (at, ft) in arg_ts.iter().zip(fields.iter()) {
+                        self.eq(at.clone(), ft.clone(), sp);
+                    }
+                    return Type::Enum(bn.clone());
+                }
+            }
             let tb = self.expr(scope, base);
             let arg_ts: Vec<Type> = args.iter().map(|a| self.expr(scope, a)).collect();
             if let Type::Struct(s) | Type::Extern(s) = self.subst.apply(&tb) {

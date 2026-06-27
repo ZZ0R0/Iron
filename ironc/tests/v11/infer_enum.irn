@@ -1,0 +1,23 @@
+# V11 vague 6.1 — DA-1 (construction d'enum typée + scrutateur informé) + DA-2 (anti-unification).
+enum Shape:
+    Circle(i64)
+    Rect(i64, i64)
+
+# ZÉRO annotation : `s` est inféré `Shape` car le match nomme ses variantes,
+# et l'appel passe `Shape.Circle(2)` (construction typée Shape).
+def area(s):
+    match s:
+        Shape.Circle(r):
+            return r * r * 3
+        Shape.Rect(w, h):
+            return w * h
+
+# ZÉRO annotation : `xs` appelé en list[i64] ET list[str] → anti-unifié list[T].
+def count(xs):
+    return len(xs)
+
+def main():
+    print(area(Shape.Circle(2)))
+    print(area(Shape.Rect(3, 4)))
+    print(count([1, 2, 3]))
+    print(count(["a", "b"]))
