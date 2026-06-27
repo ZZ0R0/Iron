@@ -1,0 +1,5 @@
+def label(prefix, n):
+    return f"{prefix}={n}"
+def main():
+    print(label("a", "b"))
+    print(label("c", "d"))

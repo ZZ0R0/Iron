@@ -38,6 +38,12 @@ impl Subst {
         self.next
     }
 
+    /// Nombre de vars de **params/retours** (`id < boundary`) déjà liées — sert à détecter le point fixe de
+    /// la **résolution structurelle** (V10.1, D-g) : tant que ça augmente, re-générer résout plus.
+    pub fn bound_below(&self, boundary: u32) -> usize {
+        self.map.keys().filter(|&&v| v < boundary).count()
+    }
+
     /// Lie `Var(v)` à `ty` (suppose `v` non encore lié et `occurs_check` déjà fait par l'appelant).
     pub fn bind(&mut self, v: u32, ty: Type) {
         self.map.insert(v, ty);

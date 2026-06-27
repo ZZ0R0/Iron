@@ -1815,8 +1815,12 @@ fn lower_generics(gens: &Generics) -> TokenStream {
         .map(|(n, bounds)| {
             let id = format_ident!("{}", n);
             // Borne `Clone` par défaut (V9.1, 21400) : la sémantique-valeur d'Iron (I1) clone → `T: Clone`.
-            let bs: Vec<proc_macro2::Ident> = bounds.iter().map(|b| format_ident!("{}", b)).collect();
-            if bounds.is_empty() {
+            // Les bornes sont des **chemins** (`std::fmt::Display`…) → parsées comme TokenStream (V10.1, R2).
+            let bs: Vec<TokenStream> = bounds
+                .iter()
+                .map(|b| TokenStream::from_str(b).unwrap_or_else(|_| quote! { Clone }))
+                .collect();
+            if bs.is_empty() {
                 quote! { #id: Clone }
             } else {
                 quote! { #id: Clone + #(#bs)+* }

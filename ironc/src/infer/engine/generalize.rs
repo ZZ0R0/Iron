@@ -12,7 +12,7 @@ use crate::ir::*;
 use std::collections::{HashMap, HashSet};
 
 /// Bornes accumulées par métavariable (après application de la subst).
-fn var_bounds(cs: &[Constraint], subst: &Subst) -> HashMap<u32, HashSet<&'static str>> {
+pub fn var_bounds(cs: &[Constraint], subst: &Subst) -> HashMap<u32, HashSet<&'static str>> {
     let mut m: HashMap<u32, HashSet<&'static str>> = HashMap::new();
     for c in cs {
         if let Constraint::Trait(t, b, _) = c {
@@ -27,7 +27,13 @@ fn var_bounds(cs: &[Constraint], subst: &Subst) -> HashMap<u32, HashSet<&'static
 
 /// Décide le type d'une var libre puis le **lie** dans la subst (defaulting global, fait une fois).
 /// Les vars sans contrainte exploitable deviennent un générique implicite `__T{v}`.
-pub fn default_free_vars(cs: &[Constraint], subst: &mut Subst, used_vars: &HashSet<u32>, ret_vars: &HashSet<u32>) {
+pub fn default_free_vars(
+    cs: &[Constraint],
+    subst: &mut Subst,
+    used_vars: &HashSet<u32>,
+    ret_vars: &HashSet<u32>,
+    promoted: &HashSet<u32>,
+) {
     let bounds = var_bounds(cs, subst);
     for &v in used_vars {
         if subst.is_bound(v) {
@@ -35,6 +41,10 @@ pub fn default_free_vars(cs: &[Constraint], subst: &mut Subst, used_vars: &HashS
         }
         // la var peut être liée transitivement → re-vérifier via apply
         if !matches!(subst.apply(&Type::Var(v)), Type::Var(w) if w == v) {
+            continue;
+        }
+        // Var **promue** (V10.1) : ne PAS défauter — elle deviendra un générique **borné** au writeback.
+        if promoted.contains(&v) {
             continue;
         }
         let _ = ret_vars; // (les retours sans valeur ne reçoivent plus de var — voir assume.rs)
@@ -104,9 +114,35 @@ fn collect_implicit_generics(t: &Type, out: &mut Vec<String>) {
     }
 }
 
+/// Borne de trait (nom interne) → **chemin Rust** pour un générique implicite (V10.1, R2). On ne porte que
+/// les bornes qui s'appliquent **proprement** à un générique (`Display`/`PartialOrd`/`PartialEq`) ; les
+/// bornes arithmétiques sur un générique (`T + 1`) sont trop fines → laissées au filet `rustc`.
+fn rust_bound(name: &str) -> Option<&'static str> {
+    match name {
+        "Display" => Some("std::fmt::Display"),
+        "Ord" => Some("PartialOrd"),
+        "Eq" => Some("PartialEq"),
+        _ => None,
+    }
+}
+
+/// Bornes Rust d'un générique implicite `__T{v}` d'après les bornes accumulées de la var `v`.
+fn bounds_for(generic: &str, bounds: &HashMap<u32, HashSet<&'static str>>) -> Vec<String> {
+    let Some(v) = generic.strip_prefix("__T").and_then(|s| s.parse::<u32>().ok()) else {
+        return Vec::new();
+    };
+    let mut out: Vec<String> = bounds
+        .get(&v)
+        .map(|bs| bs.iter().filter_map(|b| rust_bound(b)).map(String::from).collect())
+        .unwrap_or_default();
+    out.sort();
+    out.dedup();
+    out
+}
+
 /// Réécrit dans l'AST les types de params/retours **non annotés** (sentinelle / `Unit`), résolus par le
-/// moteur. Ajoute les génériques implicites nécessaires. Subsume `params.rs`.
-pub fn writeback(ast: &mut Ast, env: &Env, subst: &Subst) {
+/// moteur. Ajoute les génériques implicites nécessaires, **bornés** (R2) d'après leurs contraintes.
+pub fn writeback(ast: &mut Ast, env: &Env, subst: &Subst, bounds: &HashMap<u32, HashSet<&'static str>>) {
     for it in &mut ast.items {
         match &mut it.kind {
             ItemKind::Fn { name, generics, params, ret, .. } => {
@@ -129,7 +165,8 @@ pub fn writeback(ast: &mut Ast, env: &Env, subst: &Subst) {
                 }
                 for g in implicit {
                     if !generics.iter().any(|(n, _)| n == &g) {
-                        generics.push((g, Vec::new()));
+                        let b = bounds_for(&g, bounds);
+                        generics.push((g, b));
                     }
                 }
             }

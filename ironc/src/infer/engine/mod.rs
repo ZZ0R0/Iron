@@ -54,10 +54,31 @@ pub fn resolve_params(ast: &mut Ast, bindings: &Bindings) -> Result<(), CompileE
         promoted.extend(fresh_conflicts);
     }
 
-    // Defaulting **en dernier** (D-j), après convergence.
+    // Résolution structurelle (V10.1, D-g) : on **re-génère en gardant la `Subst`** (params déjà liés par
+    // les appels). Les accès `x.name` / `obj.m()` / `xs[i]` qui s'étaient « abstenus » au 1ᵉʳ tour (base
+    // inconnue) se résolvent maintenant ; un `return x.name` devient concret. Point fixe : tant que de
+    // nouvelles vars de params/retours se lient.
+    let mut sguard = 0;
+    loop {
+        let before = subst.bound_below(boundary);
+        cs = {
+            let mut g = gen::Gen::new(&env, &mut subst, &promoted);
+            g.program(ast);
+            g.cs
+        };
+        promote::solve_and_detect(&cs, &mut subst, boundary);
+        sguard += 1;
+        if subst.bound_below(boundary) == before || sguard > 20 {
+            break;
+        }
+    }
+
+    // Defaulting **en dernier** (D-j), après convergence. Les vars promues restent libres → génériques
+    // **bornés** (R2) au writeback ; les autres libres sont défautées (num→i64, Display→str, sinon générique).
+    let bounds = generalize::var_bounds(&cs, &subst);
     let used: HashSet<u32> = (0..subst.vars()).collect();
-    generalize::default_free_vars(&cs, &mut subst, &used, &env.ret_vars);
-    generalize::writeback(ast, &env, &subst);
+    generalize::default_free_vars(&cs, &mut subst, &used, &env.ret_vars, &promoted);
+    generalize::writeback(ast, &env, &subst, &bounds);
     Ok(())
 }
 

@@ -190,7 +190,17 @@ impl<'a> Gen<'a> {
                 }
                 Type::Str
             }
-            ExprKind::Var(n) => scope.get(n).cloned().unwrap_or_else(|| self.fresh()),
+            ExprKind::Var(n) => {
+                // local/param du scope ; sinon une **fonction utilisée comme valeur** (HOF) → son type `fn`.
+                if let Some(t) = scope.get(n) {
+                    t.clone()
+                } else if let Some(sig) = self.env.fns.get(n).cloned() {
+                    let (ps, r) = self.instantiate(&sig);
+                    Type::Fn(ps, Box::new(r))
+                } else {
+                    self.fresh()
+                }
+            }
             ExprKind::Unary { op, expr } => {
                 let t = self.expr(scope, expr);
                 match op {
@@ -383,6 +393,13 @@ impl<'a> Gen<'a> {
         // Appel nommé
         let arg_ts: Vec<Type> = args.iter().map(|a| self.expr(scope, a)).collect();
         if let ExprKind::Var(fname) = &callee.kind {
+            // HOF (D-h) : `fname` est un **param/local** (dans le scope) appelé comme fonction → il a un type
+            // `fn(args) -> ret`. La vraie fonction passée au site d'appel fixera ce type.
+            if let Some(ft) = scope.get(fname).cloned() {
+                let ret = self.fresh();
+                self.eq(ft, Type::Fn(arg_ts.clone(), Box::new(ret.clone())), sp);
+                return ret;
+            }
             if let Some(t) = self.builtin_call(fname, &arg_ts, sp) {
                 return t;
             }

@@ -1,0 +1,5 @@
+def make_pair(a, b):
+    return [a, b]
+def main():
+    print(make_pair(1, 2))
+    print(make_pair("x", "y"))
