@@ -417,11 +417,16 @@ impl<'a> Gen<'a> {
         (params, ret)
     }
 
-    /// Copie un type en remplaçant `Generic(g)`/`Var(v)` par des fraîches (maps partagés pour la cohérence).
+    /// Copie un type en remplaçant `Generic(g)` (générique **déclaré**) et `Var(v)` **promue** par des
+    /// fraîches (maps partagés pour la cohérence). Une `Var(v)` **non promue** est **gardée telle quelle**
+    /// (monomorphe : l'arg s'unifiera avec la **vraie** var du param — V10.1, D-a).
     fn freshen(&mut self, t: &Type, gmap: &mut HashMap<String, Type>, vmap: &mut HashMap<u32, Type>) -> Type {
         match t {
             Type::Generic(g) => gmap.entry(g.clone()).or_insert_with(|| self.subst.fresh()).clone(),
-            Type::Var(v) => vmap.entry(*v).or_insert_with(|| self.subst.fresh()).clone(),
+            Type::Var(v) if self.promoted.contains(v) => {
+                vmap.entry(*v).or_insert_with(|| self.subst.fresh()).clone()
+            }
+            Type::Var(v) => Type::Var(*v), // monomorphe : on conserve la vraie var du param
             Type::Option(x) => Type::Option(Box::new(self.freshen(x, gmap, vmap))),
             Type::Result(x) => Type::Result(Box::new(self.freshen(x, gmap, vmap))),
             Type::ResultE(x, e) => {
