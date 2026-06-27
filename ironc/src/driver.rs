@@ -88,6 +88,9 @@ pub fn compile(src: &str, file: FileId, base_dir: &Path) -> CResult<Compiled> {
     // V10 (21700+) : moteur d'inférence — résout les types de params/retours non annotés (par contraintes,
     // lit les bindings). Réécrit l'AST avant inférence locale (subsume l'ancienne pré-passe `params`).
     infer::engine::resolve_params(&mut ast, &bindings)?;
+    // Diagnostic de type Iron natif (D8/22200) : conflits de primitives signalés sur la ligne Iron, avant
+    // `rustc` (qui reste le filet pour le reste, D7). Conservateur (zéro faux-positif sur le corpus).
+    infer::engine::check_types(&ast, &bindings)?;
     let types = infer::infer(&ast, &bindings);
     let (own, param_modes) = resolve::resolve(&ast, &types);
     let (ts, sm, audit) = lower::lower(&ast, &types, &own, &param_modes, &bindings);

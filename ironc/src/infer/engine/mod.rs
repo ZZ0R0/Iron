@@ -41,3 +41,33 @@ pub fn resolve_params(ast: &mut Ast, bindings: &Bindings) -> Result<(), CompileE
     generalize::writeback(ast, &env, &subst);
     Ok(())
 }
+
+/// **Diagnostic de type Iron** (D8/22200) pour `ironc check` : signale les **conflits entre primitives
+/// concrètes** (`str` vs `i64`…) sur la ligne Iron, avant `rustc`. Volontairement conservateur — les
+/// conflits structurels (génériques/struct/var) sont laissés au filet `rustc` (D7), pas de faux-positif.
+pub fn check_types(ast: &Ast, bindings: &Bindings) -> Result<(), CompileError> {
+    let mut subst = subst::Subst::new();
+    let env = assume::build_env(ast, bindings, &mut subst);
+    let cs = {
+        let mut g = gen::Gen::new(&env, &mut subst);
+        g.program(ast);
+        g.cs
+    };
+    for c in &cs {
+        if let constraint::Constraint::Eq(a, b, sp) = c {
+            let (ra, rb) = (subst.apply(a), subst.apply(b));
+            if is_primitive(&ra) && is_primitive(&rb) && ra != rb {
+                return Err(CompileError {
+                    span: Some(*sp),
+                    msg: format!("type : `{}` attendu, trouvé `{}`", solve::show(&rb), solve::show(&ra)),
+                });
+            }
+            let _ = solve::unify(a.clone(), b.clone(), *sp, &mut subst); // best-effort pour la suite
+        }
+    }
+    Ok(())
+}
+
+fn is_primitive(t: &Type) -> bool {
+    matches!(t, Type::I64 | Type::F64 | Type::Str | Type::Bool | Type::Char)
+}
