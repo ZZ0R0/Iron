@@ -147,6 +147,8 @@ fn ty(t: &Type) -> String {
         Type::Char => "char".into(),
         Type::Struct(n) | Type::Enum(n) | Type::Generic(n) => n.clone(),
         Type::Extern(p) => p.clone(),
+        Type::ExternApp(p, args) if args.is_empty() => p.clone(),
+        Type::ExternApp(p, args) => format!("{}[{}]", p, args.iter().map(ty).collect::<Vec<_>>().join(", ")),
         Type::Option(x) => format!("Option[{}]", ty(x)),
         Type::Result(x) => format!("Result[{}]", ty(x)),
         Type::ResultE(x, e) => format!("Result[{}, {}]", ty(x), ty(e)),

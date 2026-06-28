@@ -243,6 +243,17 @@ impl P {
 
     fn parse_type_decl(&mut self, b: &mut Bindings) -> CResult<()> {
         let name = self.ident()?;
+        // Paramètres de type : `extern type Point[T, U] = …` (V12, [24000]). Optionnel (rétro-compat).
+        let mut params = Vec::new();
+        if self.eat(&TokenKind::LBracket) {
+            while !self.is(&TokenKind::RBracket) {
+                params.push(self.ident()?);
+                if !self.eat(&TokenKind::Comma) {
+                    break;
+                }
+            }
+            self.expect(&TokenKind::RBracket, "`]`")?;
+        }
         self.expect(&TokenKind::Assign, "`=`")?;
         let path = self.string()?;
         // **first-wins** sur collision de nom court : le crate **principal** est émis avant les sources de
@@ -251,7 +262,7 @@ impl P {
         b.types.entry(name.clone()).or_insert_with(|| path.clone());
         // Bloc indenté → type à API.
         if self.eat(&TokenKind::Colon) {
-            let mut et = ExternType { rust_path: path.clone(), ..Default::default() };
+            let mut et = ExternType { rust_path: path.clone(), params: params.clone(), ..Default::default() };
             self.skip_nl();
             if self.eat(&TokenKind::Indent) {
                 loop {
@@ -390,7 +401,22 @@ impl P {
             }
             // tuple `(A, B, …)` — non géré ici si la grammaire `.iri` n'ouvre pas par `(` ; les tuples
             // arrivent via la projection bind. Nom inconnu → type externe (résolu après coup).
-            other => Ok(Type::Extern(other.to_string())),
+            // `Name[args]` (V12, [24000]) → type externe **générique appliqué** (`ExternApp`).
+            other => {
+                if self.eat(&TokenKind::LBracket) {
+                    let mut args = Vec::new();
+                    while !self.is(&TokenKind::RBracket) {
+                        args.push(self.parse_type()?);
+                        if !self.eat(&TokenKind::Comma) {
+                            break;
+                        }
+                    }
+                    self.expect(&TokenKind::RBracket, "`]`")?;
+                    Ok(Type::ExternApp(other.to_string(), args))
+                } else {
+                    Ok(Type::Extern(other.to_string()))
+                }
+            }
         }
     }
 }
@@ -407,6 +433,15 @@ fn resolve_extern(t: &mut Type, types: &std::collections::HashMap<String, String
         Type::Extern(name) => {
             if let Some(path) = types.get(name) {
                 *name = path.clone();
+            }
+        }
+        // `ExternApp(name, args)` (V12) : résoudre le nom → chemin Rust ET récurser dans les args.
+        Type::ExternApp(name, args) => {
+            if let Some(path) = types.get(name) {
+                *name = path.clone();
+            }
+            for a in args {
+                resolve_extern(a, types);
             }
         }
         Type::List(e) | Type::Option(e) | Type::Result(e) | Type::Set(e) => resolve_extern(e, types),

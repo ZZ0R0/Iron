@@ -149,6 +149,9 @@ pub enum Type {
     ResultE(Box<Type>, Box<Type>),
     /// Type Rust opaque (interop 50200) — stocke le chemin Rust.
     Extern(String),
+    /// Type Rust externe **générique appliqué** (V12, [24000]) : `(rust_path, args)` → `rust_path::<args>` au
+    /// lowering. `args` vide ⇒ équivalent `Extern`. Porte les paramètres de type jadis jetés (`Point<f64>`).
+    ExternApp(String, Vec<Type>),
     /// Enum utilisateur (V3, 20300).
     Enum(String),
     /// Paramètre de type générique opaque (V3, 20300).
@@ -515,6 +518,9 @@ pub struct ExternType {
     pub fields: Vec<(String, Type)>,
     /// Variantes d'un enum externe : `path::Variant` au lowering.
     pub variants: Vec<String>,
+    /// Paramètres de type du type externe (V12, [24000]) : `extern type Point[T] = …` → `["T"]`. Base de la
+    /// **substitution** en inférence (`Point[f64]`.méthode rendant `T` → `f64`). Vide = type non générique.
+    pub params: Vec<String>,
 }
 
 /// Bindings chargés depuis les `.iri` importés (50200, étendu V8 50900).

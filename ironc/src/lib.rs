@@ -5,6 +5,7 @@
 //! Les vagues 2.x remplissent chaque module sans toucher à `ir`.
 
 pub mod bind;
+pub mod bridge;
 pub mod ir;
 pub mod iri;
 pub mod lex;

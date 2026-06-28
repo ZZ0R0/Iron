@@ -2444,6 +2444,16 @@ fn lower_type(t: &Type) -> TokenStream {
             quote! { std::collections::HashMap<#k, #v> }
         }
         Type::Extern(path) => TokenStream::from_str(path).unwrap_or_else(|_| quote! { () }),
+        // Type externe générique appliqué (V12, [24000]) : `rust_path::<args>` ; args vide ⇒ comme `Extern`.
+        Type::ExternApp(path, args) => {
+            let base = TokenStream::from_str(path).unwrap_or_else(|_| quote! { () });
+            if args.is_empty() {
+                base
+            } else {
+                let a: Vec<TokenStream> = args.iter().map(lower_type).collect();
+                quote! { #base::< #(#a),* > }
+            }
+        }
         Type::Enum(n) => {
             let id = format_ident!("{}", n);
             quote! { #id }
@@ -2499,22 +2509,9 @@ fn lower_type(t: &Type) -> TokenStream {
     }
 }
 
-/// Nom Rust d'un `NumKind` (V7, 20800).
+/// Nom Rust d'un `NumKind` (V7, 20800). Délègue au **pont** (V12, [24000] R1) : table canonique unique.
 fn num_kind_str(k: NumKind) -> &'static str {
-    match k {
-        NumKind::I8 => "i8",
-        NumKind::I16 => "i16",
-        NumKind::I32 => "i32",
-        NumKind::I128 => "i128",
-        NumKind::Isize => "isize",
-        NumKind::U8 => "u8",
-        NumKind::U16 => "u16",
-        NumKind::U32 => "u32",
-        NumKind::U64 => "u64",
-        NumKind::U128 => "u128",
-        NumKind::Usize => "usize",
-        NumKind::F32 => "f32",
-    }
+    crate::bridge::rust_num_name(k)
 }
 
 /// Coerce le côté `i64` (défaut Iron des littéraux) au type entier **dimensionné** de l'autre opérande :
@@ -2556,5 +2553,27 @@ fn lower_binop(op: BinOp) -> TokenStream {
         BinOp::Shr => quote! { >> },
         // Pow/FloorDiv/In/NotIn ne passent jamais par lower_binop (value(Binary) les spécial-case, 2.4/2.5).
         BinOp::Pow | BinOp::FloorDiv | BinOp::In | BinOp::NotIn => quote! { + },
+    }
+}
+
+#[cfg(test)]
+mod bridge_abi_tests {
+    use super::*;
+    use crate::ir::{NumKind, Type};
+
+    // [24000] vague 1 : l'ABI `ExternApp` abaisse `rust_path::<args>` ; args vide ⇒ chemin nu.
+    #[test]
+    fn extern_app_lowers_turbofish() {
+        let t = Type::ExternApp("geo::Point".into(), vec![Type::F64]);
+        assert_eq!(lower_type(&t).to_string(), quote! { geo::Point::<f64> }.to_string());
+
+        let nested = Type::ExternApp(
+            "nalgebra::Vector3".into(),
+            vec![Type::Num(NumKind::I32)],
+        );
+        assert_eq!(lower_type(&nested).to_string(), quote! { nalgebra::Vector3::<i32> }.to_string());
+
+        let empty = Type::ExternApp("scraper::Selector".into(), vec![]);
+        assert_eq!(lower_type(&empty).to_string(), quote! { scraper::Selector }.to_string());
     }
 }
