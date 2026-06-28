@@ -11,8 +11,8 @@
 | 2 | 2.1 | Prélude idiomes Iron (split()/slice−/join/ord/chr/count/char/…) | ✅ fait |
 | 3 | 3.1–3.16 | Fan-out bucket A (wc grep uniq cut tr nl fold rev tac comm seq od expand cksum factor sort) | ✅ fait (16/16) |
 | 4 | 4.1–4.14 | Fan-out bucket B (wordfreq sieve histogram naivesort csvsum rle jsonsum collatz editdist matmul gcdsum primecount dotproduct anagram) | ✅ fait (14/14) |
-| 5 | 5.1 | Unification + verdict (tableau perf, speedup géométrique, trous) | 🔄 en cours |
-| 6 | 6.1 | Bonus exotique threading (Rust vs GIL) — **optionnel** | ☐ todo |
+| 5 | 5.1 | Unification + verdict (tableau perf, speedup géométrique, trous) | ✅ fait (30/30 · 14.73×) |
+| 6 | 6.1 | Bonus exotique threading (Rust vs GIL) — **optionnel** | ⏸️ proposé (sur demande) |
 
 ## Invariants de réalisation
 
