@@ -24,6 +24,14 @@ Chaque crate réel a exposé un trou ; tous corrigés sans régresser le gate-v1
 | — | **Modules privés stdlib** (`core::ops::arith::Mul`, `core::str::traits::FromStr`) → collapse vers le re-export public. | binder | ✅ |
 | B13 | **Fns génériques** sautées en bloc → monomorphisation des bornes d'entrée (`impl AsRef<Path>` → `str`) + `Self` résolu. Débloque `new(path: impl AsRef<Path>)`. | binder | ✅ |
 | B14 | **Boucle `for` sur type externe** émettait `.iter()` (absent) → itération **par valeur** (`for x in #it`, couvre `IntoIterator` ET `Iterator`). | lower | ✅ |
+| B15 | **Dédup de variante** (`regex::Regex` vs `bytes::Regex`) → préférer le chemin public le plus court. | binder | ✅ |
+| B16 | **Impls blanket matérialisés** par type concret → liés (Digest/Read/Write…) ; générique du blanket = `Self` ; dédup **après** projection. | binder | ✅ |
+| B17 | **Struct/enum externes** : construction par littéral `S(champ=…)` + variantes `Enum.Variant`. | ir/binder/iri/infer/lower | ✅ |
+| B18 | **Arg externe par valeur** (`own T`) → pas de `&` (handle consommé, ex. `create(spec)`). | binder/lower | ✅ |
+| B19 | **Méthodes de trait sur primitif** (`"x".red()` → pseudo-type `__str`) + **méthodes fournies** (corps par défaut) d'un trait. | binder/infer/lower | ✅ |
+| — | **Binding multi-crate des façades** (52700) : `rustdoc -p geo_types` + fusion des re-exports. | binder | ✅ |
+| B20 | **Crate multi-cibles** : `cargo rustdoc` échouait → `--lib` (no-op si lib unique, ex. qrcode). | binder | ✅ |
+| B21 | **Param déstructuré** (`fn index(&self, (x, y): …)`) → nom non-identifiant → assaini en `argN`. | binder | ✅ |
 
 **Gains généraux B8/B9/B10/B12/B13/B14** (débloquent des classes entières) :
 - B8 → tout le motif `ctor().unwrap().méthode()` (omniprésent).
@@ -47,6 +55,13 @@ Chaque crate réel a exposé un trou ; tous corrigés sans régresser le gate-v1
 | 42 | Synthé / WAV | `hound` | ✅ **vert** | **B17** (struct/enum externes) + **B18** (arg par valeur) : écrit un WAV valide (`RIFF…WAVE`, en-tête 44 o, `sample_rate=44100`). Reste hors-mur : `write_sample<S: Sample>` (générique sur trait de crate). |
 | 05 | Renommeur regex | `regex` | ✅ **vert** (cœur) | **B15** : dédup retient `regex::Regex` (chemin court). `Regex.new("[0-9]+").unwrap()` → `is_match`/`find().as_str()` OK. `replace_all` reste non bindé (arg `R: Replacer` ; coercition `&String`→`&str` à part). |
 | 04 | Texte coloré | `colored` | ✅ **vert** | **B19** (méthodes de trait sur primitif `str` + méthodes fournies) : `"error".red()` → `\e[31m`, `"ok".green().bold()` → `\e[1;32m` (chaînage). |
+| 33 | Barres de progression | `indicatif` | ✅ **vert** | `ProgressBar.new(5).inc(2).finish()`. Débloqué par B16+B19 (sans nouveau fix). |
+| 11 | Carnet SQLite | `rusqlite` | ✅ **vert** | `Connection.open_in_memory().unwrap()` + `execute_batch("CREATE…INSERT…")`. 128 items bindés. |
+| 70 | Fuseaux horaires | `chrono-tz` | ✅ **vert** | `Tz.from_str("Europe/Paris").unwrap().name()` → `Europe/Paris`. |
+| 37 | Générateur QR | `qrcode` | ✅ **vert** | **B20** (`--lib` multi-cibles) + **B21** (param déstructuré → `argN`) : `QrCode.new(url).unwrap().width()` → `25`. |
+| 36/39 | Filtres / ASCII art | `image` | ✅ **vert** | `DynamicImage.new_rgb8(32,24).grayscale().save(p)` → PNG valide écrit, `width=32`. (via `DynamicImage` concret, pas l'alias générique `RgbImage`.) |
+| — | (sanity, hors-80) | `uuid` | ✅ **vert** | `Uuid.nil().to_string()` → `00000000-…`. |
+| 51 | Algèbre linéaire | `nalgebra` | 🟡 | `Vector3<T>` générique sur le **scalaire** → `Vector3.new` non bindé. **Même limite que geo → [24100]** (V12). |
 | 67 | Distances géo | `geo` | 🟡 | **Façade corrigée** (52700, binding multi-crate) → `Point` porte ses méthodes geo_types. **Mais** `Point<T: CoordNum>` est générique sur le **scalaire** en entrée *et* en sortie (`new(x: T)`, `distance() -> T`) → monomorphiser `T`→`f64` exigerait de reconnaître `CoordNum`/`Num` (traits de crate) : **interdit par la règle globale**. Limite dure. |
 | 63 | Gzip | `flate2` | 🔴 | **Modèle io.** Tout passe par `Write`/`Read`/`BufRead` (puits/sources d'octets streaming) + params `&mut Vec` (out-params) + variantes `read`/`write`/`bufread`. Même en mappant `Write`/`Read` (std) → `list[u8]`, l'usage cogne sur : littéraux `list[u8]` (la liste est `i64`), `&[u8]` vs `&Vec` pour `BufRead`, out-params. Stack de features hors sémantique par valeur d'Iron. **Limite de modèle** (chantier io V12). |
 
@@ -75,10 +90,15 @@ Tous corrigés en **règles globales** (zéro nom de crate) :
 
 ## Constat & cadence (honnête)
 
-- Le binder est **solide** et nettement durci : **10 crates réels verts** (whatlang, statrs, chrono,
-  num-bigint, walkdir, csv, regex, sha2, hound, colored), **B5–B19** (trous + features), dont les gros
-  gains généraux : B8/B9/B10/B12/B13/B14 + **blanket** (B16), **struct/enum externes** (B17), **arg par
-  valeur** (B18), **trait sur primitif + méthodes fournies** (B19). Le gate reste VERT à chaque pas.
+- Le binder est **solide** et nettement durci : **16 crates réels verts** (whatlang, statrs, chrono,
+  num-bigint, walkdir, csv, regex, sha2, hound, colored, indicatif, rusqlite, chrono-tz, qrcode, image,
+  + uuid hors-80), **B5–B21** (trous + features), dont les gros gains généraux : B8/B9/B10/B12/B13/B14 +
+  **blanket** (B16), **struct/enum externes** (B17), **arg par valeur** (B18), **trait sur primitif +
+  méthodes fournies** (B19), **multi-crate façade** (52700), **multi-cibles + params déstructurés** (B20/B21).
+  Le gate reste VERT à chaque pas.
+- **Limites de modèle → V12** : geo + nalgebra (généricité scalaire, [24100]), flate2 (io par flux, [52800]).
+  Observations mineures (hors-80) : `rand` 0.9 renomme `thread_rng`→`rng` ; `base64` expose son API en
+  **`const`** (Iron ne binde pas encore les constantes — gap si un crate du 80 en a besoin).
 - **« Tous les 80 un par un » reste un grind séquentiel** : chaque crate peut révéler un bug à corriger dans
   `ironc/src` (non parallélisable). Réaliste : **plusieurs sessions**.
 - **Plan** : continuer les feuilles 🟢/🟡 (CLI/données/temps/maths à API simples) ; adresser les 3 murs
