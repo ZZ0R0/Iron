@@ -53,6 +53,16 @@ bloque vraiment :
 > Ces trois ne sont **pas** encore prouvés bloquants — je les **confirmerai en écrivant les 25** et les
 > ajouterai (bug → corrigé ; capacité → ici), conformément à la règle.
 
+### Trouvés en écrivant les programmes complets
+- **🔧 [24400] corrigé (B30)** — type d'élément d'itérateur externe local → **CSV→JSON complet ✅**.
+- **🔧 collision de nom court via façade (52700) CORRIGÉE (B31)** — scraper avait **deux** `Selector`
+  (`scraper::Selector` *avec `parse`* ET `selectors::parser::Selector`, fusionné par le multi-crate) ;
+  au chargement le 2ᵉ **écrasait** le 1ᵉʳ → `parse` perdu → **scraper bloqué**. Fix : **first-wins** au
+  chargement du `.iri` (`iri.rs`) — le crate **principal** est émis avant les sources de façade, on garde
+  donc son type. Sûr : aucun homonyme dans le gate ; geo est bloqué par les génériques scalaires de toute
+  façon (pas par ce choix). **scraper select complet ✅** (`Selector.parse("li")` → `scraper::Selector::parse`,
+  parse HTML → select → `inner_html` sur chaque `<li>`).
+
 ## Pourquoi ce sont des capacités (pas du durcissement)
 
 - **[24100] généricité de type.** Iron ne suit pas `T` dans `Foo<T>` : `Point<f64>` ≡ `Point<i32>` ≡

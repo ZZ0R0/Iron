@@ -245,7 +245,10 @@ impl P {
         let name = self.ident()?;
         self.expect(&TokenKind::Assign, "`=`")?;
         let path = self.string()?;
-        b.types.insert(name.clone(), path.clone());
+        // **first-wins** sur collision de nom court : le crate **principal** est émis avant les sources de
+        // façade fusionnées (52700) ; on garde donc le type principal (`scraper::Selector` avec `parse`) au
+        // lieu de le laisser écraser par un homonyme fusionné (`selectors::parser::Selector`). B31.
+        b.types.entry(name.clone()).or_insert_with(|| path.clone());
         // Bloc indenté → type à API.
         if self.eat(&TokenKind::Colon) {
             let mut et = ExternType { rust_path: path.clone(), ..Default::default() };
@@ -282,7 +285,8 @@ impl P {
                 }
                 self.eat(&TokenKind::Dedent);
             }
-            b.etypes.insert(name, et);
+            // first-wins (B31) : ne pas laisser un homonyme de façade écraser le type du crate principal.
+            b.etypes.entry(name).or_insert(et);
         }
         Ok(())
     }

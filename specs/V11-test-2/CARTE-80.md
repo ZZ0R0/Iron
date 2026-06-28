@@ -65,7 +65,7 @@
 | # | Crate | Statut | Base | Note |
 |---|---|:--:|:--:|---|
 | 16 | ureq/serde_json | 🟥 | A | client HTTP = réseau (serde_json ✅). |
-| 17 | scraper/ureq | ✅ | T | `Html.parse_document().html()` (ureq=réseau). |
+| 17 | scraper/ureq | ✅ | T | **Programme complet** : parse HTML → `Selector.parse("li")` → `select` → `inner_html` par `<li>` (3 items). Débloqué par **B31** (collision de nom court façade : first-wins). (ureq=réseau, hors-langage.) |
 | 18 | tiny_http | 🔵 | T | `Server::http(impl ToSocketAddrs)` — ctor générique. |
 | 19 | axum/tokio | 🟥 | A | **async**. |
 | 20 | rss/ureq | ✅ | T | `ChannelBuilder.default()…build()`. |
