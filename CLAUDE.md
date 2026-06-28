@@ -66,11 +66,16 @@ avant d'avoir cadré et planifié. On ne valide pas avant d'avoir testé.
 
 ## Phase 2 — PLANIFICATION
 **But :** découper pour lancer **un max d'agents en parallèle, CORRECTEMENT** (sans collision).
-- Unités de planif dans `specs/VX/planification/` (nommage concret **défini par le projet**). La
-  décomposition suit deux axes :
+- Unités de planif dans `specs/VX/planification/`, nommées **`planify-<vague>.<piste>.md`** (+ `README.md`
+  de vue d'ensemble, + `fondation.md` optionnel pour le contrat de squelette). **RÈGLE DURE de nommage :** le
+  nom encode l'**axe d'EXÉCUTION** (vague, piste), **JAMAIS** un numéro de spec de cadrage. Une planif `planify-2.3`
+  = vague 2, piste 3 — et elle **cite** dans son en-tête la/les spec(s) de cadrage qu'elle réalise. **Cadrage ≠
+  planification** : le cadrage (`Vn/XXXXX.md`, contenu/contrats) et la planification (`planify-V.P`, découpage
+  d'exécution) sont des **objets distincts** ; confondre leurs nommages (planif numérotée comme une spec) est l'erreur à ne JAMAIS refaire.
+  La décomposition suit deux axes :
   - **VAGUE** de réalisation (1, 2, 3…), exécutées **dans l'ordre** (toute la vague 1, puis la 2…).
-    Ce n'est NI une couche d'archi NI la version — c'est le rang séquentiel de l'étape.
-  - **PISTE PARALLÈLE** au sein d'une vague. Même vague ⇒ parallèle ; vagues différentes ⇒ séquentielles.
+    Ce n'est NI une couche d'archi NI la version — c'est le rang séquentiel de l'étape. = le **X** du nom.
+  - **PISTE PARALLÈLE** au sein d'une vague. Même vague ⇒ parallèle ; vagues différentes ⇒ séquentielles. = le **Y** du nom.
   - Une vague à 1 piste = étape séquentielle ; à plusieurs = fan-out parallèle.
 - **Le squelette/fondation EST la 1ʳᵉ vague.** Puis fan-out → unification → **on recommence** jusqu'à la
   fin de la phase.
@@ -149,8 +154,9 @@ du projet — jamais de big-bang d'intégration à la fin.
 - **Quoi.** Iron = un **langage** (indentation-sensitive, sémantique par valeur) qui **transpile vers
   Rust** et compile via `cargo`. Pas d'OS, pas de runtime lourd, pas de GC.
 - **Contrat de contenu.** `specs/generator.md` possède les **gabarits** de specs/planif, les **invariants
-  I1–I14**, et le **nommage** : specs `specs/Vn/XXXXX.md` (1ᵉʳ chiffre = sous-système), planifs
-  `specs/Vn/planification/X.Y.md` (X = spec parente, Y = tâche atomique).
+  I1–I14**, et le **nommage** : specs (cadrage) `specs/Vn/XXXXX.md` (1ᵉʳ chiffre = sous-système) ; planifs
+  `specs/Vn/planification/planify-<vague>.<piste>.md` (**X = vague d'exécution, Y = piste parallèle** — PAS le
+  numéro de la spec de cadrage), chaque planif **citant** en en-tête la/les spec(s) qu'elle réalise.
 - **Stack.** Rust. Pipeline figé (I9) : lexer → parser → AST → type-check + ownership → lowering →
   `proc_macro2::TokenStream` (`quote`) → `prettyplease` → `cargo`. CLI `ironc` (`build`/`run`).
   **Codegen via `TokenStream` uniquement** (I10, jamais de concat de chaînes) ; Iron **n'émet jamais

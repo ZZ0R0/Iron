@@ -18,7 +18,8 @@ cadrage (décisions validées)
  specs/Vn/XXXXX.md            ← une spec = UN composant cohérent
         │
         ▼
- specs/Vn/planification/X.Y.md ← une unité = UNE tâche atomique (une session Claude Code)
+ specs/Vn/planification/planify-<vague>.<piste>.md ← une unité = UNE tâche atomique (une session Claude Code)
+                               (X = VAGUE d'exécution, Y = PISTE parallèle — JAMAIS le n° de spec)
         │
         ▼
  implémentation
@@ -122,7 +123,15 @@ Décisions verrouillées au cadrage. **Aucune spec ne peut les contredire.** Tou
 
   Chiffres 2–3 = composant, 4–5 = sous-composant/itération. Ex. `10100` lexer, `10200` parser, `20100` inférence locale, `30100` résolveur clone/move, `40100` lowering core, `50100` blocs `rust:` inline, `60100` source maps.
 
-- **`X.Y`** — décomposition d'une spec en tâches. `X` = identifiant court de la spec parente (table de correspondance en tête de `planification/`), `Y` = numéro de tâche atomique. Chaque `X.Y` = une session Claude Code, build vert à la fin. Le fichier référence sa spec parente dans son en-tête.
+- **`planify-X.Y.md`** — unité de planification = découpage d'**exécution**, **pas** de cadrage.
+  **`X` = VAGUE** (rang séquentiel de réalisation : toute la vague 1, puis la 2…). **`Y` = PISTE** (track
+  parallèle au sein de la vague, ownership de fichiers disjoint). **JAMAIS le numéro d'une spec de cadrage.**
+  Une même vague peut réaliser plusieurs specs, et une même spec peut s'étaler sur plusieurs vagues — d'où le
+  découplage. Chaque `planify-X.Y` = une session Claude Code, build vert à la fin, et **cite en en-tête la/les
+  spec(s) de cadrage** qu'elle réalise (traçabilité planif → cadrage). La vague 1 est le **squelette/fondation**.
+  > **Cadrage ≠ planification.** Nommer une planif d'après une spec (`24000.1.md`) **confond** les deux axes :
+  > c'est l'anti-pattern à proscrire. Le cadrage répond « quoi/contrats » (`Vn/XXXXX.md`) ; la planif répond
+  > « dans quel ordre, qui possède quoi, en parallèle de qui » (`planify-vague.piste.md`).
 
 ---
 
@@ -161,7 +170,8 @@ le mapping span .irn ↔ Rust généré. Sinon : "N/A".>
 <liste testable. Chaque critère = un test ou une vérification objective.>
 
 ## Décomposition
-<liste des unités de planif X.Y produites depuis cette spec.>
+<liste des unités de planif `planify-<vague>.<piste>` qui RÉALISENT cette spec — par **vague/piste
+d'exécution**, pas par numéro de spec. Une spec peut être réalisée par des planifs de plusieurs vagues.>
 
 ## Risques / questions ouvertes
 <honnête. Ce qui n'est pas tranché.>
@@ -169,36 +179,44 @@ le mapping span .irn ↔ Rust généré. Sinon : "N/A".>
 
 ---
 
-## 5. Procédure — décomposer en `planification/X.Y.md`
+## 5. Procédure — décomposer en `planification/planify-<vague>.<piste>.md`
 
-1. Chaque `X.Y` = **une tâche atomique**, taille d'une PR, testable isolément, **laisse le build vert**.
-2. Ordonner par dépendances : une tâche ne dépend que de tâches déjà faites ou explicitement listées.
-3. **Pas de tâche fourre-tout.** Si une tâche ne tient pas en une session → la scinder.
-4. Chaque `X.Y` porte au moins **un critère de done objectif** (test qui passe + build vert).
+1. **Identifier les VAGUES** (rang séquentiel) : vague 1 = squelette/fondation (fige schéma + interfaces), puis
+   fan-out → unification → on recommence. Une planif d'une vague ne dépend que de vagues antérieures.
+2. **Au sein d'une vague, identifier les PISTES parallèles** à **ownership de fichiers disjoint** — deux pistes
+   d'une même vague ne touchent JAMAIS le même fichier ni n'attendent une interface non figée.
+3. Chaque `planify-<vague>.<piste>` = **une tâche atomique**, taille d'une PR, testable isolément, **build vert**.
+4. **Pas de tâche fourre-tout.** Si une tâche ne tient pas en une session → la scinder (autre piste/vague).
+5. Chaque planif porte au moins **un critère de done objectif** (test qui passe + build vert) et **cite sa/ses
+   spec(s) de cadrage**.
+6. **Test mental avant de valider** : « si je lance ces pistes en parallèle, deux agents touchent-ils le même
+   fichier ou attendent-ils une interface non figée ? » Si oui → re-découper ou remonter en fondation (vague 1).
 
 ---
 
-## 6. Gabarit de planif — `planification/X.Y.md`
+## 6. Gabarit de planif — `planification/planify-<vague>.<piste>.md`
 
 ```markdown
-# [X.Y] <titre de la tâche>
+# planify-<vague>.<piste> — <titre de la tâche>
 
-- Spec parente : [XXXXX]
-- Version : Vn
-- Dépend de : [X.Y], [X.Y]
-- Statut : todo | wip | done
+- Réalise (cadrage) : [XXXXX] (et [YYYYY] le cas échéant)   ← citation de(s) spec(s), PAS l'inverse
+- Version : Vn · Vague : <n> · Piste : <m> · Statut : todo | wip | done
+- Dépend de : planify-<v>.<p>, …   (vagues/pistes antérieures)
 
 ## But
 <une tâche atomique, implémentable en une session, build vert à la fin.>
 
-## Fichiers touchés
-<chemins attendus.>
+## Fichiers POSSÉDÉS (ownership disjoint)
+<chemins que CETTE piste édite en exclusivité — aucune autre piste de la même vague n'y touche.>
+
+## Interface produite / consommée
+<ce que cette piste expose (signatures, schéma de données) et ce qu'elle consomme d'une vague antérieure.>
 
 ## Étapes
 <séquence d'implémentation.>
 
-## Critère de done
-<test(s) qui passe(nt) + build vert. Objectif, vérifiable.>
+## Definition of Done (vérifiable)
+<test(s) qui passe(nt) + build vert + gate vert. Objectif, vérifiable.>
 
 ## Notes
 <pièges connus, références aux invariants concernés.>
