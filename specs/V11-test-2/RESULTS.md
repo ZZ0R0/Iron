@@ -46,18 +46,28 @@ Chaque crate réel a exposé un trou ; tous corrigés sans régresser le gate-v1
 | 02/80 | Hash / PoW | `sha2` | 🟡 | `Sha256` : `new`/`finalize` vivent dans le trait **blanket** `Digest` (`impl<T> Digest for T`) → le binder les saute (les blankets sont partout). Seul `update` (impl direct `Update`) est bindé. **Mur : API de convenance via trait blanket.** |
 | 05 | Renommeur regex | `regex` | 🟡 | Le binder a retenu `regex::bytes::Regex` (variante octets) au lieu de `regex::Regex` (str) sur collision de nom court → `replace_all("…","X")` veut un `bytes::Replacer`. Mur : **dédup choisit la mauvaise variante** (préférer le chemin le plus court). |
 | 04 | Texte coloré | `colored` | 🔴 | `.red()` est ajouté à `&str` via le trait `Colorize` ; Iron `str` est un builtin (pas un type externe) → impossible d'y greffer une méthode de trait. **Mur dur : extension d'un type primitif.** |
+| 67 | Distances géo | `geo` | 🟡 | `Point<T: CoordNum>` est **générique sur le type scalaire** → ses méthodes prennent/rendent `T` (borne non mappable) → type opaque, `Point.new` non bindé. Même classe que nalgebra/ndarray. |
+| 42 | Synthé / WAV | `hound` | 🟡 | `WavSpec` est une **struct à champs publics** (config) ; Iron ne sait construire un type externe que par ctor, pas par littéral `WavSpec(channels=1, …)`. |
 | 63 | Gzip | `flate2` | ☐ | `import` OK ; usage réel (Encoder/Write, io) à tester. |
 
-## Murs identifiés (frontière)
+## Murs identifiés (frontière) — chantiers de fond, pas des bugs ponctuels
 
 1. **Traits blanket de convenance** (sha2 `Digest`, et tout `Read`/`Write`/`Iterator` blanket) : l'API
    utile (`new`/`finalize`/`read`/`collect`) est dans un `impl<T> Trait for T` (le `for` est un `T`
    générique, pas un type concret) → sauté par nécessité (sinon explosion). → piste : *whitelist* de
    traits-blanket utiles + synthèse de leurs méthodes sur les types concrets qui satisfont les bornes.
-2. **Dédup variante de type** (regex `Regex` vs `bytes::Regex`) : sur collision de nom court, préférer le
-   chemin **public le plus court** (la variante « principale »). Nécessite un pré-passage type.
-3. **Extension d'un type primitif** (colored sur `str`) : Iron ne peut greffer une méthode de trait sur son
+2. **Génériques sur le type scalaire** (geo `Point<T: CoordNum>`, nalgebra, ndarray) : les méthodes
+   prennent/rendent `T` borné par un trait **numérique** (`CoordNum`/`Num`/`Float`) → non mappable. → piste :
+   monomorphiser les bornes numériques vers `f64` (risqué : suppose le cas `f64`).
+3. **Construction de struct externe par littéral** (hound `WavSpec`, structs de config à champs publics) :
+   binder les **champs** des structs publiques + émettre `crate::S { champ: val, … }` au lowering.
+4. **Dédup variante de type** (regex `Regex` vs `bytes::Regex`) : sur collision de nom court, préférer le
+   chemin **public le plus court**. Nécessite un pré-passage type.
+5. **Extension d'un type primitif** (colored sur `str`) : Iron ne peut greffer une méthode de trait sur son
    `str` builtin. Mur dur (sémantique du langage).
+
+> Ces 5 murs sont des **features de fond** (chacune mérite un cadrage), pas des bugs de durcissement. Ils
+> relèvent d'une V12 « binder avancé » plutôt que de la Vague 0.
 
 > ✔ *Résolu cette session* : « ctors sur types génériques » (csv `Reader<R>`) — c'était la borne
 > `impl AsRef<Path>` non monomorphisée, corrigée par **B13**.
