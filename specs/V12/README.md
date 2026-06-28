@@ -40,20 +40,17 @@
 >
 > Hors-V12 (tooling) : `bincode` → `rustdoc` « could not document » (flag rustdoc à creuser, pas une capacité).
 
-## À SURVEILLER pendant la passe des « 25 complets » (anticipé, non confirmé)
+## Anticipé pendant la passe des « 25 complets » — les 3 points TRANCHÉS (aucun n'est un mur)
 
-Les fiches complètes (pas les bouts) toucheront sans doute **plus** que les bouts. À confirmer/ajouter si ça
-bloque vraiment :
+Les 3 risques anticipés ont été **confirmés par l'essai** ; **aucun** n'est une nouvelle capacité bloquante :
 - ~~**[83000] opérations fichier**~~ → **🔧 RÉSOLU (B32)** : `rename`/`copy_file`/`remove_file`/`create_dir`/
-  `create_dir_all`/`remove_dir_all`/`path_exists` ajoutés **globalement** à `std.iri` (mêmes signatures que
-  `read_file`/`write_file`). Le **renommeur #05 est VERT** (regex `captures` → `rename` → `path_exists`,
-  vérifié sur disque). Le listage de répertoire passe déjà par **walkdir** (B30, vert). Restant mineur
-  (non bloquant) : `std::fs::metadata` (taille/mtime) pour la dédup #03 — à ajouter si un projet le force.
-- **[52600b] construction d'un `Value` dynamique** (et pas que le parser) : `serde_json::json!{}` /
-  `Value::Object.insert` pour le **CSV→JSON** (#06) — **non bloquant en fait** : CSV→JSON ✅ construit le
-  JSON par assemblage de chaînes (la voie `json!{}` reste une ergonomie, pas un mur).
-- **dépaquetage d'un retour tuple** d'une fn externe (`(c, r) = size()`) — possiblement un **bug** réparable,
-  pas une capacité ; à vérifier.
+  `create_dir_all`/`remove_dir_all`/`path_exists` ajoutés **globalement** à `std.iri`. Renommeur #05 VERT.
+  Listage de répertoire déjà couvert par **walkdir** (B30). Restant mineur : `std::fs::metadata` (taille/mtime)
+  pour la dédup #03 — à ajouter si un projet le force.
+- ~~**[52600b] construction d'un `Value` dynamique**~~ → **non bloquant** : CSV→JSON ✅ assemble le JSON par
+  chaînes (`serde_json::json!{}` reste une ergonomie, pas un mur).
+- ~~**dépaquetage d'un retour tuple** d'une fn externe~~ → **MARCHE** : `q, r = a.div_rem(b)` (num-bigint)
+  donne `14 reste 2`. Pas un bug.
 
 ### Trouvés en écrivant les programmes complets
 - **🔧 [24400] corrigé (B30)** — type d'élément d'itérateur externe local → **CSV→JSON complet ✅**.
@@ -67,11 +64,31 @@ bloque vraiment :
 - **🔧 [83000] opérations fichier RÉSOLU (B32)** — std fs élargie (`rename`/`copy_file`/`remove_file`/
   `create_dir`/`create_dir_all`/`remove_dir_all`/`path_exists`), **globale**. **Renommeur #05 VERT** :
   `IMG_001.JPG`→`photo_001.jpg`, `note.txt` ignoré (regex `captures`), vérifié sur disque.
+- **🔧 expansion des alias de type CORRIGÉE (B33)** — `pub type ImageResult<T> = Result<T, ImageError>`
+  (et `ParseResult<T>`, tout `XResult<T>`/`XBytes = Vec<u8>`…) était bindé en **handle opaque** → `.unwrap()`
+  impossible. Le binder recense désormais les `type_alias` et les **expanse** (substitution des params),
+  strictement non régressif (retombe sur le handle si l'expansion ne mappe pas). Débloque **image::open**
+  (load→resize→grayscale→save, 400×300→200×150 ✅) et **chrono `parse_from_str`** (parsing de dates ✅).
 - **rusqlite #20 — partiel, bloqué par capacités existantes (pas un bug)** : `open_in_memory` +
   `execute_batch` (CREATE+INSERT) + `total_changes`/`last_insert_rowid` ✅ ; mais `execute(sql, params)` et
   `query_row(sql, params, |row| …)` sont **droppés au binding** (génériques `P: Params` = trait de crate
   → [24100b] ; closure `|row| row.get::<T>(0)` → [40300]/[24100]). La **lecture** de lignes est donc bloquée
   par **[24100]+[40300] déjà cadrés** — rien de neuf.
+- **gpx #?? — bloqué [52800]** : `gpx::read(reader: impl Read)` droppé au binding (entrée par flux). Le
+  parse RSS, lui, marche (`Channel.from_str(str)` ✅) — la différence est *str vs `impl Read`*.
+
+### Bilan HONNÊTE de la passe « programmes complets » (essais réels, end-to-end)
+**Programmes complets VERTS** (≥ 1 programme multi-étapes exécuté, sortie vérifiée) : CSV→JSON, statrs,
+walkdir, **scraper** (B31), **renommeur/regex** (B32), **num-bigint** (factorial 30!), **tiny-skia** (dessin→PNG),
+**image** (B33, load→process→save), **rss** (feed→items), **whatlang**, **zstd** (round-trip), **uuid**,
+**sysinfo**, **chrono-tz**, **chrono** (B33, parse+arith ; seul `.format()` strftime = [30200]), serde_json
+(tableaux), + terminal/headless (colored, indicatif, crossterm, serialport). → **≈ 18-19 réellement complets.**
+**Partiels / bloqués, TOUS sur des capacités DÉJÀ cadrées** (zéro nouvelle capacité non prévue) : rusqlite
+(lecture [24100]+[40300]), sha2 (hex [82000]), gpx ([52800]), qr ([24100]).
+**Conclusion** : écrire les **programmes entiers** (vs bouts) a révélé **4 bugs de binder** — B30 (itérateur),
+B31 (collision façade), B32 (fs std), B33 (alias de type) — **tous corrigés**. **Aucune** nouvelle capacité de
+langage non déjà listée dans ce cadrage n'a émergé. Le « ~25 qui marchent » est honnêtement **~18-19 complets**,
+le reste butant sur les capacités V12 ci-dessus.
 
 ## Pourquoi ce sont des capacités (pas du durcissement)
 

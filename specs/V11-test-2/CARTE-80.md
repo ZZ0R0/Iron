@@ -219,3 +219,45 @@ Une seule liste, peu importe la « couleur » que je leur avais collée :
 > **Conclusion franche.** ~24 marchent, ~5 sont des **bugs** que je finis de corriger (→ ~26-29), et le gros
 > (~51) demande de **vraies extensions du langage** — pas du durcissement. La « couleur » bleu/rouge était
 > une fausse distinction de ma part ; le vrai axe c'est **bug vs feature**, et la majorité est *feature*.
+
+---
+
+## PASSE « PROGRAMMES COMPLETS » (essais réels end-to-end, pas des bouts)
+
+> Suite à la demande : écrire et **exécuter** les programmes ENTIERS (boucles, usage des éléments,
+> pipeline complet), pas juste prouver que la lib se binde. Bilan honnête ci-dessous.
+
+**Verts confirmés (programme multi-étapes exécuté, sortie vérifiée) :**
+
+| Crate | Programme complet exécuté | Débloqué par |
+|---|---|---|
+| CSV→JSON | lit le CSV, construit `[{...}]`, sortie JSON | B30 |
+| statrs | stats descriptives sur un échantillon | — |
+| walkdir | parcourt l'arbo + utilise `de.depth()`/`path()` | B30 |
+| scraper | parse HTML → `Selector.parse("li")` → select → `inner_html` ×3 | **B31** |
+| renommeur (regex) | `captures` extrait le n° → `rename` → `path_exists` (vérifié disque) | **B32** |
+| num-bigint | `30! = 265252859812191058636308480000000` (boucle), `(30!)²`, `div_rem` | — |
+| tiny-skia | Pixmap + rect rouge + cercle bleu → PNG 400×300 valide | — |
+| image | `open()` → resize → grayscale → `save()` (400×300→200×150) | **B33** |
+| rss | `Channel.from_str` → titre/lien + itère les `items` (match Option) | — |
+| whatlang | détecte Deutsch/Français + confidence | — |
+| zstd | `compress`/`decompress` round-trip (73→55 o, ok=true) | B27 |
+| uuid | `from_u128`/`nil`/`max` + `hyphenated` | — |
+| sysinfo | mémoire totale/used/swap + host | — |
+| chrono-tz | `Tz.from_str` + `name` (3 zones) | — |
+| chrono | `parse_from_str` + diff de dates + weekday + ordinal + succ | **B33** (parse) ; `.format()` = [30200] |
+| serde_json | parse tableau → itère → `as_i64` → somme | — (clé-accès = [24100]) |
+
+**Partiels / bloqués — TOUS sur des capacités DÉJÀ cadrées (aucune surprise) :**
+
+| Crate | Ce qui marche | Ce qui bloque |
+|---|---|---|
+| rusqlite | open + `execute_batch` (CREATE/INSERT) + `total_changes` | lecture `query_row`/`execute(params)` → [24100b]+[40300] |
+| sha2 | hash fichier → 32 octets | hex → [82000] |
+| gpx | (construction en mémoire) | `gpx::read(impl Read)` → [52800] |
+| qr | — | génériques scalaires → [24100] |
+
+> **Verdict honnête.** Le « ~25 qui marchent » est en réalité **~18-19 programmes COMPLETS** verts ; le reste
+> bute sur des capacités **déjà listées en V12**. Écrire les programmes entiers a fait sortir **4 bugs de
+> binder** (B30 itérateur, B31 collision façade, B32 fs std, B33 alias de type) — **tous corrigés直接**. Aucune
+> capacité de langage non prévue n'a émergé : le cadrage V12 est **complet** pour ce qu'on a essayé.
