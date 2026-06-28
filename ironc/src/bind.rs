@@ -213,6 +213,9 @@ fn emit(v: &Json, crate_name: &str, crate_real: &str, versions: &HashMap<String,
     let mut types: BTreeMap<String, (Vec<String>, Vec<String>)> = BTreeMap::new(); // nom → (ctors, méthodes)
     let mut type_paths: BTreeMap<String, String> = BTreeMap::new(); // nom court → chemin Rust complet (sous-modules)
     let mut seen: BTreeMap<String, HashSet<String>> = BTreeMap::new(); // dedup noms par type
+    // V12 [24000] : paramètres de type d'un type externe générique (`Point<T>` → `["T"]`) → entête
+    // `extern type Point[T]`. Base de la substitution en inférence (`Point[f64]`.méthode rendant `T` → `f64`).
+    let mut type_params: BTreeMap<String, Vec<String>> = BTreeMap::new();
 
     // Pré-passe « variante canonique » : sur **collision de nom court** (ex. `regex::Regex` ET
     // `regex::bytes::Regex` → tous deux `Regex`), retenir la variante au chemin public **le plus court** (la
@@ -318,6 +321,31 @@ fn emit(v: &Json, crate_name: &str, crate_real: &str, versions: &HashMap<String,
         let mut blanket_self: Generics = Generics::new();
         if let Some(g) = imp["blanket_impl"]["generic"].as_str() {
             blanket_self.insert(g.to_string(), Some(tyname.clone()));
+        }
+        // V12 [24000] : **garder** les paramètres de type de l'impl (`impl<T: CoordNum> Point<T>`) au lieu de
+        // les jeter — sinon `new(x: T, y: T)` et `euclidean_distance(self) -> T` sont droppés. Un param à borne
+        // reconnue (`AsRef<Path>`) prend son type Iron ; sinon il **reste générique** (`Some("T")`), instancié
+        // par l'argument à l'appel (infer). Et on enregistre les params du type pour l'entête `Point[T]`.
+        for p in imp["generics"]["params"].as_array().into_iter().flatten() {
+            if let Some(name) = p["name"].as_str() {
+                let ty = &p["kind"]["type"];
+                if ty.is_object() {
+                    blanket_self
+                        .entry(name.to_string())
+                        .or_insert_with(|| bound_to_iron(&ty["bounds"]).or_else(|| Some(name.to_string())));
+                }
+            }
+        }
+        let for_params: Vec<String> = imp["for"]["resolved_path"]["args"]["angle_bracketed"]["args"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|a| a["type"]["generic"].as_str().map(str::to_string))
+            .collect();
+        if !for_params.is_empty() {
+            // `Self` = type **appliqué** (`Complex[T]`) → `new(...) -> Self` rend `Complex[T]` (substituable).
+            blanket_self.insert("Self".to_string(), Some(format!("{tyname}[{}]", for_params.join(", "))));
+            type_params.entry(tyname.clone()).or_insert(for_params);
         }
         // Méthodes de l'impl + méthodes **fournies** (corps par défaut) du trait **non surchargées** (52600,
         // ex. colored `red`/`green`, déclarées avec défaut dans `Colorize` et absentes des items de l'impl).
@@ -436,17 +464,33 @@ fn emit(v: &Json, crate_name: &str, crate_real: &str, versions: &HashMap<String,
         // struct à **tous** champs publics nommés (sinon non constructible par littéral).
         let plain = &item["inner"]["struct"]["kind"]["plain"];
         if plain.is_object() && plain["has_stripped_fields"].as_bool() == Some(false) {
+            // V12 [24000] : params de type de la struct → gardés génériques pour ne pas dropper les champs
+            // typés `T` (`Complex { re: T, im: T }`). Et enregistrés pour l'entête `extern type Complex[T]`.
+            let mut sgen: Generics = Generics::new();
+            let mut sparams = Vec::new();
+            for p in item["inner"]["struct"]["generics"]["params"].as_array().into_iter().flatten() {
+                if let Some(name) = p["name"].as_str() {
+                    let ty = &p["kind"]["type"];
+                    if ty.is_object() {
+                        sgen.insert(name.to_string(), bound_to_iron(&ty["bounds"]).or_else(|| Some(name.to_string())));
+                        sparams.push(name.to_string());
+                    }
+                }
+            }
             let mut fs = Vec::new();
             let mut ok = true;
             for fid in plain["fields"].as_array().into_iter().flatten().filter_map(|x| x.as_u64()) {
                 let Some(fm) = index.get(&fid.to_string()) else { ok = false; break };
-                match (fm["name"].as_str(), map_type(&fm["inner"]["struct_field"], &Generics::new())) {
+                match (fm["name"].as_str(), map_type(&fm["inner"]["struct_field"], &sgen)) {
                     (Some(fname), Some(t)) if !is_iron_keyword(fname) => fs.push((fname.to_string(), t)),
                     _ => { ok = false; break }
                 }
             }
             if ok && !fs.is_empty() {
                 struct_fields.insert(tyname.clone(), fs);
+                if !sparams.is_empty() {
+                    type_params.entry(tyname.clone()).or_insert(sparams);
+                }
                 type_paths.entry(tyname.clone()).or_insert_with(|| resolve_type_path(Some(idn), &tyname, &public_paths, paths, crate_name));
             }
         }
@@ -516,7 +560,12 @@ fn emit(v: &Json, crate_name: &str, crate_real: &str, versions: &HashMap<String,
             continue;
         }
         let typath = type_paths.get(ty).cloned().unwrap_or_else(|| format!("{crate_name}::{ty}"));
-        iri.push_str(&format!("\nextern type {ty} = \"{typath}\":\n"));
+        // V12 [24000] : entête `extern type Point[T] = …` si le type a des paramètres.
+        let hdr = match type_params.get(ty) {
+            Some(p) if !p.is_empty() => format!("{ty}[{}]", p.join(", ")),
+            _ => ty.clone(),
+        };
+        iri.push_str(&format!("\nextern type {hdr} = \"{typath}\":\n"));
         for (fname, fty) in fields.into_iter().flatten() {
             iri.push_str(&format!("    field {fname}: {fty}\n"));
         }
@@ -639,14 +688,21 @@ fn project(f: &Json, owner: &str, extra_gen: &Generics) -> Option<Sig> {
     // (`impl<D> Digest for D` → `D` dénote le type concret matérialisé, comme `Self`).
     let mut gen: Generics = extra_gen.clone();
     // `Self` (type de retour des ctors `fn new(...) -> Self`) → le type impl'é. Sans ça `new` est sauté.
+    // V12 [24000] : si l'impl a déjà fixé `Self` au type **appliqué** (`Complex[T]`), ne pas l'écraser par le
+    // nom nu — sinon `new` rendrait `Complex` (opaque) et la substitution des génériques serait perdue.
     if !owner.is_empty() {
-        gen.insert("Self".to_string(), Some(owner.to_string()));
+        gen.entry("Self".to_string()).or_insert_with(|| Some(owner.to_string()));
     }
     for p in f["generics"]["params"].as_array().into_iter().flatten() {
         if let Some(name) = p["name"].as_str() {
             let ty = &p["kind"]["type"];
             if ty.is_object() {
-                gen.insert(name.to_string(), bound_to_iron(&ty["bounds"]));
+                // V12 [24000] : borne reconnue → type Iron ; sinon **garder générique** (`Some("T")`) au lieu
+                // de dropper la fn — l'argument l'instanciera (infer). Couvre `new(x: T)` borné par un trait de crate.
+                gen.insert(
+                    name.to_string(),
+                    bound_to_iron(&ty["bounds"]).or_else(|| Some(name.to_string())),
+                );
             }
         }
     }
@@ -656,7 +712,10 @@ fn project(f: &Json, owner: &str, extra_gen: &Generics) -> Option<Sig> {
         let bp = &w["bound_predicate"];
         if let Some(name) = bp["type"]["generic"].as_str() {
             if !matches!(gen.get(name), Some(Some(_))) {
-                gen.insert(name.to_string(), bound_to_iron(&bp["bounds"]));
+                gen.insert(
+                    name.to_string(),
+                    bound_to_iron(&bp["bounds"]).or_else(|| Some(name.to_string())),
+                );
             }
         }
     }
@@ -899,8 +958,20 @@ fn map_named(name: &str, targs: &[&Json], gen: &Generics) -> Option<String> {
         "HashMap" | "BTreeMap" => Some(format!("dict[{}, {}]", one(0)?, one(1)?)),
         "HashSet" | "BTreeSet" => Some(format!("set[{}]", one(0)?)),
         "Box" | "Rc" | "Arc" => one(0),
-        // struct/enum nommé (PascalCase) → réf de type externe (handle).
-        other if other.chars().next().map_or(false, |c| c.is_ascii_uppercase()) => Some(other.to_string()),
+        // struct/enum nommé (PascalCase) → réf de type externe. V12 [24000] : si **appliqué** (`Point<T>`) et que
+        // tous les args mappent, émettre `Point[args]` (→ `ExternApp`) au lieu de jeter les args. Un arg non
+        // mappable → handle opaque `Point` (pas de drop ; non régressif).
+        other if other.chars().next().map_or(false, |c| c.is_ascii_uppercase()) => {
+            if targs.is_empty() {
+                Some(other.to_string())
+            } else {
+                let mapped: Option<Vec<String>> = targs.iter().map(|t| map_type(t, gen)).collect();
+                match mapped {
+                    Some(args) if !args.is_empty() => Some(format!("{other}[{}]", args.join(", "))),
+                    _ => Some(other.to_string()),
+                }
+            }
+        }
         _ => None,
     }
 }

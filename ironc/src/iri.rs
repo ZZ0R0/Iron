@@ -16,12 +16,15 @@ use crate::lex;
 
 pub fn parse(src: &str, file: FileId) -> CResult<Bindings> {
     let toks = lex::lex(src, file)?;
-    P { t: toks, i: 0 }.run()
+    P { t: toks, i: 0, cur_params: Vec::new() }.run()
 }
 
 struct P {
     t: Vec<Token>,
     i: usize,
+    /// V12 [24000] : params de type du bloc `extern type Name[T]:` en cours — un nom de type qui matche
+    /// est lu en `Type::Generic` (et non `Extern`), pour la substitution en inférence.
+    cur_params: Vec<String>,
 }
 
 impl P {
@@ -260,6 +263,8 @@ impl P {
         // façade fusionnées (52700) ; on garde donc le type principal (`scraper::Selector` avec `parse`) au
         // lieu de le laisser écraser par un homonyme fusionné (`selectors::parser::Selector`). B31.
         b.types.entry(name.clone()).or_insert_with(|| path.clone());
+        // Les noms de params sont lus en `Generic` dans le bloc (substitution infer).
+        self.cur_params = params.clone();
         // Bloc indenté → type à API.
         if self.eat(&TokenKind::Colon) {
             let mut et = ExternType { rust_path: path.clone(), params: params.clone(), ..Default::default() };
@@ -299,6 +304,7 @@ impl P {
             // first-wins (B31) : ne pas laisser un homonyme de façade écraser le type du crate principal.
             b.etypes.entry(name).or_insert(et);
         }
+        self.cur_params.clear();
         Ok(())
     }
 
@@ -401,6 +407,8 @@ impl P {
             }
             // tuple `(A, B, …)` — non géré ici si la grammaire `.iri` n'ouvre pas par `(` ; les tuples
             // arrivent via la projection bind. Nom inconnu → type externe (résolu après coup).
+            // Nom = paramètre de type du bloc courant (`T` dans `extern type Point[T]:`) → `Generic` (V12).
+            other if self.cur_params.iter().any(|p| p == other) => Ok(Type::Generic(other.to_string())),
             // `Name[args]` (V12, [24000]) → type externe **générique appliqué** (`ExternApp`).
             other => {
                 if self.eat(&TokenKind::LBracket) {

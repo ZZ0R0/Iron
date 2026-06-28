@@ -11,6 +11,34 @@ fn arg0_ty(cx: &Inf, args: &[Expr]) -> Type {
     args.first().and_then(|a| cx.tm.get(&a.id).cloned()).unwrap_or(Type::Unit)
 }
 
+/// Substitue les paramètres de type d'un type externe générique (V12, [24000]) : `Generic(name)` → son
+/// instanciation. Récursif sur les composés. Cœur de `Point[f64]`.méthode rendant `T` → `f64`.
+fn subst(t: &Type, map: &HashMap<String, Type>) -> Type {
+    match t {
+        Type::Generic(n) => map.get(n).cloned().unwrap_or_else(|| t.clone()),
+        Type::ExternApp(p, a) => Type::ExternApp(p.clone(), a.iter().map(|x| subst(x, map)).collect()),
+        Type::Option(x) => Type::Option(Box::new(subst(x, map))),
+        Type::Result(x) => Type::Result(Box::new(subst(x, map))),
+        Type::List(x) => Type::List(Box::new(subst(x, map))),
+        Type::Set(x) => Type::Set(Box::new(subst(x, map))),
+        Type::Weak(x) => Type::Weak(Box::new(subst(x, map))),
+        Type::Tuple(xs) => Type::Tuple(xs.iter().map(|x| subst(x, map)).collect()),
+        Type::ResultE(x, e) => Type::ResultE(Box::new(subst(x, map)), Box::new(subst(e, map))),
+        Type::Dict(k, v) => Type::Dict(Box::new(subst(k, map)), Box::new(subst(v, map))),
+        _ => t.clone(),
+    }
+}
+
+/// Unifie les paramètres formels (`Generic`) d'un ctor/méthode avec les types d'arguments inférés, pour
+/// **instancier par l'argument** (`Complex.new(1.0, 2.0)` ⇒ `T = f64`). Gère `Generic` direct et sous `&`/own.
+fn unify_params(params: &[Type], arg_types: &[Type], map: &mut HashMap<String, Type>) {
+    for (p, a) in params.iter().zip(arg_types) {
+        if let Type::Generic(n) = p {
+            map.entry(n.clone()).or_insert_with(|| a.clone());
+        }
+    }
+}
+
 /// Type d'élément yieldé par un **itérateur/itérable externe** (24400). `next() -> Option[Item]` → `Item` ;
 /// sinon `into_iter() -> IterType` → élément de `IterType` (un cran, `depth` borne la récursion). `Unit` si
 /// non itérable ou élément inconnu (ex. `GenericArray<u8>` d'une crate étrangère).
@@ -338,14 +366,15 @@ pub(crate) fn expr(cx: &mut Inf, e: &Expr, scope: &Scope) -> Type {
                     if let ExprKind::Field { base, name } = &callee.kind {
                         // constructeur namespacé `Type.ctor(...)` (V8, 21100/51500) : `Regex.new(...)`.
                         if let ExprKind::Var(tname) = &base.kind {
-                            if let Some(et) = cx.etypes.get(tname) {
-                                if let Some((_, f)) = et.ctors.iter().find(|(n, _)| n == name) {
-                                    let ret = f.ret.clone();
-                                    for a in args {
-                                        expr(cx, a, scope);
-                                    }
-                                    return cx.set(e.id, ret);
-                                }
+                            if let Some((params, ret)) = cx.etypes.get(tname).and_then(|et| {
+                                et.ctors.iter().find(|(n, _)| n == name).map(|(_, f)| (f.params.clone(), f.ret.clone()))
+                            }) {
+                                // V12 [24000] : instancier les génériques par les arguments
+                                // (`Complex.new(1.0, 2.0)` ⇒ `T = f64` ⇒ retour `Complex[f64]`).
+                                let arg_types: Vec<Type> = args.iter().map(|a| expr(cx, a, scope)).collect();
+                                let mut map = HashMap::new();
+                                unify_params(&params, &arg_types, &mut map);
+                                return cx.set(e.id, subst(&ret, &map));
                             }
                         }
                         // thread.spawn(f) (V9, 70900) → handle `__Handle[T]` (T = retour de la lambda).
@@ -396,6 +425,19 @@ pub(crate) fn expr(cx: &mut Inf, e: &Expr, scope: &Scope) -> Type {
                         if let Type::Struct(tn) = &bt {
                             if let Some(ret) = cx.methods.get(&(tn.clone(), name.clone())) {
                                 return cx.set(e.id, ret.clone());
+                            }
+                        }
+                        // méthode externe **générique** (V12, [24000]) : `obj.m(...)` où `obj : ExternApp(nom, args)`
+                        // → substituer les params du type par `args` dans le retour (`c: Complex[f64]`, `norm` → `f64`).
+                        if let Type::ExternApp(iron_name, targs) = bt.clone() {
+                            if let Some((tparams, ret)) = cx.etypes.get(&iron_name).and_then(|et| {
+                                et.methods.iter().find(|(n, _)| n == name).map(|(_, f)| (et.params.clone(), f.ret.clone()))
+                            }) {
+                                for a in args {
+                                    expr(cx, a, scope);
+                                }
+                                let map: HashMap<String, Type> = tparams.into_iter().zip(targs).collect();
+                                return cx.set(e.id, subst(&ret, &map));
                             }
                         }
                         // méthode externe (V8, 21100) : `obj.m(...)` où `obj : Extern(nom Iron)`.

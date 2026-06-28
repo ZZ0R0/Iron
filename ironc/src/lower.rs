@@ -2026,6 +2026,8 @@ impl Cx<'_> {
     fn try_extern_method(&mut self, base: &Expr, name: &str, args: &[Expr]) -> Option<TokenStream> {
         let iron_name = match self.type_of(base) {
             Type::Extern(n) => n,
+            // V12 [24000] : récepteur générique `obj : Complex[f64]` → même routage (nom = clé d'etype).
+            Type::ExternApp(n, _) => n,
             _ => return None,
         };
         let ef = match self.bindings.etypes.get(&iron_name) {
