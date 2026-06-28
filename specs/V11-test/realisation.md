@@ -61,7 +61,8 @@ pour `sort` (délègue). Catalogue des **trous d'idiomes Iron** comblés / conto
 
 **30/30** programmes : **compilent** (`ironc`, **0 `unsafe`**), **zéro annotation**, **même sortie** que
 `python3` sur le dataset. Mono-cœur (`taskset -c 0`), min de N=3, mode résumé. **Speedup géométrique global :
-14.73×.**
+≈ 14–15×** (deux runs indépendants : **14.73×** et **14.15×** — l'écart = bruit de mesure machine, ~4 %).
+Le tableau ci-dessous donne le 1ᵉʳ run ; le 2ᵉ (ironc final) confirme 30/30 sans exception.
 
 | Programme | t_CPython (s) | t_Iron→Rust (s) | speedup | profil |
 |---|---:|---:|---:|---|
