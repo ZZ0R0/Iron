@@ -494,6 +494,9 @@ pub enum Idiom {
 #[derive(Debug, Clone)]
 pub struct ExternFn {
     pub params: Vec<Type>,
+    /// Param passé **par valeur** (`own T` dans le `.iri`) plutôt que par emprunt → pas de `&` au lowering
+    /// (ex. `WavWriter::create(spec: WavSpec)` consomme `spec`). Parallèle à `params` ; vide ⇒ tous par réf.
+    pub param_owned: Vec<bool>,
     pub ret: Type,
     pub path: String,
     pub recv: Option<Recv>,

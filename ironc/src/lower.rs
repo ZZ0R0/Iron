@@ -1900,7 +1900,7 @@ impl Cx<'_> {
     /// binding (`u32`/`i32`/`usize`/`u64`/`f64`…). Iron défaute les entiers à `i64` ; sans cast, un appel
     /// `from_ymd_opt(2026, 6, 28)` (i64) vers `(i32, u32, u32)` casse (E0308). On émet `(v) as T` seulement
     /// si le type diffère (pas de cast inutile → pas de bruit clippy).
-    fn extern_arg_to(&mut self, x: &Expr, expected: Option<&Type>) -> TokenStream {
+    fn extern_arg_to(&mut self, x: &Expr, expected: Option<&Type>, owned: bool) -> TokenStream {
         if let Some(exp) = expected {
             let target: Option<&'static str> = match exp {
                 Type::Num(k) => Some(num_kind_str(*k)),
@@ -1915,6 +1915,10 @@ impl Cx<'_> {
                     return quote! { (#v) as #id };
                 }
             }
+        }
+        // param **par valeur** (`own T` dans le binding) → pas de `&` (le handle est consommé/copié).
+        if owned {
+            return self.value(x);
         }
         self.extern_arg(x)
     }
@@ -1946,7 +1950,7 @@ impl Cx<'_> {
             .and_then(|et| et.ctors.iter().find(|(n, _)| n == name).map(|(_, f)| f.clone()))?;
         let path = TokenStream::from_str(&ctor.path).unwrap_or_else(|_| quote! { () });
         let a: Vec<TokenStream> =
-            args.iter().enumerate().map(|(i, x)| self.extern_arg_to(x, ctor.params.get(i))).collect();
+            args.iter().enumerate().map(|(i, x)| self.extern_arg_to(x, ctor.params.get(i), ctor.param_owned.get(i).copied().unwrap_or(false))).collect();
         let call = quote! { #path( #(#a),* ) };
         Some(if matches!(ctor.ret, Type::Result(_)) {
             quote! { #call.map_err(|e| IronError(format!("{:?}", e))) }
@@ -1971,7 +1975,7 @@ impl Cx<'_> {
         };
         let recv = self.place(base);
         let a: Vec<TokenStream> =
-            args.iter().enumerate().map(|(i, x)| self.extern_arg_to(x, ef.params.get(i))).collect();
+            args.iter().enumerate().map(|(i, x)| self.extern_arg_to(x, ef.params.get(i), ef.param_owned.get(i).copied().unwrap_or(false))).collect();
         // Méthode de **trait** (chemin `crate::Trait::method`) → UFCS `Trait::method(<recv>, args)` (évite
         // `use Trait`). Méthode **inhérente** (nom court) → syntaxe-méthode `recv.m(args)` (auto-ref/deref,
         // gère les méthodes via `Deref` comme `str` sur `String`).

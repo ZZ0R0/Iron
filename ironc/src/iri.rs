@@ -164,7 +164,7 @@ impl P {
     fn parse_fn(&mut self, owner: Option<&str>) -> CResult<(String, ExternFn)> {
         let name = self.ident()?;
         self.expect(&TokenKind::LParen, "`(`")?;
-        let (recv, params) = self.parse_params()?;
+        let (recv, params, param_owned) = self.parse_params()?;
         self.expect(&TokenKind::RParen, "`)`")?;
         let ret = if self.eat(&TokenKind::Arrow) { self.parse_type()? } else { Type::Unit };
         self.expect(&TokenKind::Assign, "`=`")?;
@@ -178,11 +178,12 @@ impl P {
             }
         }
         let idioms = self.parse_idioms()?;
-        Ok((name, ExternFn { params, ret, path, recv, idioms }))
+        Ok((name, ExternFn { params, param_owned, ret, path, recv, idioms }))
     }
 
-    /// Réceveur (`self`/`mut self`/`own self`) puis params nommés.
-    fn parse_params(&mut self) -> CResult<(Option<Recv>, Vec<Type>)> {
+    /// Réceveur (`self`/`mut self`/`own self`) puis params nommés. `param_owned[i]` = param `i` par valeur
+    /// (`own T`).
+    fn parse_params(&mut self) -> CResult<(Option<Recv>, Vec<Type>, Vec<bool>)> {
         let mut recv = None;
         if self.ident_is("self") {
             self.adv();
@@ -200,15 +201,22 @@ impl P {
             self.eat(&TokenKind::Comma);
         }
         let mut params = Vec::new();
+        let mut param_owned = Vec::new();
         while !self.is(&TokenKind::RParen) {
             let _pn = self.ident()?;
             self.expect(&TokenKind::Colon, "`:`")?;
+            // `own T` → param par valeur (pas de `&` au lowering).
+            let owned = self.ident_is("own");
+            if owned {
+                self.adv();
+            }
+            param_owned.push(owned);
             params.push(self.parse_type()?);
             if !self.eat(&TokenKind::Comma) {
                 break;
             }
         }
-        Ok((recv, params))
+        Ok((recv, params, param_owned))
     }
 
     fn parse_idioms(&mut self) -> CResult<Vec<Idiom>> {

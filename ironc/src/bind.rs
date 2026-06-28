@@ -544,7 +544,13 @@ fn project(f: &Json, owner: &str, extra_gen: &Generics) -> Option<Sig> {
         // d'importance, l'appel est positionnel) pour rester un identifiant valide.
         let pn = if is_iron_keyword(pn) { format!("{pn}_") } else { pn.to_string() };
         match map_type(ty, &gen) {
-            Some(t) => params.push(format!("{pn}: {t}")),
+            Some(t) => {
+                // param **par valeur** (pas d'emprunt Rust) d'un *handle* (type externe/struct, PascalCase) →
+                // marqué `own` pour que le lowering **ne mette pas** de `&` (ex. `create(spec: WavSpec)`).
+                let owned = ty.get("borrowed_ref").is_none()
+                    && t.chars().next().is_some_and(|c| c.is_ascii_uppercase());
+                params.push(if owned { format!("{pn}: own {t}") } else { format!("{pn}: {t}") });
+            }
             None => return None,
         }
     }
