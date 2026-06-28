@@ -188,8 +188,12 @@ fn load_bindings(imports: &[String], base_dir: &Path) -> CResult<Bindings> {
 
 /// Écrit un projet cargo autonome `{Cargo.toml, src/main.rs}` dans `out_dir`.
 fn deps_toml(crates: &[(String, String, Vec<String>)]) -> String {
+    // dédup par nom de crate (deux imports peuvent tirer la même dép transitive, B12) → pas de clé
+    // Cargo dupliquée. On garde la 1ʳᵉ occurrence.
+    let mut seen = std::collections::HashSet::new();
     crates
         .iter()
+        .filter(|(n, _, _)| seen.insert(n.clone()))
         .map(|(n, v, feats)| {
             if feats.is_empty() {
                 format!("{n} = \"{v}\"\n")

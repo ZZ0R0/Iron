@@ -46,7 +46,24 @@ pub fn bind(crate_dir: &Path, pkg: Option<&str>) -> CResult<String> {
     let v: serde_json::Value = serde_json::from_str(&json)
         .map_err(|e| CompileError::msg(format!("JSON rustdoc invalide : {e}")))?;
 
-    emit(&v, &target.replace('-', "_"), &target)
+    // Versions résolues des dépendances (transitives incluses) — pour déclarer les crates **étrangères**
+    // référencées dans les chemins de traits UFCS (`num_traits::…`) comme deps Cargo (B12). Clé = nom de
+    // module (underscores) ⇒ (nom publié, version) ; permet de retrouver `num-traits` depuis `num_traits`.
+    let lock = std::fs::read_to_string(crate_dir.join("Cargo.lock")).unwrap_or_default();
+    let mut versions: HashMap<String, (String, String)> = HashMap::new();
+    let mut name: Option<String> = None;
+    for line in lock.lines() {
+        let l = line.trim();
+        if let Some(n) = l.strip_prefix("name = \"").and_then(|s| s.strip_suffix('"')) {
+            name = Some(n.to_string());
+        } else if let Some(ver) = l.strip_prefix("version = \"").and_then(|s| s.strip_suffix('"')) {
+            if let Some(n) = name.take() {
+                versions.insert(n.replace('-', "_"), (n, ver.to_string()));
+            }
+        }
+    }
+
+    emit(&v, &target.replace('-', "_"), &target, &versions)
 }
 
 type Json = serde_json::Value;
@@ -126,10 +143,13 @@ fn build_public_paths(index: &serde_json::Map<String, Json>, root: u64, crate_na
     out.into_iter().map(|(k, v)| (k, v.join("::"))).collect()
 }
 
-fn emit(v: &Json, crate_name: &str, crate_real: &str) -> CResult<String> {
+fn emit(v: &Json, crate_name: &str, crate_real: &str, versions: &HashMap<String, (String, String)>) -> CResult<String> {
     let index = v["index"]
         .as_object()
         .ok_or_else(|| CompileError::msg("rustdoc-json : `.index` absent (format inattendu)"))?;
+    // Crates **étrangères** référencées par des chemins de traits UFCS (`num_traits`, `rand`…) — à déclarer
+    // comme deps Cargo, sinon `error[E0433]: cannot find module or crate num_traits` (B12).
+    let mut foreign: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     let paths = &v["paths"];
     let version = v["crate_version"].as_str().unwrap_or("*");
     // Chemins **publics** (re-exports inclus) des items locaux — corrige les chemins canoniques qui
@@ -196,7 +216,15 @@ fn emit(v: &Json, crate_name: &str, crate_real: &str) -> CResult<String> {
                     .and_then(|p| p["path"].as_array())
                     .map(|segs| segs.iter().filter_map(|s| s.as_str()).collect::<Vec<_>>().join("::"))
             })
-            .or_else(|| imp["trait"]["path"].as_str().map(|t| t.to_string()));
+            .or_else(|| imp["trait"]["path"].as_str().map(|t| t.to_string()))
+            .map(|t| collapse_std_private(&t)); // modules privés de la stdlib (B9 bis)
+        // crate racine du trait (UFCS) : si étrangère (ni core/std/alloc ni la crate courante), à déclarer
+        // en dep Cargo (B12).
+        if let Some(root) = trait_short.as_deref().and_then(|t| t.split("::").next()) {
+            if !matches!(root, "core" | "std" | "alloc") && root != crate_name {
+                foreign.insert(root.to_string());
+            }
+        }
         for mid in imp["items"].as_array().into_iter().flatten() {
             let Some(id) = mid.as_u64() else { continue };
             method_ids.insert(id);
@@ -279,6 +307,13 @@ fn emit(v: &Json, crate_name: &str, crate_real: &str) -> CResult<String> {
     // Directive `crate` = nom **publié** (clé Cargo, peut avoir des tirets) ; les chemins de types et le nom
     // d'import restent en `crate_name` (underscore).
     let mut iri = format!("# bindings auto-générés depuis `{crate_name}` (ironc bind)\ncrate {crate_real} = \"{version}\"\n");
+    // Crates étrangères des traits UFCS (B12) → deps Cargo, version **résolue** (Cargo.lock) pour éviter le
+    // hasard d'unification de versions. Inconnue du lock (rare) → ignorée (le nom de module ≠ nom publié).
+    for root in &foreign {
+        if let Some((name, ver)) = versions.get(root) {
+            iri.push_str(&format!("crate {name} = \"{ver}\"\n"));
+        }
+    }
     for ty in &opaque {
         iri.push_str(&format!("\nextern type {ty} = \"{crate_name}::{ty}\"\n")); // handle opaque (graphe fermé)
     }
@@ -300,6 +335,23 @@ fn emit(v: &Json, crate_name: &str, crate_real: &str) -> CResult<String> {
     }
     iri.push_str(&format!("\n# {bound} item(s) bindé(s), {skipped} non mappable(s) sauté(s)\n"));
     Ok(iri)
+}
+
+/// Collapse les modules **privés** internes de `core`/`std`/`alloc` (stables, non documentés en JSON donc
+/// hors `build_public_paths`) : `core::ops::arith::Mul` → `core::ops::Mul`, `core::str::traits::FromStr` →
+/// `core::str::FromStr`, `core::iter::traits::iterator::Iterator` → `core::iter::Iterator`. Sans ça les
+/// méthodes d'opérateurs/conversions en UFCS échouent (`error[E0603]: module \`arith\` is private`).
+fn collapse_std_private(path: &str) -> String {
+    if !(path.starts_with("core::") || path.starts_with("std::") || path.starts_with("alloc::")) {
+        return path.to_string();
+    }
+    // Modules d'organisation **privés** de la lib standard (les traits sont re-exportés au parent).
+    const PRIV: &[&str] = &[
+        "arith", "bit", "deref", "function", "index", "range", "unsize", "control_flow", "try_trait",
+        "coroutine", "async_function", "traits", "iterator", "collect", "double_ended", "exact_size",
+        "accum", "marker",
+    ];
+    path.split("::").filter(|s| !PRIV.contains(s)).collect::<Vec<_>>().join("::")
 }
 
 /// Heuristique de re-export (rustdoc donne le chemin **canonique** = module privé interne ; le chemin
