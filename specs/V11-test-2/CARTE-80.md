@@ -5,8 +5,9 @@
 > device / ML lourd — déclaré dès le départ). **Base** : `T` = testé et exécuté ici ; `A` = catégorie
 > **architecturale** certaine, confirmée par échantillon (ex. eframe/iced **bindent** mais sont event-loop).
 >
-> **Bilan : ~25 ✅ · ~13 🔵 · ~3 🟡 · ~39 🟥.** Les 🔵/🟥 ne sont **pas** des bugs : ce sont les frontières
-> cadrées (V12) et les murs durs déclarés. Tout le **durcissement possible** est fait (B5–B26, gate VERT).
+> **Bilan exact (compté ligne à ligne) : 24 ✅ · 21 🔵 · 7 🟡 · 28 🟥.** Les 🔵/🟥 ne sont **pas** des bugs :
+> ce sont les frontières cadrées (V12) et les murs durs déclarés. Tout le **durcissement possible** est fait
+> (B5–B26, gate VERT). Soit **~31 projets utilisables** (✅ + 🟡 dont la brique marche) sur 80.
 
 ## 1. CLI & fichiers
 | # | Crate | Statut | Base | Note |
@@ -156,11 +157,11 @@
 
 ## Synthèse honnête
 
-- **✅ ~25 verts** : tout ce qui est **valeur/objet concret** (CLI, données dynamiques, SQLite, image, audio-fichier, QR, vectoriel-bigint, géo-temps, parsing HTML/RSS, terminal-requêtes) marche.
-- **🔵 ~13 limites de modèle** (cadré V12) : scalaire générique (24100), io par flux (52800), serde typé
+- **✅ 24 verts** : tout ce qui est **valeur/objet concret** (CLI, données dynamiques, SQLite, image, audio-fichier, QR, vectoriel-bigint, géo-temps, parsing HTML/RSS, terminal-requêtes) marche.
+- **🔵 21 limites de modèle** (cadré V12) : scalaire générique (24100), io par flux (52800), serde typé
   (52900), retour emprunté (30200), octets (82000), ctor à borne générique de crate, taille fixe.
-- **🟡 ~3 partiels** : la brique de base binde (sysinfo/crossterm), mais le **tout** (TUI/jeu) est event-loop.
-- **🟥 ~39 murs durs** *déclarés dès le cadrage* : GUI/jeux (boucle d'événements + état mutable), async
+- **🟡 7 partiels** : la brique de base binde (sysinfo/crossterm), mais le **tout** (TUI/jeu) est event-loop.
+- **🟥 28 murs durs** *déclarés dès le cadrage* : GUI/jeux (boucle d'événements + état mutable), async
   (web/bots/IoT), réseau, `no_std`/embarqué (I2), ML lourd, device audio/série. Ils **bindent** souvent
   (eframe 474, iced 134) — c'est le **modèle d'exécution** qui ne colle pas, pas le binder.
 
