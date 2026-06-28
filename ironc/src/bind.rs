@@ -18,7 +18,11 @@ fn run_rustdoc(crate_dir: &Path, pkg: Option<&str>, stem: &str) -> CResult<Json>
     if let Some(p) = pkg {
         cmd.args(["-p", p]);
     }
-    cmd.arg("--manifest-path")
+    // `--lib` : documenter la **bibliothèque** (une crate à plusieurs cibles — lib + bin(s)/exemple(s),
+    // ex. `qrcode` — sinon `cargo rustdoc` échoue « passing --lib or --bin NAME »). No-op pour une crate à
+    // lib unique (B20).
+    cmd.arg("--lib")
+        .arg("--manifest-path")
         .arg(crate_dir.join("Cargo.toml"))
         .args(["--", "-Zunstable-options", "--output-format", "json"]);
     let out = cmd
@@ -625,9 +629,19 @@ fn project(f: &Json, owner: &str, extra_gen: &Generics) -> Option<Sig> {
             recv = Some(recv_kind(ty));
             continue;
         }
-        // param nommé comme un mot-clé Iron (`lambda`, `in`, `type`…) → renommé (le nom n'a pas
-        // d'importance, l'appel est positionnel) pour rester un identifiant valide.
-        let pn = if is_iron_keyword(pn) { format!("{pn}_") } else { pn.to_string() };
+        // Nom de param → identifiant Iron valide (l'appel est **positionnel**, le nom n'importe pas) :
+        // - **motif** non-identifiant (`(x, y)` d'un `fn index(&self, (x, y): …)` déstructuré) → `argN` (B21) ;
+        // - **mot-clé** Iron (`lambda`/`in`/`type`…) → `{nom}_`.
+        let valid = !pn.is_empty()
+            && pn.chars().next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+            && pn.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+        let pn = if !valid {
+            format!("arg{i}")
+        } else if is_iron_keyword(pn) {
+            format!("{pn}_")
+        } else {
+            pn.to_string()
+        };
         match map_type(ty, &gen) {
             Some(t) => {
                 // param **par valeur** (pas d'emprunt Rust) d'un *handle* (type externe/struct, PascalCase) →
