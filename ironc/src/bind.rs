@@ -393,12 +393,22 @@ fn project(f: &Json, owner: &str) -> Option<Sig> {
     if f["header"]["is_unsafe"].as_bool() == Some(true) {
         return None;
     }
-    // générique au niveau de la fonction → sauté (couche B / instance-pinning, 51400).
-    if f["generics"]["params"]
-        .as_array()
-        .map_or(false, |a| a.iter().any(|p| !p["kind"]["lifetime"].is_object()))
-    {
-        return None;
+    // Génériques de fonction résolus par leurs **bornes d'entrée** (`P: AsRef<Path>` → `str`) ; un générique
+    // sans borne mappable reste `None` → la fn est sautée si ce générique est réellement utilisé (via
+    // `map_type` qui renverra `None`). Couvre `new(path: impl AsRef<Path>)` (ubiquitaire) sans débinder les
+    // vraies fns génériques (`fn parse<T: FromStr>()` → `T` non mappable → sautée comme avant).
+    let mut gen: Generics = HashMap::new();
+    // `Self` (type de retour des ctors `fn new(...) -> Self`) → le type impl'é. Sans ça `new` est sauté.
+    if !owner.is_empty() {
+        gen.insert("Self".to_string(), Some(owner.to_string()));
+    }
+    for p in f["generics"]["params"].as_array().into_iter().flatten() {
+        if let Some(name) = p["name"].as_str() {
+            let ty = &p["kind"]["type"];
+            if ty.is_object() {
+                gen.insert(name.to_string(), bound_to_iron(&ty["bounds"]));
+            }
+        }
     }
     let inputs = f["sig"]["inputs"].as_array()?;
     let mut recv = None;
@@ -414,7 +424,7 @@ fn project(f: &Json, owner: &str) -> Option<Sig> {
         // param nommé comme un mot-clé Iron (`lambda`, `in`, `type`…) → renommé (le nom n'a pas
         // d'importance, l'appel est positionnel) pour rester un identifiant valide.
         let pn = if is_iron_keyword(pn) { format!("{pn}_") } else { pn.to_string() };
-        match map_type(ty) {
+        match map_type(ty, &gen) {
             Some(t) => params.push(format!("{pn}: {t}")),
             None => return None,
         }
@@ -429,7 +439,7 @@ fn project(f: &Json, owner: &str) -> Option<Sig> {
         "unit".to_string()
     } else if let Some(inner) = borrowed_inner(out) {
         // getter : retour emprunté `&T` → valeur possédée (clone, D4).
-        match map_type(inner) {
+        match map_type(inner, &gen) {
             Some(t) => {
                 idioms.push("clone");
                 t
@@ -437,7 +447,7 @@ fn project(f: &Json, owner: &str) -> Option<Sig> {
             None => return None,
         }
     } else {
-        map_type(out)?
+        map_type(out, &gen)?
     };
     Some(Sig { recv, params, ret, idioms })
 }
@@ -485,18 +495,53 @@ fn render(name: &str, sig: &Sig, free_path: Option<&str>) -> String {
 }
 
 /// Projection récursive type-Rust → type-Iron (51000, D1). `None` si non mappable. **Aucun widening.**
-fn map_type(t: &Json) -> Option<String> {
+/// Génériques d'une fonction résolus en type Iron : `P: AsRef<Path>` → `Some("str")`, `T: Clone` → `None`
+/// (non mappable → la fn sera sautée si `T` est utilisé). Clé = nom du générique.
+type Generics = HashMap<String, Option<String>>;
+
+/// Monomorphise un faisceau de bornes de trait **en position d'entrée** vers un type Iron concret :
+/// `AsRef<Path>`/`AsRef<str>`/`Into<String>`/`ToString` → `str` (couvre le motif ubiquitaire
+/// `new(path: impl AsRef<Path>)`). Tout le reste → `None`.
+fn bound_to_iron(bounds: &Json) -> Option<String> {
+    for b in bounds.as_array().into_iter().flatten() {
+        let tr = &b["trait_bound"]["trait"];
+        let tname = tr["path"].as_str().unwrap_or("").rsplit("::").next().unwrap_or("");
+        let arg = tr["args"]["angle_bracketed"]["args"]
+            .as_array()
+            .and_then(|a| a.first())
+            .and_then(|x| x.get("type"));
+        let arg_name = arg
+            .and_then(|t| t["resolved_path"]["path"].as_str().or_else(|| t["primitive"].as_str()))
+            .map(|p| p.rsplit("::").next().unwrap_or(p));
+        match (tname, arg_name) {
+            ("AsRef" | "Into" | "AsMut", Some("Path" | "PathBuf" | "OsStr" | "OsString" | "str" | "String")) => {
+                return Some("str".to_string())
+            }
+            ("ToString", _) => return Some("str".to_string()),
+            _ => {}
+        }
+    }
+    None
+}
+
+fn map_type(t: &Json, gen: &Generics) -> Option<String> {
     if let Some(p) = t["primitive"].as_str() {
         return map_prim(p);
     }
+    if let Some(g) = t["generic"].as_str() {
+        return gen.get(g).cloned().flatten(); // générique résolu par ses bornes (ou None → sauté)
+    }
+    if let Some(bounds) = t.get("impl_trait") {
+        return bound_to_iron(bounds); // `impl AsRef<Path>` en position d'argument
+    }
     if let Some(b) = t.get("borrowed_ref") {
-        return map_type(&b["type"]); // emprunt en entrée → intérieur (& réinjecté au lowering)
+        return map_type(&b["type"], gen); // emprunt en entrée → intérieur (& réinjecté au lowering)
     }
     if let Some(s) = t.get("slice") {
-        return map_type(s).map(|x| format!("list[{x}]"));
+        return map_type(s, gen).map(|x| format!("list[{x}]"));
     }
     if let Some(items) = t["tuple"].as_array() {
-        let parts: Option<Vec<String>> = items.iter().map(map_type).collect();
+        let parts: Option<Vec<String>> = items.iter().map(|x| map_type(x, gen)).collect();
         return parts.map(|p| format!("({})", p.join(", ")));
     }
     if let Some(rp) = t.get("resolved_path") {
@@ -505,13 +550,13 @@ fn map_type(t: &Json) -> Option<String> {
             .as_array()
             .map(|a| a.iter().filter_map(|x| x.get("type")).collect())
             .unwrap_or_default();
-        return map_named(name, &targs);
+        return map_named(name, &targs, gen);
     }
-    None // generic nu, dyn Trait, qualified_path, raw_pointer → couche B/C
+    None // dyn Trait, qualified_path, raw_pointer → couche B/C
 }
 
-fn map_named(name: &str, targs: &[&Json]) -> Option<String> {
-    let one = |i: usize| targs.get(i).and_then(|t| map_type(t));
+fn map_named(name: &str, targs: &[&Json], gen: &Generics) -> Option<String> {
+    let one = |i: usize| targs.get(i).and_then(|t| map_type(t, gen));
     match name {
         "String" | "str" | "Cow" | "PathBuf" | "OsString" => Some("str".to_string()),
         "Vec" | "VecDeque" => Some(format!("list[{}]", one(0)?)),
