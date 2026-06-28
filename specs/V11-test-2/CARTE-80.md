@@ -155,17 +155,42 @@
 
 ---
 
-## Synthèse honnête
+## Re-classification HONNÊTE (la distinction 🔵/🟥 était bidon)
 
-- **✅ 24 verts** : tout ce qui est **valeur/objet concret** (CLI, données dynamiques, SQLite, image, audio-fichier, QR, vectoriel-bigint, géo-temps, parsing HTML/RSS, terminal-requêtes) marche.
-- **🔵 21 limites de modèle** (cadré V12) : scalaire générique (24100), io par flux (52800), serde typé
-  (52900), retour emprunté (30200), octets (82000), ctor à borne générique de crate, taille fixe.
-- **🟡 7 partiels** : la brique de base binde (sysinfo/crossterm), mais le **tout** (TUI/jeu) est event-loop.
-- **🟥 28 murs durs** *déclarés dès le cadrage* : GUI/jeux (boucle d'événements + état mutable), async
-  (web/bots/IoT), réseau, `no_std`/embarqué (I2), ML lourd, device audio/série. Ils **bindent** souvent
-  (eframe 474, iced 134) — c'est le **modèle d'exécution** qui ne colle pas, pas le binder.
+Il n'y a que **deux** statuts pour un projet qui ne passe pas. La séparation 🔵/🟥 ne voulait rien dire :
+les deux = « bloqué ». La seule question utile : **bug du pont** (réparable maintenant) ou **capacité que
+le langage n'a pas** (feature) ?
 
-> **Ce n'est pas du travail bâclé** : c'est exactement la **carte de stabilité** demandée. Le ~1/3 « valeur
-> concrète » passe ; le reste se répartit proprement entre **6 frontières cadrées (V12)** et les **murs
-> d'architecture** annoncés. Aucun de ces murs n'est franchissable par du *durcissement* — ils exigent une
-> extension du **langage** (génériques de type, io par flux, async, derive, `no_std`).
+### A. ✅ Marche aujourd'hui — **24** (+ #78 pur-Iron)
+CLI, données dynamiques (json/html/rss/sql), image/QR/vectoriel-2D, audio-fichier, bigint, géo-temps,
+terminal-requêtes (sysinfo/crossterm).
+
+### B. 🔧 BUG du binder/lower — réparable (peu nombreux, et souvent seulement *partiels*)
+| Projet | Le bug | Effet réel du fix |
+|---|---|---|
+| — (fait) | `str.encode()`/`bytes.decode()` | **corrigé (B27)** — vrai bug que j'avais parqué à tort |
+| 38 plotters (backend) | coercition d'éléments de **tuple** (`(200,150)` i64 vs `(u32,u32)`) | *construit* le backend ; le chart complet = API de dessin |
+| 18 tiny_http / 01 clap (ctor) | mappings de bornes std manquants (`ToSocketAddrs`/`Into<newtype>` → `str`) | *construit* serveur/commande ; le **tout** = io/event-loop |
+| 12 sled (insert) | `list[u8]` **par valeur** vers `Into<IVec>` | clés binaires |
+
+→ **Honnêteté** : après vérif, **80 PoW / sha2-hex ne sont PAS un bug simple** — le type d'élément du digest
+(`u8`) vit dans la crate **étrangère `generic-array`**, non récupérable sans binding multi-crate ou hack
+spécifique-crate. Ça bascule en **capacité** (C). Et les bugs restants font surtout *construire* le 1er
+objet ; le **projet complet** retombe sur une capacité. Donc : les bugs réparables ajoutent **0-1 vert
+complet**, pas une vague.
+
+### C. 🧱 CAPACITÉ que le langage n'a pas — **feature, pas durcissement** (~51)
+Une seule liste, peu importe la « couleur » que je leur avais collée :
+- **Génériques de type** (`Point<T>`, `Series<T>`, `Vector<T>`) : geo, nalgebra, ndarray, polars, rustfft, dialoguer, rapier2d. → [24100]
+- **serde typé** (macros derive) : toml-doc, serde_yaml, bincode, jsonwebtoken. → [52900]
+- **io par flux** (`Write`/`Read` streaming) : flate2, printpdf-save, quick-xml. → [52800]
+- **Boucle d'événements + état mutable** : tout GUI (26-30), TUI complet (31-32), jeux (46-50).
+- **Runtime async** : axum, teloxide, redis, tungstenite, hickory, rumqttc, réseau (14/16/19/21-25).
+- **`no_std` / matériel** : esp-hal (71), rppal, serialport, btleplug, linux-embedded-hal ; build device (rodio/cpal/minifb).
+- **ML lourd / tenseurs** : linfa, candle, tract, smartcore.
+- **Durée de vie d'un retour emprunté** : midly. → [30200]
+- **Tableaux à taille fixe** (`GenericArray<u8, N>`) : aes-gcm, chacha20poly1305.
+
+> **Conclusion franche.** ~24 marchent, ~5 sont des **bugs** que je finis de corriger (→ ~26-29), et le gros
+> (~51) demande de **vraies extensions du langage** — pas du durcissement. La « couleur » bleu/rouge était
+> une fausse distinction de ma part ; le vrai axe c'est **bug vs feature**, et la majorité est *feature*.
