@@ -195,6 +195,9 @@ fn emit(v: &Json, crate_name: &str, crate_real: &str, versions: &HashMap<String,
     let index = v["index"]
         .as_object()
         .ok_or_else(|| CompileError::msg("rustdoc-json : `.index` absent (format inattendu)"))?;
+    // B33 : recense les alias `pub type FooResult<T> = Result<T, E>` pour les **expanser** en leur forme
+    // Iron (`ImageResult<DynamicImage>` → `Result[DynamicImage]`) au lieu d'un handle opaque inutilisable.
+    populate_alias_map(index);
     // Crates **étrangères** référencées par des chemins de traits UFCS (`num_traits`, `rand`…) — à déclarer
     // comme deps Cargo, sinon `error[E0433]: cannot find module or crate num_traits` (B12).
     let mut foreign: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
@@ -797,6 +800,56 @@ fn bound_to_iron(bounds: &Json) -> Option<String> {
     None
 }
 
+thread_local! {
+    /// Alias de type `pub type FooResult<T> = Result<T, E>` (B33) : id rustdoc → (noms de params, type
+    /// sous-jacent). Peuplé par `populate_alias_map` au début de chaque `emit`. Permet d'**expanser**
+    /// l'alias en sa forme Iron au lieu de le binder en handle opaque non déballable (`.unwrap()` cassé).
+    static ALIAS_MAP: std::cell::RefCell<HashMap<u64, (Vec<String>, Json)>> =
+        std::cell::RefCell::new(HashMap::new());
+    /// Garde de récursion (alias → alias → …) : borne la profondeur d'expansion.
+    static ALIAS_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// Recense les `type_alias` de l'index → `ALIAS_MAP` (B33). Appelé une fois par `emit`.
+fn populate_alias_map(index: &serde_json::Map<String, Json>) {
+    ALIAS_MAP.with(|m| {
+        let mut m = m.borrow_mut();
+        m.clear();
+        for (id, item) in index {
+            let Some(ta) = item["inner"].get("type_alias") else { continue };
+            let Some(under) = ta.get("type") else { continue };
+            let params: Vec<String> = ta["generics"]["params"]
+                .as_array()
+                .map(|a| a.iter().filter_map(|p| p["name"].as_str().map(String::from)).collect())
+                .unwrap_or_default();
+            if let Ok(id) = id.parse::<u64>() {
+                m.insert(id, (params, under.clone()));
+            }
+        }
+    });
+}
+
+/// Tente d'expanser un `resolved_path` qui pointe sur un alias de type (B33). Substitue les params de
+/// l'alias par les args **mappés dans le `gen` courant**, puis projette le type sous-jacent. Renvoie `None`
+/// si l'id n'est pas un alias, si la profondeur déborde, ou si l'expansion ne mappe pas — auquel cas
+/// l'appelant **retombe** sur le handle opaque (jamais de régression : on n'expanse que si ça améliore).
+fn try_expand_alias(id: u64, targs: &[&Json], gen: &Generics) -> Option<String> {
+    let entry = ALIAS_MAP.with(|m| m.borrow().get(&id).cloned())?;
+    let (params, under) = entry;
+    if ALIAS_DEPTH.with(|d| d.get()) > 16 {
+        return None;
+    }
+    let mut alias_gen: Generics = Generics::new();
+    for (i, pname) in params.iter().enumerate() {
+        // chaque param de l'alias ← l'arg correspondant, mappé dans le `gen` de l'appelant.
+        alias_gen.insert(pname.clone(), targs.get(i).and_then(|t| map_type(t, gen)));
+    }
+    ALIAS_DEPTH.with(|d| d.set(d.get() + 1));
+    let out = map_type(&under, &alias_gen);
+    ALIAS_DEPTH.with(|d| d.set(d.get() - 1));
+    out
+}
+
 fn map_type(t: &Json, gen: &Generics) -> Option<String> {
     if let Some(p) = t["primitive"].as_str() {
         return map_prim(p);
@@ -823,6 +876,14 @@ fn map_type(t: &Json, gen: &Generics) -> Option<String> {
             .as_array()
             .map(|a| a.iter().filter_map(|x| x.get("type")).collect())
             .unwrap_or_default();
+        // B33 : si le chemin pointe sur un alias de type, l'expanser (`ImageResult<DynamicImage>` →
+        // `Result[DynamicImage]`). On ne le fait que si l'expansion **mappe** ; sinon on retombe sur le
+        // handle (`map_named`) — strictement non régressif.
+        if let Some(id) = rp["id"].as_u64() {
+            if let Some(expanded) = try_expand_alias(id, &targs, gen) {
+                return Some(expanded);
+            }
+        }
         return map_named(name, &targs, gen);
     }
     None // dyn Trait, qualified_path, raw_pointer → couche B/C
