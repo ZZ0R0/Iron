@@ -11,15 +11,8 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::path::Path;
 use std::process::Command;
 
-/// Lance rustdoc-json sur la crate (dossier avec `Cargo.toml`) et renvoie le `.iri` généré.
-pub fn bind(crate_dir: &Path, pkg: Option<&str>) -> CResult<String> {
-    let manifest = std::fs::read_to_string(crate_dir.join("Cargo.toml"))
-        .map_err(|e| CompileError::msg(format!("lecture Cargo.toml : {e}")))?;
-    let target = match pkg {
-        Some(p) => p.to_string(),
-        None => pkg_name(&manifest).ok_or_else(|| CompileError::msg("nom de crate introuvable dans Cargo.toml"))?,
-    };
-
+/// Lance `cargo +nightly rustdoc --output-format json` sur la crate (ou un package `-p`) et renvoie le JSON.
+fn run_rustdoc(crate_dir: &Path, pkg: Option<&str>, stem: &str) -> CResult<Json> {
     let mut cmd = Command::new("cargo");
     cmd.args(["+nightly", "rustdoc"]);
     if let Some(p) = pkg {
@@ -37,18 +30,15 @@ pub fn bind(crate_dir: &Path, pkg: Option<&str>) -> CResult<String> {
             String::from_utf8_lossy(&out.stderr).trim()
         )));
     }
-
-    let json_path = crate_dir
-        .join("target/doc")
-        .join(format!("{}.json", target.replace('-', "_")));
+    let json_path = crate_dir.join("target/doc").join(format!("{stem}.json"));
     let json = std::fs::read_to_string(&json_path)
         .map_err(|e| CompileError::msg(format!("lecture {} : {e}", json_path.display())))?;
-    let v: serde_json::Value = serde_json::from_str(&json)
-        .map_err(|e| CompileError::msg(format!("JSON rustdoc invalide : {e}")))?;
+    serde_json::from_str(&json).map_err(|e| CompileError::msg(format!("JSON rustdoc invalide : {e}")))
+}
 
-    // Versions résolues des dépendances (transitives incluses) — pour déclarer les crates **étrangères**
-    // référencées dans les chemins de traits UFCS (`num_traits::…`) comme deps Cargo (B12). Clé = nom de
-    // module (underscores) ⇒ (nom publié, version) ; permet de retrouver `num-traits` depuis `num_traits`.
+/// Versions résolues (Cargo.lock) : nom de **module** (underscores) ⇒ (nom **publié**, version). Sert à
+/// déclarer les crates étrangères en deps (B12) et à retrouver `geo-types` depuis le module `geo_types`.
+fn read_lock_versions(crate_dir: &Path) -> HashMap<String, (String, String)> {
     let lock = std::fs::read_to_string(crate_dir.join("Cargo.lock")).unwrap_or_default();
     let mut versions: HashMap<String, (String, String)> = HashMap::new();
     let mut name: Option<String> = None;
@@ -62,8 +52,62 @@ pub fn bind(crate_dir: &Path, pkg: Option<&str>) -> CResult<String> {
             }
         }
     }
+    versions
+}
 
-    emit(&v, &target.replace('-', "_"), &target, &versions)
+/// Crates (modules, underscores) dont la crate **ré-exporte publiquement** des types (`pub use geo_types::…`)
+/// → à documenter aussi et fusionner (mur « crate façade », 52700). On ne retient que les **vraies crates
+/// externes** (présentes dans `external_crates`), pas les modules internes (`self`/`crate`/`super`).
+fn reexport_source_crates(v: &Json) -> Vec<String> {
+    let Some(idx) = v["index"].as_object() else { return vec![] };
+    let ext_names: HashSet<&str> = v["external_crates"]
+        .as_object()
+        .map(|o| o.values().filter_map(|c| c["name"].as_str()).collect())
+        .unwrap_or_default();
+    let mut out: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for it in idx.values() {
+        if it["inner"]["use"].is_object() && it["visibility"].as_str() == Some("public") {
+            if let Some(root) = it["inner"]["use"]["source"].as_str().and_then(|s| s.split("::").next()) {
+                if !matches!(root, "core" | "std" | "alloc") && ext_names.contains(root) {
+                    out.insert(root.to_string());
+                }
+            }
+        }
+    }
+    out.into_iter().collect()
+}
+
+/// Lance rustdoc-json sur la crate (dossier avec `Cargo.toml`) et renvoie le `.iri` généré.
+pub fn bind(crate_dir: &Path, pkg: Option<&str>) -> CResult<String> {
+    let manifest = std::fs::read_to_string(crate_dir.join("Cargo.toml"))
+        .map_err(|e| CompileError::msg(format!("lecture Cargo.toml : {e}")))?;
+    let target = match pkg {
+        Some(p) => p.to_string(),
+        None => pkg_name(&manifest).ok_or_else(|| CompileError::msg("nom de crate introuvable dans Cargo.toml"))?,
+    };
+    let v = run_rustdoc(crate_dir, pkg, &target.replace('-', "_"))?;
+    let versions = read_lock_versions(crate_dir);
+
+    let mut iri = emit(&v, &target.replace('-', "_"), &target, &versions)?;
+
+    // Mur « crate façade » (52700) : `geo` ré-exporte `geo_types::Point` dont les ctors/méthodes vivent dans
+    // `geo_types` (invisibles au bind mono-crate). On documente aussi ces crates-sources et on **fusionne**
+    // leurs blocs **après** (le parseur `.iri` est last-wins → `geo_types::Point` typé l'emporte sur le
+    // `Point` opaque de geo). Borné à 4 pour éviter les explosions.
+    for src_mod in reexport_source_crates(&v).into_iter().take(4) {
+        let Some((published, _)) = versions.get(&src_mod) else { continue };
+        let published = published.clone();
+        match run_rustdoc(crate_dir, Some(&published), &src_mod)
+            .and_then(|sub| emit(&sub, &src_mod, &published, &versions))
+        {
+            Ok(sub_iri) => {
+                iri.push_str(&format!("\n# --- re-export façade depuis `{published}` (52700) ---\n"));
+                iri.push_str(&sub_iri);
+            }
+            Err(_) => continue, // crate-source non documentable → on garde le binding mono-crate
+        }
+    }
+    Ok(iri)
 }
 
 type Json = serde_json::Value;
