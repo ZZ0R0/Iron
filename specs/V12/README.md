@@ -30,7 +30,8 @@
 | [43000] | **Émission `no_std` + HAL encapsulé** (embarqué, sans violer I2) | 4 | esp-hal (ESP32), rppal, serialport, btleplug, linux-embedded-hal | **cadré (nouveau)** |
 | [30200] | **Retour emprunté lié à l'entrée** (parseurs zéro-copie, `<'a>`) | 3 | midly, plotters(backend) | cadré |
 | [24200] | **Tableaux à taille fixe** (const-génériques, `[u8; 32]`/`GenericArray`) | 2 | aes-gcm, chacha20poly1305 | cadré |
-| [82000] | **Ergonomie des octets** (`bytes`, type d'élément d'itérateur externe `u8`, hex) | 8 | sha2(hex), PoW(80) | partiel (encode/decode faits B27) |
+| [24400] | **Type de l'élément d'un itérateur externe** (`for x in records()` → `x: Result[StringRecord]`) | 2 | csv, walkdir (locaux) · sha2-octets (foreign) | **🔧 CORRIGÉ (B30)** pour itérateurs **locaux** (CSV→JSON complet ✅) ; reste **capacité** pour `Item` **foreign** (`GenericArray<u8>`) |
+| [82000] | **Ergonomie des octets** (`bytes`, hex) — sous-cas de [24400] pour `u8` | 8 | sha2(hex), PoW(80) | partiel (encode/decode faits B27) |
 | [50500] | **Constantes** publiques d'un crate (`pub const`) | 5 | base64 | gap mineur |
 
 > Hors-langage (environnement, pas une spec) : `rodio`/`cpal`/`minifb` exigent des **libs système / une
