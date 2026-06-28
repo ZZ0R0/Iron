@@ -1,0 +1,14 @@
+import sys
+
+def main():
+    n = int(sys.argv[1])
+    total = 0
+    i = 0
+    while i < n:
+        x = (i * 7 + 1) % 100
+        y = (i * 3 + 5) % 100
+        total += x * y
+        i += 1
+    print(total)
+
+main()

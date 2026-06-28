@@ -936,6 +936,10 @@ impl Cx<'_> {
         let it = self.place(iter);
         match self.type_of(iter) {
             Type::Dict(..) => quote! { #it.keys().cloned() },
+            // `for c in s` (Python) → caractères Rust `char` (rapide, sans allocation). `ord(c)`/`c == "x"`/
+            // `s + c` gérés pour les `char` (cf. ord/Binary). Python n'a pas de type char : `c` se comporte
+            // comme une chaîne d'un caractère.
+            Type::Str => quote! { #it.chars() },
             _ => quote! { #it.iter().cloned() },
         }
     }
@@ -989,9 +993,26 @@ impl Cx<'_> {
                 let i = self.value(idx);
                 match self.type_of(base) {
                     Type::Dict(..) => quote! { #b[&#i] },
+                    // str n'est jamais une lvalue d'index → accès caractère par valeur (indices négatifs gérés).
+                    Type::Str => quote! {{
+                        let __s = &#b;
+                        let __i = (#i) as i64;
+                        let __n = __s.chars().count() as i64;
+                        let __k = (if __i < 0 { __n + __i } else { __i }) as usize;
+                        __s.chars().nth(__k).unwrap().to_string()
+                    }},
                     _ => quote! { #b[(#i) as usize] },
                 }
             }
+            _ => self.value(e),
+        }
+    }
+
+    /// Argument d'affichage (`print`) : emprunte une place simple (Var/Field — pas de consommation), mais
+    /// **calcule** un Index/Slice/etc. via `value` (indices négatifs, chars de str gérés correctement).
+    fn display_arg(&mut self, e: &Expr) -> TokenStream {
+        match &e.kind {
+            ExprKind::Var(_) | ExprKind::Field { .. } => self.place(e),
             _ => self.value(e),
         }
     }
@@ -1067,10 +1088,44 @@ impl Cx<'_> {
                         let r = self.value(rhs);
                         quote! { (#l).div_euclid(#r) }
                     }
-                    // `+` sur chaînes (Python) : concaténation (Rust `String + String` ne marche pas).
-                    BinOp::Add if matches!(self.type_of(lhs), Type::Str) => {
+                    // `+` sur chaînes/char (Python) : concaténation. Couvre `s + c`/`c + s`/`c + c` (char
+                    // d'une boucle `for c in s`) → `format!` (Rust `String + String`/`char + char` échouent).
+                    BinOp::Add
+                        if matches!(self.type_of(lhs), Type::Str | Type::Char)
+                            || matches!(self.type_of(rhs), Type::Str | Type::Char) =>
+                    {
                         let r = self.value(rhs);
                         quote! { format!("{}{}", #l, #r) }
+                    }
+                    // comparaisons : `char` vs littéral chaîne d'1 caractère → comparaison de `char` (rapide).
+                    BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
+                        let o = lower_binop(*op);
+                        let lc = matches!(self.type_of(lhs), Type::Char);
+                        let rc = matches!(self.type_of(rhs), Type::Char);
+                        if lc && !rc {
+                            if let Some(ch) = str_lit_char(rhs) {
+                                let cl = proc_macro2::Literal::character(ch);
+                                return quote! { (#l #o #cl) };
+                            }
+                        }
+                        if rc && !lc {
+                            if let Some(ch) = str_lit_char(lhs) {
+                                let cl = proc_macro2::Literal::character(ch);
+                                let r = self.value(rhs);
+                                return quote! { (#cl #o #r) };
+                            }
+                        }
+                        let r = self.value(rhs);
+                        quote! { (#l #o #r) }
+                    }
+                    // `[x] * n` / `n * [x]` (Python) : répétition de liste. Idem `"ab" * n` pour les chaînes.
+                    BinOp::Mul if matches!(self.type_of(lhs), Type::List(_) | Type::Str) => {
+                        let r = self.value(rhs);
+                        quote! { (#l).repeat((#r) as usize) }
+                    }
+                    BinOp::Mul if matches!(self.type_of(rhs), Type::List(_) | Type::Str) => {
+                        let r = self.value(rhs);
+                        quote! { (#r).repeat((#l) as usize) }
                     }
                     // `in`/`not in` (10800) : contains / contains_key.
                     BinOp::In | BinOp::NotIn => {
@@ -1134,15 +1189,38 @@ impl Cx<'_> {
             ExprKind::Index { base, idx } => {
                 let b = self.place(base);
                 let i = self.value(idx);
-                let access = match self.type_of(base) {
-                    Type::Dict(..) => quote! { #b[&#i] },
-                    _ => quote! { #b[(#i) as usize] },
-                };
-                if is_copy(&self.type_of(e)) {
-                    quote! { #access }
-                } else {
-                    self.audit.push(e.span);
-                    quote! { #access.clone() }
+                match self.type_of(base) {
+                    Type::Dict(..) => {
+                        if is_copy(&self.type_of(e)) {
+                            quote! { #b[&#i] }
+                        } else {
+                            self.audit.push(e.span);
+                            quote! { #b[&#i].clone() }
+                        }
+                    }
+                    // `s[i]` (Python) → str d'un caractère ; indices négatifs depuis la fin.
+                    Type::Str => quote! {{
+                        let __s = &#b;
+                        let __i = (#i) as i64;
+                        let __n = __s.chars().count() as i64;
+                        let __k = (if __i < 0 { __n + __i } else { __i }) as usize;
+                        __s.chars().nth(__k).unwrap().to_string()
+                    }},
+                    // liste : index négatif depuis la fin ; clone si non-Copy.
+                    _ => {
+                        let non_copy = !is_copy(&self.type_of(e));
+                        if non_copy {
+                            self.audit.push(e.span);
+                        }
+                        let tail = if non_copy { quote! { .clone() } } else { quote! {} };
+                        quote! {{
+                            let __b = &#b;
+                            let __i = (#i) as i64;
+                            let __n = __b.len() as i64;
+                            let __k = (if __i < 0 { __n + __i } else { __i }) as usize;
+                            __b[__k] #tail
+                        }}
+                    }
                 }
             }
             ExprKind::ListLit { items } => {
@@ -1281,26 +1359,32 @@ impl Cx<'_> {
                 quote! { (#it).into_iter().#mapper.#collect }
             }
             ExprKind::Slice { base, lo, hi } => {
+                // Indices Python : bornes négatives = depuis la fin (`len + i`), clampées dans [0, len].
                 let b = self.place(base);
-                let lo_ts = match lo {
-                    Some(l) => {
-                        let l = self.value(l);
-                        quote! { (#l) as usize }
-                    }
-                    None => quote! { 0usize },
+                let is_str = matches!(self.type_of(base), Type::Str);
+                let lo_raw = match lo {
+                    Some(l) => self.value(l),
+                    None => quote! { 0i64 },
                 };
-                let range = match hi {
-                    Some(h) => {
-                        let h = self.value(h);
-                        quote! { #lo_ts..((#h) as usize) }
-                    }
-                    None => quote! { #lo_ts.. },
+                let hi_raw = match hi {
+                    Some(h) => self.value(h),
+                    None => quote! { __n },
                 };
-                if matches!(self.type_of(base), Type::Str) {
-                    quote! { #b[#range].to_string() }
+                // __n = longueur (chars pour str, len pour list) ; normalise une borne i64 → usize clampé.
+                let len_ts =
+                    if is_str { quote! { (__base.chars().count() as i64) } } else { quote! { (__base.len() as i64) } };
+                let body = if is_str {
+                    quote! { __base.chars().skip(__lo).take(__hi.saturating_sub(__lo)).collect::<String>() }
                 } else {
-                    quote! { #b[#range].to_vec() }
-                }
+                    quote! { __base[__lo..__hi.max(__lo)].to_vec() }
+                };
+                quote! {{
+                    let __base = &#b;
+                    let __n = #len_ts;
+                    let __lo = { let __x = (#lo_raw) as i64; (if __x < 0 { (__n + __x).max(0) } else { __x.min(__n) }) as usize };
+                    let __hi = { let __x = (#hi_raw) as i64; (if __x < 0 { (__n + __x).max(0) } else { __x.min(__n) }) as usize };
+                    #body
+                }}
             }
         }
     }
@@ -1399,7 +1483,7 @@ impl Cx<'_> {
             if !self.user_fns.contains(name) {
             match name.as_str() {
                 "print" if args.len() == 1 => {
-                    let a = self.place(&args[0]); // println! emprunte → pas de clone
+                    let a = self.display_arg(&args[0]);
                     return if is_debug_type(&self.type_of(&args[0])) {
                         quote! { println!("{:?}", #a) }
                     } else {
@@ -1441,6 +1525,20 @@ impl Cx<'_> {
                 "str" if args.len() == 1 => {
                     let a = self.value(&args[0]);
                     return quote! { (#a).to_string() };
+                }
+                // ord(c)/chr(n) (V11-test) : code Unicode ↔ caractère. `c` = char (boucle `for c in s`) ou
+                // str d'un caractère (indexation/littéral).
+                "ord" if args.len() == 1 => {
+                    if matches!(self.type_of(&args[0]), Type::Char) {
+                        let a = self.value(&args[0]);
+                        return quote! { ((#a) as i64) };
+                    }
+                    let a = self.place(&args[0]);
+                    return quote! { (#a.chars().next().unwrap() as i64) };
+                }
+                "chr" if args.len() == 1 => {
+                    let a = self.value(&args[0]);
+                    return quote! { (char::from_u32((#a) as u32).unwrap().to_string()) };
                 }
                 "abs" if args.len() == 1 => {
                     let a = self.value(&args[0]);
@@ -1796,6 +1894,28 @@ impl Cx<'_> {
                 let s = arg(self, 0);
                 quote! { #b.split((#s).as_str()).map(|x| x.to_string()).collect::<Vec<_>>() }
             }
+            // `s.split()` sans argument (Python) → découpe sur les blancs (runs d'espaces, trim).
+            (Type::Str, "split") if args.is_empty() => {
+                let b = self.place(base);
+                quote! { #b.split_whitespace().map(|x| x.to_string()).collect::<Vec<_>>() }
+            }
+            // `s.splitlines()` → lignes (sans le `\n`), gère un `\n` final.
+            (Type::Str, "splitlines") => {
+                let b = self.place(base);
+                quote! { #b.lines().map(|x| x.to_string()).collect::<Vec<_>>() }
+            }
+            // `s.count(sub)` → nombre d'occurrences (non chevauchantes), comme Python.
+            (Type::Str, "count") if args.len() == 1 => {
+                let b = self.place(base);
+                let s = arg(self, 0);
+                quote! { (#b.matches((#s).as_str()).count() as i64) }
+            }
+            // `sep.join(list)` (forme méthode Python) → `list.join(sep)`.
+            (Type::Str, "join") if args.len() == 1 => {
+                let b = self.place(base);
+                let xs = self.place(&args[0]);
+                quote! { #xs.join(#b.as_str()) }
+            }
             (Type::Str, "replace") if args.len() == 2 => {
                 let b = self.place(base);
                 let a = arg(self, 0);
@@ -2043,6 +2163,18 @@ fn is_annotatable(t: &Type) -> bool {
 
 /// Dunders bénis surchargeables (V11, DC-4) — désucrés en `impl std::ops`/`PartialEq`/`PartialOrd`/`Display`.
 /// `__getitem__` (→ `Index`) différé (retour `&Output`). Hors de cet ensemble : méthode inhérente normale.
+/// Caractère d'un littéral chaîne d'**un seul** caractère (sinon `None`) — pour comparer un `char` à `"x"`.
+fn str_lit_char(e: &Expr) -> Option<char> {
+    if let ExprKind::Lit(Lit::Str(s)) = &e.kind {
+        let mut it = s.chars();
+        let c = it.next()?;
+        if it.next().is_none() {
+            return Some(c);
+        }
+    }
+    None
+}
+
 fn is_blessed_dunder(name: &str) -> bool {
     matches!(name, "__add__" | "__sub__" | "__mul__" | "__div__" | "__eq__" | "__lt__" | "__str__")
 }

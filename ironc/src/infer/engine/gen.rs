@@ -229,6 +229,7 @@ impl<'a> Gen<'a> {
         match self.subst.apply(&t) {
             Type::List(e) | Type::Set(e) => *e,
             Type::Dict(k, _) => *k,
+            Type::Str => Type::Char, // `for c in s` → c : char (Rust)
             _ => self.fresh(),
         }
     }
@@ -422,6 +423,26 @@ impl<'a> Gen<'a> {
     fn binary(&mut self, op: &BinOp, tl: Type, tr: Type, sp: Span) -> Type {
         use BinOp::*;
         match op {
+            // Répétition Python `str*int` / `list*int` (et symétrique) : résultat = le str/list, l'autre = i64.
+            // Sinon `*` numérique → traité comme les autres arithmétiques (opérandes égaux + Trait).
+            Mul if matches!(self.subst.apply(&tl), Type::Str | Type::List(_)) => {
+                let rl = self.subst.apply(&tl);
+                self.eq(tr, Type::I64, sp);
+                rl
+            }
+            Mul if matches!(self.subst.apply(&tr), Type::Str | Type::List(_)) => {
+                let rr = self.subst.apply(&tr);
+                self.eq(tl, Type::I64, sp);
+                rr
+            }
+            // Concaténation chaîne/char (Python `s + c`, `c + c`…) : **les deux** opérandes str/char →
+            // résultat str, sans unification forcée. `str + int` (un seul côté) reste un conflit → la
+            // branche arithmétique l'unifie et le diagnostic natif le signale (1 + "x").
+            Add if matches!(self.subst.apply(&tl), Type::Str | Type::Char)
+                && matches!(self.subst.apply(&tr), Type::Str | Type::Char) =>
+            {
+                Type::Str
+            }
             Add | Sub | Mul | Div | Rem | Pow | FloorDiv | BitAnd | BitOr | BitXor | Shl | Shr => {
                 self.eq(tl.clone(), tr, sp);
                 let b = match op {
@@ -433,6 +454,13 @@ impl<'a> Gen<'a> {
                 };
                 self.req(tl.clone(), b, sp);
                 tl
+            }
+            // Comparaison impliquant un `char` (`c == "x"`, `c == c2`) : pas d'unification forcée (char/str
+            // coexistent), résultat bool.
+            Eq | Ne | Lt | Le | Gt | Ge
+                if matches!(self.subst.apply(&tl), Type::Char) || matches!(self.subst.apply(&tr), Type::Char) =>
+            {
+                Type::Bool
             }
             Eq | Ne => {
                 self.eq(tl.clone(), tr, sp);

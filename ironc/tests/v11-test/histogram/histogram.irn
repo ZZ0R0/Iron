@@ -1,0 +1,12 @@
+import std
+
+def main():
+    data = read_text(args()[1])
+    counts = [0] * 256
+    for c in data:
+        counts[ord(c)] += 1
+    best = 0
+    for v in counts:
+        if v > best:
+            best = v
+    print(best)

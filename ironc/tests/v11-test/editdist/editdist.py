@@ -1,0 +1,39 @@
+import sys
+
+def main():
+    n = int(sys.argv[1])
+    a = []
+    b = []
+    i = 0
+    while i < n:
+        a.append((i * 7) % 26)
+        b.append((i * 5 + 3) % 26)
+        i += 1
+    prev = []
+    j = 0
+    while j <= n:
+        prev.append(j)
+        j += 1
+    i = 1
+    while i <= n:
+        cur = [i]
+        j = 1
+        while j <= n:
+            cost = 1
+            if a[i - 1] == b[j - 1]:
+                cost = 0
+            x = prev[j] + 1
+            y = cur[j - 1] + 1
+            z = prev[j - 1] + cost
+            m = x
+            if y < m:
+                m = y
+            if z < m:
+                m = z
+            cur.append(m)
+            j += 1
+        prev = cur
+        i += 1
+    print(prev[n])
+
+main()

@@ -1,0 +1,18 @@
+import sys
+
+def main():
+    n = int(sys.argv[1])
+    is_p = [True] * (n + 1)
+    count = 0
+    i = 2
+    while i <= n:
+        if is_p[i]:
+            count += 1
+            j = i + i
+            while j <= n:
+                is_p[j] = False
+                j += i
+        i += 1
+    print(count)
+
+main()

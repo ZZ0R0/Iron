@@ -1,0 +1,24 @@
+import sys
+
+def main():
+    data = open(sys.argv[1]).read()
+    xs = []
+    for line in data.splitlines():
+        xs.append(int(line))
+    n = len(xs)
+    i = 1
+    while i < n:
+        key = xs[i]
+        j = i - 1
+        while j >= 0 and xs[j] > key:
+            xs[j + 1] = xs[j]
+            j -= 1
+        xs[j + 1] = key
+        i += 1
+    modulo = 1000000007
+    h = 0
+    for v in xs:
+        h = (h * 31 + v) % modulo
+    print(h)
+
+main()

@@ -48,6 +48,9 @@ impl<'a> Lexer<'a> {
     fn peek2(&self) -> Option<u8> {
         self.src.get(self.pos + 1).copied()
     }
+    fn peek3(&self) -> Option<u8> {
+        self.src.get(self.pos + 2).copied()
+    }
     /// Pousse le **code point UTF-8** courant dans `s` et avance `pos` du bon nombre d'octets. Corrige
     /// le bug « octet-comme-char » (`c as char`) qui mojibakait les littéraux non-ASCII (`"café"` → `Café`).
     /// La source `.irn` est de l'UTF-8 valide ; on décode la séquence complète d'après l'octet de tête.
@@ -451,6 +454,10 @@ impl<'a> Lexer<'a> {
             (b'-', Some(b'=')) => two_!(TokenKind::MinusEq),
             (b'*', Some(b'*')) => two_!(TokenKind::StarStar),
             (b'*', Some(b'=')) => two_!(TokenKind::StarEq),
+            (b'/', Some(b'/')) if self.peek3() == Some(b'=') => {
+                self.pos += 3;
+                self.push(TokenKind::SlashSlashEq, start); // `//=` (affectation floor-div)
+            }
             (b'/', Some(b'/')) => two_!(TokenKind::SlashSlash),
             (b'/', Some(b'=')) => two_!(TokenKind::SlashEq),
             (b'%', Some(b'=')) => two_!(TokenKind::PercentEq),

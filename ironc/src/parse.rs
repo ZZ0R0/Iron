@@ -50,6 +50,7 @@ fn aug_op(t: &TokenKind) -> Option<BinOp> {
         TokenKind::StarEq => BinOp::Mul,
         TokenKind::SlashEq => BinOp::Div,
         TokenKind::PercentEq => BinOp::Rem,
+        TokenKind::SlashSlashEq => BinOp::FloorDiv,
         _ => return None,
     })
 }

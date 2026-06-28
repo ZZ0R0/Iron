@@ -1,0 +1,9 @@
+import std
+
+def main():
+    data = read_text(args()[1])
+    modulo = 4294967291
+    h = 0
+    for c in data:
+        h = (h * 131 + ord(c)) % modulo
+    print(h)

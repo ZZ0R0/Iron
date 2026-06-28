@@ -1,0 +1,9 @@
+import std
+
+def main():
+    data = read_text(args()[1])
+    total = 0
+    for c in data:
+        v = ord(c)
+        total += (v // 16) + (v % 16)
+    print(total)

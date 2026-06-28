@@ -1,0 +1,21 @@
+import sys
+
+def main():
+    data = open(sys.argv[1]).read()
+    lines = 0
+    words = 0
+    chars = 0
+    in_word = False
+    for c in data:
+        chars += 1
+        if c == "\n":
+            lines += 1
+        if c == " " or c == "\n" or c == "\t":
+            in_word = False
+        else:
+            if not in_word:
+                words += 1
+                in_word = True
+    print(str(lines) + " " + str(words) + " " + str(chars))
+
+main()

@@ -103,6 +103,7 @@ pub enum TokenKind {
     StarEq,
     SlashEq,
     PercentEq,
+    SlashSlashEq,
     StarStar,
     SlashSlash,
     EqEq,

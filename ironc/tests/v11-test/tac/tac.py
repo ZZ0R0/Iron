@@ -1,0 +1,16 @@
+import sys
+
+def main():
+    data = open(sys.argv[1]).read()
+    lines = data.splitlines()
+    modulo = 1000000007
+    h = 0
+    i = len(lines) - 1
+    while i >= 0:
+        line = lines[i]
+        for c in line:
+            h = (h * 31 + ord(c)) % modulo
+        i -= 1
+    print(h)
+
+main()

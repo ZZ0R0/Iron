@@ -14,8 +14,9 @@ fn arg0_ty(cx: &Inf, args: &[Expr]) -> Type {
 /// Type de retour d'une méthode built-in (str/list/dict, 80500) ; `None` si inconnue.
 fn builtin_method_ret(bt: &Type, name: &str) -> Option<Type> {
     Some(match (bt, name) {
-        (Type::Str, "upper" | "lower" | "strip" | "replace") => Type::Str,
-        (Type::Str, "split") => Type::List(Box::new(Type::Str)),
+        (Type::Str, "upper" | "lower" | "strip" | "replace" | "join") => Type::Str,
+        (Type::Str, "split" | "splitlines") => Type::List(Box::new(Type::Str)),
+        (Type::Str, "count") => Type::I64,
         (Type::Str, "startswith" | "endswith" | "contains") => Type::Bool,
         (Type::Str | Type::List(_), "len") => Type::I64,
         (Type::List(_), "append" | "sort" | "reverse") => Type::Unit,
@@ -98,6 +99,22 @@ pub(crate) fn stmt(cx: &mut Inf, s: &Stmt, scope: &mut Scope) {
         }
         StmtKind::ExprStmt(e) => {
             expr(cx, e, scope);
+            // `xs.append(x)` sur une liste d'élément encore inconnu (`xs = []`) → rétro-propage le type de
+            // l'élément (V11-test : construction de liste idiomatique).
+            if let ExprKind::Call { callee, args } = &e.kind {
+                if let ExprKind::Field { base, name } = &callee.kind {
+                    if name == "append" && args.len() == 1 {
+                        if let ExprKind::Var(v) = &base.kind {
+                            if matches!(scope.get(v), Some(Type::List(e)) if matches!(**e, Type::Unit)) {
+                                let et = expr(cx, &args[0], scope);
+                                if !matches!(et, Type::Unit) {
+                                    scope.insert(v.clone(), Type::List(Box::new(et)));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
         StmtKind::Yield(e) => {
             expr(cx, e, scope); // V9 (10900) : type collecté → `list[T]` (effective_ret)

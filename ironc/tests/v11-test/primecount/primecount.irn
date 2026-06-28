@@ -1,0 +1,18 @@
+import std
+
+def main():
+    n = int(args()[1])
+    count = 0
+    k = 2
+    while k < n:
+        d = 2
+        prime = True
+        while d * d <= k:
+            if k % d == 0:
+                prime = False
+                d = k
+            d += 1
+        if prime:
+            count += 1
+        k += 1
+    print(count)

@@ -191,6 +191,7 @@ pub(crate) fn element_of(t: &Type) -> Type {
         Type::List(e) => (**e).clone(),
         Type::Set(e) => (**e).clone(),
         Type::Dict(k, _) => (**k).clone(), // itère les clés
+        Type::Str => Type::Char,           // `for c in s` → c : char (Rust), comme un str d'1 caractère Python
         _ => Type::Unit,
     }
 }

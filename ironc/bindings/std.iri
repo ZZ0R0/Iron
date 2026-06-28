@@ -3,3 +3,7 @@
 extern fn read_file(path: str) -> Result[str] = "std::fs::read_to_string"
 extern fn write_file(path: str, content: str) -> Result[unit] = "std::fs::write"
 extern fn env_var(name: str) -> Result[str] = "std::env::var"
+# Arguments de ligne de commande (V11-test) : `sys.argv` rebindé. Binding-expression itérateur→Vec.
+extern fn args() -> list[str] = "std::env::args().collect::<Vec<String>>"
+# Lecture fichier → str directement (panique si erreur) : `open(p).read()` rebindé. Closure-expression.
+extern fn read_text(path: str) -> str = "(|p: &str| std::fs::read_to_string(p).unwrap())"

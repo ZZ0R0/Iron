@@ -1,0 +1,12 @@
+import std
+
+def main():
+    data = read_text(args()[1])
+    modulo = 1000000007
+    h = 0
+    for c in data:
+        v = ord(c)
+        if v >= 97 and v <= 122:
+            v = v - 32
+        h = (h * 31 + v) % modulo
+    print(h)
