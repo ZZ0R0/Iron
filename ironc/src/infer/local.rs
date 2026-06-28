@@ -22,6 +22,9 @@ fn builtin_method_ret(bt: &Type, name: &str) -> Option<Type> {
         (Type::Option(e) | Type::Result(e), "unwrap" | "expect") => (**e).clone(),
         (Type::ResultE(e, _), "unwrap" | "expect") => (**e).clone(),
         (Type::Str, "upper" | "lower" | "strip" | "replace" | "join") => Type::Str,
+        // `s.encode()` → octets UTF-8 (`list[u8]`) ; `b.decode()` → `str` (Python). Ergonomie d'octets.
+        (Type::Str, "encode") => Type::List(Box::new(Type::Num(NumKind::U8))),
+        (Type::List(_), "decode") => Type::Str,
         (Type::Str, "split" | "splitlines") => Type::List(Box::new(Type::Str)),
         (Type::Str, "count") => Type::I64,
         (Type::Str, "startswith" | "endswith" | "contains") => Type::Bool,

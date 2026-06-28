@@ -2076,6 +2076,10 @@ impl Cx<'_> {
         let arg = |s: &mut Self, i: usize| s.value(&args[i]);
         Some(match (&bt, name) {
             // --- str ---
+            // `s.encode()` → octets UTF-8 (`Vec<u8>`) ; `b.decode()` → `str` (`from_utf8_lossy`). Ergonomie
+            // d'octets : permet `digest.update(s.encode())`, clés binaires, etc.
+            (Type::Str, "encode") => { let b = self.place(base); quote! { #b.as_bytes().to_vec() } }
+            (Type::List(_), "decode") => { let b = self.place(base); quote! { String::from_utf8_lossy(&#b).to_string() } }
             (Type::Str, "upper") => { let b = self.place(base); quote! { #b.to_uppercase() } }
             (Type::Str, "lower") => { let b = self.place(base); quote! { #b.to_lowercase() } }
             (Type::Str, "strip") => { let b = self.place(base); quote! { #b.trim().to_string() } }
