@@ -18,7 +18,8 @@
 
 | Spec | Capacité | Sous-sys. | Projets bloqués | État spec |
 |---|---|:--:|---|---|
-| [24100] | **Génériques de type** suivis (`Point<T>`, `Vec<T>`, tenseurs) + monomorphisation scalaire | 2 | geo, nalgebra, ndarray, polars, rustfft, dialoguer, rapier2d, **ML** (candle/linfa/tract/smartcore) | spec'é |
+| **[24000]** | **FONDATION — le pont de correspondance Iron↔Rust (refactor)** + suivi des params de type. Tarit la dette B5→B33 ; prérequis de tout. | 2 | *(transverse — débloque la classe entière via [24100])* | **cadré + planifié** (`24000.md`, `planification/`) |
+| [24100] | **Génériques de type** suivis (`Point<T>`, `Vec<T>`, tenseurs) + monomorphisation scalaire — **réalisé par [24000]** (vagues 2-3) | 2 | geo, nalgebra, ndarray, polars, rustfft, dialoguer, rapier2d, **ML** (candle/linfa/tract/smartcore) | **planifié via [24000]** |
 | [52800] | **io par flux** (`Write`/`Read`/`BufRead`, puits/sources, out-params) | 5 | flate2, printpdf(save), quick-xml, image(save-stream) | spec'é |
 | [52900] | **serde typé** (derive + de/serialize générique) | 5 | toml(doc), serde_yaml, bincode, jsonwebtoken | cadré |
 | [24300] | **Implémenter un trait EXTERNE** sur un type Iron (`impl eframe::App for MyApp`) | 2 | GUI (eframe/iced), tout framework à trait-utilisateur | **confirmé par essai** (Iron parse `impl App for MyApp` mais émet un Rust faux : chemin/signatures) |
@@ -105,16 +106,26 @@ le reste butant sur les capacités V12 ci-dessus.
 - **[52900] serde typé / [24100].** `from_str::<T>` exige un `T` **dérivé** ; pas de macros derive en Iron.
   La voie **dynamique** `Value` marche déjà (serde_json ✅) — c'est le **typé** qui manque.
 
-## Priorisation suggérée (rentabilité)
+## Priorisation suggérée (rentabilité) — RÉVISÉE : fondation-refactor d'abord
 
-1. **[24100]** — débloque le plus de projets d'un coup (geo, nalgebra, ndarray, polars, rustfft + base ML) et
-   conditionne [52900]/[24200]. **Le meilleur premier pas.**
-2. **[52800]** io par flux — débloque flate2/printpdf/quick-xml, et complète [82000].
-3. **[35000]** event-loop — gros, structurant (tout GUI/jeux/TUI), mais c'est un **changement de modèle**.
-4. **[53000]** async, **[43000]** no_std — gros chantiers ciblés (web ; embarqué).
+> **Décision de planification (phase 2)** : on ne traite plus les capacités en cas-par-cas. Le census de la
+> frontière de types (`planification/README.md` §0) montre que les crate-bugs (B5→B33) naissent **d'un seul
+> endroit encodé 3×**. D'où une **fondation-refactor `[24000]`** (le **pont** de correspondance) **avant** toute
+> capacité — pour **tarir la dette à la source**, pas la déplacer.
 
-> **Méthode.** Chaque capacité = un cycle 4-phases à part entière. On en planifie **une** à la fois (commencer
-> par [24100]). Tout nouveau mur **de même nature** s'ajoute ici, jamais en cas-par-cas.
+0. **[24000] FONDATION (le pont)** — source unique de la correspondance Iron↔Rust + suivi des paramètres de
+   type. **Prérequis de tout.** Cf. `24000.md` + `planification/24000.{1..4}.md`.
+1. **[24100] génériques** — n'est plus un chantier séparé : c'est **le remplissage** de `[24000]` (vagues 2-3).
+   Débloque geo/nalgebra/ndarray/polars/rustfft + base ML d'un coup, et **fait disparaître** le besoin de
+   whitelister les bornes de trait-crate (on instancie par l'argument).
+2. **Dérivées** (petites, sur le pont) : [24100b] bornes ctor · [82000] octets · [24200] arrays · [50500] consts · [30200] retours empruntés.
+3. **Clusters séparés** (autres fondations) : [52800] io-flux (d'abord — flate2/quick-xml/gpx), puis [40300]/[40400]/[52900]/[24300].
+4. **À PROTOTYPER avant planif** : [35000] event-loop (vs sémantique-valeur), [43000] no_std (vs I2),
+   [53000] async, [24300] impl-extern — faisabilité/compat-invariants à trancher par l'essai.
+
+> **Méthode.** La **fondation** est la 1ʳᵉ vague (squelette→fan-out→unification, e2e vert en continu).
+> Les capacités dérivées s'ajoutent ensuite en **une entrée de donnée** chacune ; les clusters sont des cycles
+> 4-phases distincts. Tout nouveau mur **de même nature** s'ajoute ici, jamais en cas-par-cas.
 
 ## ✅ Passe de validation FAITE — ce cadrage reste une hypothèse, mais affinée
 
