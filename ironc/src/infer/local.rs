@@ -11,6 +11,29 @@ fn arg0_ty(cx: &Inf, args: &[Expr]) -> Type {
     args.first().and_then(|a| cx.tm.get(&a.id).cloned()).unwrap_or(Type::Unit)
 }
 
+/// Type d'élément yieldé par un **itérateur/itérable externe** (24400). `next() -> Option[Item]` → `Item` ;
+/// sinon `into_iter() -> IterType` → élément de `IterType` (un cran, `depth` borne la récursion). `Unit` si
+/// non itérable ou élément inconnu (ex. `GenericArray<u8>` d'une crate étrangère).
+fn extern_iter_elem(cx: &Inf, name: &str, depth: u8) -> Type {
+    if depth > 2 {
+        return Type::Unit;
+    }
+    let Some(et) = cx.etypes.get(name) else { return Type::Unit };
+    if let Some((_, f)) = et.methods.iter().find(|(n, _)| n == "next") {
+        if let Type::Option(inner) = &f.ret {
+            return (**inner).clone();
+        }
+    }
+    if let Some((_, f)) = et.methods.iter().chain(&et.ctors).find(|(n, _)| n == "into_iter") {
+        if let Type::Extern(m) = &f.ret {
+            if m != name {
+                return extern_iter_elem(cx, m, depth + 1);
+            }
+        }
+    }
+    Type::Unit
+}
+
 /// Type de retour d'une méthode built-in (str/list/dict, 80500) ; `None` si inconnue.
 fn builtin_method_ret(bt: &Type, name: &str) -> Option<Type> {
     Some(match (bt, name) {
@@ -97,7 +120,17 @@ pub(crate) fn stmt(cx: &mut Inf, s: &Stmt, scope: &mut Scope) {
         }
         StmtKind::For { var, iter, body, els } => {
             let it = expr(cx, iter, scope);
-            scope.insert(var.clone(), element_of(&it));
+            // type d'élément : un **itérateur/itérable externe** (24400) expose son `Item` via `next()`
+            // (`-> Option[Item]`) ou `into_iter()` ; sans ça `var` serait `Unit` et inutilisable (csv
+            // `records()`, walkdir…). Sinon, élément des collections built-in.
+            let elem = match &it {
+                Type::Extern(n) => match extern_iter_elem(cx, n, 0) {
+                    Type::Unit => element_of(&it),
+                    e => e,
+                },
+                _ => element_of(&it),
+            };
+            scope.insert(var.clone(), elem);
             for s in body.iter().chain(els) {
                 stmt(cx, s, scope);
             }
