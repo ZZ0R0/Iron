@@ -107,7 +107,7 @@ Tous corrigés en **règles globales** (zéro nom de crate) :
 
 ## Constat & cadence (honnête)
 
-- Le binder est **solide** et nettement durci : **21 crates réels verts** (whatlang, statrs, chrono,
+- Le binder est **solide** et nettement durci : **24 crates réels verts** (whatlang, statrs, chrono,
   num-bigint, walkdir, csv, regex, sha2, hound, colored, indicatif, rusqlite, chrono-tz, qrcode, image,
   tiny-skia, zstd, serde_json, rss, gpx, + uuid hors-80), **B5–B25**, dont les gros gains généraux :
   B8/B9/B10/B12/B13/B14 + **blanket** (B16), **struct/enum externes** (B17), **arg par valeur** (B18),
