@@ -163,6 +163,40 @@ fn emit(v: &Json, crate_name: &str, crate_real: &str, versions: &HashMap<String,
     let mut type_paths: BTreeMap<String, String> = BTreeMap::new(); // nom court → chemin Rust complet (sous-modules)
     let mut seen: BTreeMap<String, HashSet<String>> = BTreeMap::new(); // dedup noms par type
 
+    // Pré-passe « variante canonique » : sur **collision de nom court** (ex. `regex::Regex` ET
+    // `regex::bytes::Regex` → tous deux `Regex`), retenir la variante au chemin public **le plus court** (la
+    // « principale ») ; sinon le binder fusionne arbitrairement les méthodes des deux (B15).
+    let mut canonical_ty: HashMap<String, String> = HashMap::new();
+    for item in index.values() {
+        let imp = &item["inner"]["impl"];
+        if !imp.is_object()
+            || imp["is_synthetic"].as_bool() == Some(true)
+            || !imp["blanket_impl"].is_null()
+        {
+            continue;
+        }
+        if let Some(tr) = imp["trait"]["path"].as_str() {
+            if is_noise_trait(tr.rsplit("::").next().unwrap_or(tr)) {
+                continue;
+            }
+        }
+        let for_id = imp["for"]["resolved_path"]["id"].as_u64();
+        let Some(tyfull) = imp["for"]["resolved_path"]["path"].as_str() else { continue };
+        if !for_id.map_or(false, |id| is_local(paths, id)) {
+            continue;
+        }
+        let tyname = tyfull.rsplit("::").next().unwrap_or(tyfull).to_string();
+        let path = resolve_type_path(for_id, tyfull, &public_paths, paths, crate_name);
+        canonical_ty
+            .entry(tyname)
+            .and_modify(|e| {
+                if path.split("::").count() < e.split("::").count() {
+                    *e = path.clone();
+                }
+            })
+            .or_insert(path);
+    }
+
     for item in index.values() {
         let imp = &item["inner"]["impl"];
         if !imp.is_object() {
@@ -188,22 +222,13 @@ fn emit(v: &Json, crate_name: &str, crate_real: &str, versions: &HashMap<String,
         if !for_id.map_or(false, |id| is_local(paths, id)) {
             continue;
         }
-        // chemin Rust complet du type (sous-modules : `statrs::distribution::Beta`) — via `paths[id]`
-        // (canonique), sinon `resolved_path` puis `crate::Type`. Sinon `crate::Beta` serait introuvable.
-        type_paths.entry(tyname.clone()).or_insert_with(|| {
-            // chemin public (re-export, B9) d'abord ; sinon `paths[id]` canonique + heuristique sous-module.
-            for_id
-                .and_then(|id| public_paths.get(&id).cloned())
-                .or_else(|| {
-                    for_id
-                        .and_then(|id| paths.get(&id.to_string()))
-                        .and_then(|p| p["path"].as_array())
-                        .map(|segs| segs.iter().filter_map(|s| s.as_str()).collect::<Vec<_>>().join("::"))
-                        .filter(|p| p.contains("::"))
-                        .map(|p| drop_private_mod(&p))
-                })
-                .unwrap_or_else(|| if tyfull.contains("::") { tyfull.clone() } else { format!("{crate_name}::{tyfull}") })
-        });
+        let typath = resolve_type_path(for_id, &tyfull, &public_paths, paths, crate_name);
+        // variante non principale d'un nom en collision (ex. `regex::bytes::Regex` quand `regex::Regex`
+        // existe) → ignorée (B15), sinon ses méthodes pollueraient le type retenu.
+        if canonical_ty.get(&tyname).is_some_and(|c| c != &typath) {
+            continue;
+        }
+        type_paths.entry(tyname.clone()).or_insert(typath);
         // Chemin **complet** du trait d'un `impl Trait for T` (None = inhérent) → méthodes appelées en UFCS.
         // On résout via `paths[id]` (ex. `core::ops::Mul`, `core::fmt::Display`) — sinon les traits std/externes
         // seraient mal préfixés `{crate}::Trait` (bug : `num_bigint::Mul` au lieu de `core::ops::Mul`).
@@ -352,6 +377,28 @@ fn collapse_std_private(path: &str) -> String {
         "accum", "marker",
     ];
     path.split("::").filter(|s| !PRIV.contains(s)).collect::<Vec<_>>().join("::")
+}
+
+/// Chemin Rust complet d'un type : chemin **public** (re-export, B9) d'abord ; sinon `paths[id]` canonique
+/// + heuristique sous-module ; sinon `resolved_path` puis `crate::Type`.
+fn resolve_type_path(
+    for_id: Option<u64>,
+    tyfull: &str,
+    public_paths: &HashMap<u64, String>,
+    paths: &Json,
+    crate_name: &str,
+) -> String {
+    for_id
+        .and_then(|id| public_paths.get(&id).cloned())
+        .or_else(|| {
+            for_id
+                .and_then(|id| paths.get(&id.to_string()))
+                .and_then(|p| p["path"].as_array())
+                .map(|segs| segs.iter().filter_map(|s| s.as_str()).collect::<Vec<_>>().join("::"))
+                .filter(|p| p.contains("::"))
+                .map(|p| drop_private_mod(&p))
+        })
+        .unwrap_or_else(|| if tyfull.contains("::") { tyfull.to_string() } else { format!("{crate_name}::{tyfull}") })
 }
 
 /// Heuristique de re-export (rustdoc donne le chemin **canonique** = module privé interne ; le chemin
