@@ -1179,6 +1179,8 @@ impl Cx<'_> {
                             }
                         }
                         let r = self.value(rhs);
+                        let (lt, rt) = (self.type_of(lhs), self.type_of(rhs));
+                        let (l, r) = coerce_sized_binop(l, r, &lt, &rt);
                         quote! { (#l #o #r) }
                     }
                     // `[x] * n` / `n * [x]` (Python) : répétition de liste. Idem `"ab" * n` pour les chaînes.
@@ -1206,6 +1208,8 @@ impl Cx<'_> {
                     _ => {
                         let r = self.value(rhs);
                         let o = lower_binop(*op);
+                        let (lt, rt) = (self.type_of(lhs), self.type_of(rhs));
+                        let (l, r) = coerce_sized_binop(l, r, &lt, &rt);
                         quote! { (#l #o #r) }
                     }
                 }
@@ -2497,6 +2501,23 @@ fn num_kind_str(k: NumKind) -> &'static str {
         NumKind::U128 => "u128",
         NumKind::Usize => "usize",
         NumKind::F32 => "f32",
+    }
+}
+
+/// Coerce le côté `i64` (défaut Iron des littéraux) au type entier **dimensionné** de l'autre opérande :
+/// `mem: u64 > 0` → `mem > (0) as u64`. Sans ça `u64 > i64` (et `u8 == 0`, `usize + 1`…) casse en E0308.
+/// `i64`↔`i64` et les types non concernés sont inchangés (B26).
+fn coerce_sized_binop(l: TokenStream, r: TokenStream, lt: &Type, rt: &Type) -> (TokenStream, TokenStream) {
+    match (lt, rt) {
+        (Type::Num(k), Type::I64) => {
+            let id = format_ident!("{}", num_kind_str(*k));
+            (l, quote! { (#r) as #id })
+        }
+        (Type::I64, Type::Num(k)) => {
+            let id = format_ident!("{}", num_kind_str(*k));
+            (quote! { (#l) as #id }, r)
+        }
+        _ => (l, r),
     }
 }
 
