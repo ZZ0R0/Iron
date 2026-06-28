@@ -4,6 +4,7 @@
   "description": "Support du langage Iron (.irn) — coloration, diagnostics live (LSP + overlay rustc), imports de crates Rust, build/run.",
   "version": "0.1.0",
   "publisher": "iron",
+  "icon": "icons/iron.png",
   "engines": { "vscode": "^1.75.0" },
   "categories": ["Programming Languages", "Linters"],
   "main": "./out/extension.js",
@@ -15,7 +16,7 @@
         "aliases": ["Iron", "iron"],
         "extensions": [".irn", ".iri"],
         "configuration": "./language-configuration.json",
-        "icon": { "light": "./icons/iron.svg", "dark": "./icons/iron.svg" }
+        "icon": { "light": "./icons/iron.png", "dark": "./icons/iron.png" }
       }
     ],
     "grammars": [
