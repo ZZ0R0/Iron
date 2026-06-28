@@ -368,6 +368,13 @@ pub(crate) fn expr(cx: &mut Inf, e: &Expr, scope: &Scope) -> Type {
                                 return cx.set(e.id, ret);
                             }
                         }
+                        // méthode de trait **importée sur le primitif `str`** (`"x".bold()`, colored, 52500)
+                        // → rattachée au pseudo-type `__str`.
+                        if matches!(bt, Type::Str) {
+                            if let Some(ret) = cx.extern_method_ret("__str", name) {
+                                return cx.set(e.id, ret);
+                            }
+                        }
                         // handle de thread (V9, 70900) : `h.join()` → le type porté par `__Handle[T]`.
                         if let Type::App(n, targs) = &bt {
                             if n == "__Handle" && name == "join" {

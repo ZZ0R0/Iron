@@ -1572,6 +1572,13 @@ impl Cx<'_> {
                 return ts;
             }
         }
+        // méthode de trait **importée sur le primitif `str`** (`"x".bold()`, colored — 52500) : après les
+        // built-ins (qui priment) → UFCS `Trait::method(&str)`.
+        if let ExprKind::Field { base, name } = &callee.kind {
+            if let Some(ts) = self.try_str_ext_method(base, name, args) {
+                return ts;
+            }
+        }
         if let ExprKind::Var(name) = &callee.kind {
             // les fns utilisateur priment sur les built-ins homonymes (ex. un `fn add` perso).
             if !self.user_fns.contains(name) {
@@ -1957,6 +1964,29 @@ impl Cx<'_> {
         } else {
             call
         })
+    }
+
+    /// Méthode de trait **importée sur le primitif `str`** (52500, ex. colored `"x".bold()`) → UFCS
+    /// `crate::Trait::method(&str, args)`. Le récepteur (`String` Iron) est passé en `&` → `&str` par
+    /// déréf-coercition. Rattachée au pseudo-type `__str`.
+    fn try_str_ext_method(&mut self, base: &Expr, name: &str, args: &[Expr]) -> Option<TokenStream> {
+        if !matches!(self.type_of(base), Type::Str) {
+            return None;
+        }
+        let ef = self
+            .bindings
+            .etypes
+            .get("__str")
+            .and_then(|et| et.methods.iter().find(|(n, _)| n == name).map(|(_, f)| f.clone()))?;
+        let path = TokenStream::from_str(&ef.path).ok()?;
+        let recv = self.place(base);
+        let a: Vec<TokenStream> = args
+            .iter()
+            .enumerate()
+            .map(|(i, x)| self.extern_arg_to(x, ef.params.get(i), ef.param_owned.get(i).copied().unwrap_or(false)))
+            .collect();
+        // `&*recv` : `String`/littéral → `str` → `&str` (le trait est impl'é pour `&str`, pas `&String`).
+        Some(quote! { #path(&*#recv #(, #a)*) })
     }
 
     /// Méthode externe (V8, 40200) : `obj.m(args)` → `RustPath::m(<recv> obj, args)` + glue d'idiomes.

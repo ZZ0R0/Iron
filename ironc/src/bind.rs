@@ -214,22 +214,33 @@ fn emit(v: &Json, crate_name: &str, crate_real: &str, versions: &HashMap<String,
             }
         }
         let for_id = imp["for"]["resolved_path"]["id"].as_u64();
-        let tyfull = match imp["for"]["resolved_path"]["path"].as_str() {
-            Some(n) => n.to_string(),
-            None => continue,
+        // Récepteur : type **nommé** (resolved_path) OU **primitif** (`impl Trait for &str` → extension d'un
+        // primitif, ex. colored). Sinon (slice/tuple/dyn…) → sauté.
+        let (tyname, is_prim) = match imp["for"]["resolved_path"]["path"].as_str() {
+            Some(n) => (n.rsplit("::").next().unwrap_or(n).to_string(), false),
+            None => match prim_for_type(&imp["for"]) {
+                Some(p) => (p, true),
+                None => continue,
+            },
         };
-        let tyname = tyfull.rsplit("::").next().unwrap_or(&tyfull).to_string();
-        // type local à la crate (crate_id 0) — sinon on n'a pas son chemin public.
-        if !for_id.map_or(false, |id| is_local(paths, id)) {
-            continue;
+        if is_prim {
+            // pas de `is_local`, pas de dédup de variante, pas de chemin résolu : les méthodes seront des
+            // **traits** appelées en UFCS (`Colorize::red(&x)`) ; le pseudo-type pointe vers le primitif Rust.
+            type_paths.entry(tyname.clone()).or_insert_with(|| "str".to_string());
+        } else {
+            let tyfull = imp["for"]["resolved_path"]["path"].as_str().unwrap_or(&tyname).to_string();
+            // type local à la crate (crate_id 0) — sinon on n'a pas son chemin public.
+            if !for_id.map_or(false, |id| is_local(paths, id)) {
+                continue;
+            }
+            let typath = resolve_type_path(for_id, &tyfull, &public_paths, paths, crate_name);
+            // variante non principale d'un nom en collision (ex. `regex::bytes::Regex` quand `regex::Regex`
+            // existe) → ignorée (B15), sinon ses méthodes pollueraient le type retenu.
+            if canonical_ty.get(&tyname).is_some_and(|c| c != &typath) {
+                continue;
+            }
+            type_paths.entry(tyname.clone()).or_insert(typath);
         }
-        let typath = resolve_type_path(for_id, &tyfull, &public_paths, paths, crate_name);
-        // variante non principale d'un nom en collision (ex. `regex::bytes::Regex` quand `regex::Regex`
-        // existe) → ignorée (B15), sinon ses méthodes pollueraient le type retenu.
-        if canonical_ty.get(&tyname).is_some_and(|c| c != &typath) {
-            continue;
-        }
-        type_paths.entry(tyname.clone()).or_insert(typath);
         // Chemin **complet** du trait d'un `impl Trait for T` (None = inhérent) → méthodes appelées en UFCS.
         // On résout via `paths[id]` (ex. `core::ops::Mul`, `core::fmt::Display`) — sinon les traits std/externes
         // seraient mal préfixés `{crate}::Trait` (bug : `num_bigint::Mul` au lieu de `core::ops::Mul`).
@@ -257,8 +268,18 @@ fn emit(v: &Json, crate_name: &str, crate_real: &str, versions: &HashMap<String,
         if let Some(g) = imp["blanket_impl"]["generic"].as_str() {
             blanket_self.insert(g.to_string(), Some(tyname.clone()));
         }
-        for mid in imp["items"].as_array().into_iter().flatten() {
-            let Some(id) = mid.as_u64() else { continue };
+        // Méthodes de l'impl + méthodes **fournies** (corps par défaut) du trait **non surchargées** (52600,
+        // ex. colored `red`/`green`, déclarées avec défaut dans `Colorize` et absentes des items de l'impl).
+        // Trait local uniquement (sa définition doit être dans l'index).
+        let impl_items: Vec<u64> =
+            imp["items"].as_array().into_iter().flatten().filter_map(|x| x.as_u64()).collect();
+        let provided: Vec<u64> = imp["trait"]["id"]
+            .as_u64()
+            .and_then(|tid| index.get(&tid.to_string()))
+            .and_then(|t| t["inner"]["trait"]["items"].as_array())
+            .map(|a| a.iter().filter_map(|x| x.as_u64()).filter(|x| !impl_items.contains(x)).collect())
+            .unwrap_or_default();
+        for &id in impl_items.iter().chain(provided.iter()) {
             method_ids.insert(id);
             let Some(m) = index.get(&id.to_string()) else { continue };
             if m["inner"]["function"].is_object() && m["visibility"].as_str() != Some("private") {
@@ -279,6 +300,12 @@ fn emit(v: &Json, crate_name: &str, crate_real: &str, versions: &HashMap<String,
                 }
                 match project(&m["inner"]["function"], &tyname, &blanket_self) {
                     Some(sig) => {
+                        // extension d'un primitif : on ne garde que les **méthodes de trait** (un ctor/fn
+                        // associée sur un pseudo-type `__str` n'a pas de sens).
+                        if is_prim && sig.recv.is_none() {
+                            skipped += 1;
+                            continue;
+                        }
                         seen.entry(tyname.clone()).or_default().insert(name.to_string());
                         let entry = types.entry(tyname.clone()).or_default();
                         if sig.recv.is_some() {
@@ -485,6 +512,20 @@ fn drop_private_mod(path: &str) -> String {
         }
     }
     path.to_string()
+}
+
+/// Type récepteur **primitif** d'un `impl Trait for <prim>` (extension d'un primitif via trait, ex. colored
+/// `impl Colorize for &str`) → pseudo-type Iron interne. `str`/`&str`/`String` → `__str` (les méthodes y
+/// sont rattachées et routées sur le `str` builtin au lowering). Les autres primitifs : à étendre au besoin.
+fn prim_for_type(for_json: &Json) -> Option<String> {
+    let t = for_json.get("borrowed_ref").map(|b| &b["type"]).unwrap_or(for_json);
+    let name = t["primitive"]
+        .as_str()
+        .or_else(|| t["resolved_path"]["path"].as_str().map(|p| p.rsplit("::").next().unwrap_or(p)));
+    match name {
+        Some("str" | "String") => Some("__str".to_string()),
+        _ => None,
+    }
 }
 
 /// Nom = mot-clé Iron → ne peut pas être un identifiant de méthode/fonction (binder : on saute).
