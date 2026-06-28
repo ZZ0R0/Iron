@@ -35,6 +35,7 @@ Chaque crate réel a exposé un trou ; tous corrigés sans régresser le gate-v1
 | B22 | **Octets `list[u8]`** : un littéral `[104,…]` est `list[i64]` → vers un param `list[u8]`, coercer les éléments (`v.iter().map(|e| *e as u8).collect()`). | lower | ✅ |
 | B23 | **Fn libre en sous-module** (`zstd::bulk::compress`) pathée `zstd::compress` → chemin **public** + dédup ; + les appels de fn libre passent par `extern_arg_to` (coercition). | binder/lower | ✅ |
 | B24 | **Variante d'enum non-référençable** (`case None`/`True`/`False` = littéral Iron, ou non-identifiant) → cassait le parseur `.iri` → **sautée** (le reste de l'enum reste). | binder | ✅ |
+| B25 | **`Default::default()` = constructeur**, pas du bruit → débloque les builders/config sans `new` (rss, gpx…). | binder | ✅ |
 
 **Gains généraux B8/B9/B10/B12/B13/B14** (débloquent des classes entières) :
 - B8 → tout le motif `ctor().unwrap().méthode()` (omniprésent).
@@ -72,6 +73,10 @@ Chaque crate réel a exposé un trou ; tous corrigés sans régresser le gate-v1
 | 10 | Parseur XML | `quick-xml` | 🟡 | `Reader.from_str` binde ; lecture = **lecteur d'événements** (io, 52800). |
 | 68 | Générateur PDF | `printpdf` | 🟡 | **B24** : le `.iri` (2320 items) parse ; mais `save(writer)` = **Write** (io, 52800). |
 | 45 | Parseur MIDI | `midly` | 🔴 | `Smf::parse(&buf)` rend un `Smf<'a>` qui **emprunte** ses octets d'entrée → durée de vie liée à l'entrée, hors sémantique par valeur → **[30200]** (V12). |
+| 20 | Lecteur RSS | `rss` | ✅ **vert** | **B25** : `ChannelBuilder.default()` + `title/link/description` + `build()` → `ch.title()`. |
+| 69 | Traces GPS (GPX) | `gpx` | ✅ **vert** | **B25** : `Gpx.default()` + `len(g.tracks)` → 0. |
+| 12 | Magasin clé-valeur | `sled` | 🟡 | Construit via builder (`Config.new().temporary(True).open()`), mais `insert` veut des **octets** (IVec), pas des chaînes → ergonomie d'octets **[82000]**. |
+| 01 | TODO CLI | `clap` | 🔴 | `Command::new(impl Into<clap::Str>)` : cible **string-newtype de crate** non mappable (≠ `Into<String>`/std). |
 | — | (sanity, hors-80) | `uuid` | ✅ **vert** | `Uuid.nil().to_string()` → `00000000-…`. |
 | 51 | Algèbre linéaire | `nalgebra` | 🟡 | `Vector3<T>` générique sur le **scalaire** → `Vector3.new` non bindé. **Même limite que geo → [24100]** (V12). |
 | 67 | Distances géo | `geo` | 🟡 | **Façade corrigée** (52700, binding multi-crate) → `Point` porte ses méthodes geo_types. **Mais** `Point<T: CoordNum>` est générique sur le **scalaire** en entrée *et* en sortie (`new(x: T)`, `distance() -> T`) → monomorphiser `T`→`f64` exigerait de reconnaître `CoordNum`/`Num` (traits de crate) : **interdit par la règle globale**. Limite dure. |
@@ -102,9 +107,9 @@ Tous corrigés en **règles globales** (zéro nom de crate) :
 
 ## Constat & cadence (honnête)
 
-- Le binder est **solide** et nettement durci : **19 crates réels verts** (whatlang, statrs, chrono,
+- Le binder est **solide** et nettement durci : **21 crates réels verts** (whatlang, statrs, chrono,
   num-bigint, walkdir, csv, regex, sha2, hound, colored, indicatif, rusqlite, chrono-tz, qrcode, image,
-  tiny-skia, zstd, serde_json, + uuid hors-80), **B5–B23**, dont les gros gains généraux :
+  tiny-skia, zstd, serde_json, rss, gpx, + uuid hors-80), **B5–B25**, dont les gros gains généraux :
   B8/B9/B10/B12/B13/B14 + **blanket** (B16), **struct/enum externes** (B17), **arg par valeur** (B18),
   **trait sur primitif + fournies** (B19), **multi-crate façade** (52700), **multi-cibles + déstructurés**
   (B20/B21), **octets list[u8] + fns libres** (B22/B23). Le gate reste VERT à chaque pas.
