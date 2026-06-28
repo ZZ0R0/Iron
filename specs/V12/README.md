@@ -15,8 +15,10 @@ Tous corrigés en **règles globales** (aucun nom de crate dans le compilo), gat
 
 | Spec | Titre | Sous-système | Révélé par |
 |---|---|---|---|
-| [24100] | Suivi des paramètres de type génériques + monomorphisation des scalaires | 2 (types/inférence) | `geo` (`Point<T: CoordNum>`) |
+| [24100] | Suivi des paramètres de type génériques + monomorphisation des scalaires | 2 (types/inférence) | `geo`, `nalgebra`, `rustfft` |
 | [52800] | Modèle d'io par flux (`Write`/`Read`/`BufRead`, puits/sources d'octets) | 5 (interop) | `flate2` (`GzEncoder<W: Write>`) |
+| [52900] | Interop **serde typé** (derive + de/serialize générique) — *note*, pas encore spec'é | 5 (interop) | `toml` (doc), `jsonwebtoken`, `bincode` |
+| [50500] | Binder des **constantes** publiques d'un crate (`pub const X`) — *gap mineur* | 5 (interop) | `base64` (`STANDARD`) |
 
 ## Pourquoi ce sont des frontières (et pas du durcissement)
 
@@ -27,6 +29,10 @@ Tous corrigés en **règles globales** (aucun nom de crate dans le compilo), gat
 - **52800 — io par flux.** L'écosystème io (`flate2`, `image`, lecteurs/écrivains…) repose sur `Write`/`Read`
   consommant des **puits/sources d'octets en streaming**, avec out-params `&mut Vec`. Iron est **par valeur** :
   pas d'état mutable partagé en flux. C'est une extension du **modèle d'exécution/interop**.
+- **52900 — serde typé.** `from_str::<T>`/`to_string(&T)` exigent un `T` **dérivant** `Serialize`/`Deserialize`
+  ; Iron n'a pas de **macros derive** ni de génériques de type suivis. La voie **dynamique** (`Value` :
+  `serde_json` ✅, `toml::Value` partiel) marche déjà — c'est la voie **typée** qui est la frontière. Lié à
+  [24100] (génériques de type). À spec'er si un besoin concret le justifie.
 
 > **Note de méthode.** On n'ajoute ici **que** des frontières de modèle confirmées par tentative (pas des
 > suppositions). Si le déroulé restant des 80 en révèle d'autres de même nature, on les **ajoute à ce

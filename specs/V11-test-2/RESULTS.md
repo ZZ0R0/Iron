@@ -32,6 +32,8 @@ Chaque crate réel a exposé un trou ; tous corrigés sans régresser le gate-v1
 | — | **Binding multi-crate des façades** (52700) : `rustdoc -p geo_types` + fusion des re-exports. | binder | ✅ |
 | B20 | **Crate multi-cibles** : `cargo rustdoc` échouait → `--lib` (no-op si lib unique, ex. qrcode). | binder | ✅ |
 | B21 | **Param déstructuré** (`fn index(&self, (x, y): …)`) → nom non-identifiant → assaini en `argN`. | binder | ✅ |
+| B22 | **Octets `list[u8]`** : un littéral `[104,…]` est `list[i64]` → vers un param `list[u8]`, coercer les éléments (`v.iter().map(|e| *e as u8).collect()`). | lower | ✅ |
+| B23 | **Fn libre en sous-module** (`zstd::bulk::compress`) pathée `zstd::compress` → chemin **public** + dédup ; + les appels de fn libre passent par `extern_arg_to` (coercition). | binder/lower | ✅ |
 
 **Gains généraux B8/B9/B10/B12/B13/B14** (débloquent des classes entières) :
 - B8 → tout le motif `ctor().unwrap().méthode()` (omniprésent).
@@ -60,6 +62,12 @@ Chaque crate réel a exposé un trou ; tous corrigés sans régresser le gate-v1
 | 70 | Fuseaux horaires | `chrono-tz` | ✅ **vert** | `Tz.from_str("Europe/Paris").unwrap().name()` → `Europe/Paris`. |
 | 37 | Générateur QR | `qrcode` | ✅ **vert** | **B20** (`--lib` multi-cibles) + **B21** (param déstructuré → `argN`) : `QrCode.new(url).unwrap().width()` → `25`. |
 | 36/39 | Filtres / ASCII art | `image` | ✅ **vert** | `DynamicImage.new_rgb8(32,24).grayscale().save(p)` → PNG valide écrit, `width=32`. (via `DynamicImage` concret, pas l'alias générique `RgbImage`.) |
+| 40 | Dessin vectoriel 2D | `tiny-skia` | ✅ **vert** | `Pixmap.new(64,48).unwrap().save_png(p)` + `.width()`→64. PNG valide. |
+| 64 | Archiveur Zstd | `zstd` | ✅ **vert** | **B22/B23** : `compress([…],3).unwrap()` puis `decompress(…,100)` → round-trip 10 octets. (one-shot `bulk::compress`, pas le modèle `Write`.) |
+| 06/16 | CSV→JSON / API JSON | `serde_json` | ✅ **vert** | Voie **dynamique** `Value` : `Value.from_str(json).get("port").as_i64()` → 8080, `.get("host").as_str()` → "localhost". (La voie **typée** serde-derive reste hors-portée.) |
+| 07 | TOML | `toml` | 🟡 | `Value.from_str` + `get`/`as_integer` **bindent et chaînent** ; mais `Value::FromStr` parse une **valeur**, pas un **document** `clé=val` (ça, c'est `from_str::<Table>` = serde-générique). |
+| 65 | JWT | `jsonwebtoken` | 🟡 | `Header.new(Algorithm.HS256)` binde ; `encode/decode` exigent des claims **serde** (typé) → hors-portée. |
+| 43 | FFT spectre | `rustfft` | 🟡 | `FftPlanner.new()` binde ; `FftPlanner<T>`/`Complex<T>` **scalaire générique** + `dyn Fft<T>` → **24100**. |
 | — | (sanity, hors-80) | `uuid` | ✅ **vert** | `Uuid.nil().to_string()` → `00000000-…`. |
 | 51 | Algèbre linéaire | `nalgebra` | 🟡 | `Vector3<T>` générique sur le **scalaire** → `Vector3.new` non bindé. **Même limite que geo → [24100]** (V12). |
 | 67 | Distances géo | `geo` | 🟡 | **Façade corrigée** (52700, binding multi-crate) → `Point` porte ses méthodes geo_types. **Mais** `Point<T: CoordNum>` est générique sur le **scalaire** en entrée *et* en sortie (`new(x: T)`, `distance() -> T`) → monomorphiser `T`→`f64` exigerait de reconnaître `CoordNum`/`Num` (traits de crate) : **interdit par la règle globale**. Limite dure. |
@@ -90,15 +98,15 @@ Tous corrigés en **règles globales** (zéro nom de crate) :
 
 ## Constat & cadence (honnête)
 
-- Le binder est **solide** et nettement durci : **16 crates réels verts** (whatlang, statrs, chrono,
+- Le binder est **solide** et nettement durci : **19 crates réels verts** (whatlang, statrs, chrono,
   num-bigint, walkdir, csv, regex, sha2, hound, colored, indicatif, rusqlite, chrono-tz, qrcode, image,
-  + uuid hors-80), **B5–B21** (trous + features), dont les gros gains généraux : B8/B9/B10/B12/B13/B14 +
-  **blanket** (B16), **struct/enum externes** (B17), **arg par valeur** (B18), **trait sur primitif +
-  méthodes fournies** (B19), **multi-crate façade** (52700), **multi-cibles + params déstructurés** (B20/B21).
-  Le gate reste VERT à chaque pas.
-- **Limites de modèle → V12** : geo + nalgebra (généricité scalaire, [24100]), flate2 (io par flux, [52800]).
-  Observations mineures (hors-80) : `rand` 0.9 renomme `thread_rng`→`rng` ; `base64` expose son API en
-  **`const`** (Iron ne binde pas encore les constantes — gap si un crate du 80 en a besoin).
+  tiny-skia, zstd, serde_json, + uuid hors-80), **B5–B23**, dont les gros gains généraux :
+  B8/B9/B10/B12/B13/B14 + **blanket** (B16), **struct/enum externes** (B17), **arg par valeur** (B18),
+  **trait sur primitif + fournies** (B19), **multi-crate façade** (52700), **multi-cibles + déstructurés**
+  (B20/B21), **octets list[u8] + fns libres** (B22/B23). Le gate reste VERT à chaque pas.
+- **Limites de modèle → V12** : geo/nalgebra/rustfft (généricité scalaire, [24100]), flate2 (io par flux,
+  [52800]), **serde typé** (de/serialize via derive — la voie **dynamique** `Value` marche : serde_json ✅,
+  toml partiel). Mineur : `base64` expose son API en **`const`** (Iron ne binde pas encore les constantes).
 - **« Tous les 80 un par un » reste un grind séquentiel** : chaque crate peut révéler un bug à corriger dans
   `ironc/src` (non parallélisable). Réaliste : **plusieurs sessions**.
 - **Plan** : continuer les feuilles 🟢/🟡 (CLI/données/temps/maths à API simples) ; adresser les 3 murs
