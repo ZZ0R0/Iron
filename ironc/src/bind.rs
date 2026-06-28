@@ -108,6 +108,13 @@ fn emit(v: &Json, crate_name: &str) -> CResult<String> {
             let Some(m) = index.get(&id.to_string()) else { continue };
             if m["inner"]["function"].is_object() && m["visibility"].as_str() != Some("private") {
                 let name = m["name"].as_str().unwrap_or("");
+                // méthode dont le nom est un mot-clé Iron (`not`/`and`/`in`/`is`/…) → non parsable comme
+                // identifiant → sautée (ex. `Not::not`, `BitAnd` exposent `not`/`and`). Rare et remplaçable
+                // par les opérateurs.
+                if is_iron_keyword(name) {
+                    skipped += 1;
+                    continue;
+                }
                 // dedup par nom au sein du type (multi-`impl` → garder la 1ʳᵉ, 51100).
                 if !seen.entry(tyname.clone()).or_default().insert(name.to_string()) {
                     continue;
@@ -143,8 +150,8 @@ fn emit(v: &Json, crate_name: &str) -> CResult<String> {
             continue;
         }
         let name = match item["name"].as_str() {
-            Some(n) => n,
-            None => continue,
+            Some(n) if !is_iron_keyword(n) => n,
+            _ => continue,
         };
         match project(&item["inner"]["function"], "") {
             Some(sig) if sig.recv.is_none() => {
@@ -189,6 +196,18 @@ fn emit(v: &Json, crate_name: &str) -> CResult<String> {
     }
     iri.push_str(&format!("\n# {bound} item(s) bindé(s), {skipped} non mappable(s) sauté(s)\n"));
     Ok(iri)
+}
+
+/// Nom = mot-clé Iron → ne peut pas être un identifiant de méthode/fonction (binder : on saute).
+fn is_iron_keyword(name: &str) -> bool {
+    matches!(
+        name,
+        "not" | "and" | "or" | "in" | "is" | "if" | "elif" | "else" | "for" | "while" | "def"
+            | "class" | "return" | "match" | "case" | "import" | "from" | "as" | "pass" | "break"
+            | "continue" | "raise" | "try" | "except" | "with" | "lambda" | "yield" | "async"
+            | "await" | "true" | "false" | "none" | "self" | "enum" | "trait" | "impl" | "struct"
+            | "fn" | "let" | "const" | "type" | "mut" | "inout" | "shared" | "extern"
+    )
 }
 
 /// `true` si l'id de type appartient à la crate documentée (`crate_id == 0`).
