@@ -836,8 +836,10 @@ fn map_named(name: &str, targs: &[&Json], gen: &Generics) -> Option<String> {
 fn is_noise_trait(name: &str) -> bool {
     matches!(
         name,
+        // `Default` n'est **pas** bruit : son `default()` est un **constructeur** très utile (builders/config
+        // qui n'ont pas de `new`, ex. `ChannelBuilder::default()`). Une seule méthode → pas de clutter (B25).
         "Debug" | "Display" | "Clone" | "Copy" | "Send" | "Sync" | "Sized" | "Unpin"
-            | "PartialEq" | "Eq" | "PartialOrd" | "Ord" | "Hash" | "Default"
+            | "PartialEq" | "Eq" | "PartialOrd" | "Ord" | "Hash"
             | "From" | "Into" | "TryFrom" | "TryInto" | "AsRef" | "AsMut" | "Borrow" | "BorrowMut"
             | "Deref" | "DerefMut" | "Drop" | "ToOwned" | "ToString"
             | "Serialize" | "Deserialize" | "Freeze" | "RefUnwindSafe" | "UnwindSafe"
