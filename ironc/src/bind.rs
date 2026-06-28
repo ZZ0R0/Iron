@@ -169,10 +169,7 @@ fn emit(v: &Json, crate_name: &str, crate_real: &str, versions: &HashMap<String,
     let mut canonical_ty: HashMap<String, String> = HashMap::new();
     for item in index.values() {
         let imp = &item["inner"]["impl"];
-        if !imp.is_object()
-            || imp["is_synthetic"].as_bool() == Some(true)
-            || !imp["blanket_impl"].is_null()
-        {
+        if !imp.is_object() || imp["is_synthetic"].as_bool() == Some(true) {
             continue;
         }
         if let Some(tr) = imp["trait"]["path"].as_str() {
@@ -202,9 +199,13 @@ fn emit(v: &Json, crate_name: &str, crate_real: &str, versions: &HashMap<String,
         if !imp.is_object() {
             continue;
         }
-        if imp["is_synthetic"].as_bool() == Some(true) || !imp["blanket_impl"].is_null() {
+        if imp["is_synthetic"].as_bool() == Some(true) {
             continue;
         }
+        // Note : on **ne saute plus** les impls blanket. rustdoc les **matérialise par type concret** (le `for`
+        // d'`impl<T> Digest for T` apparaît comme `Sha256` dans la liste d'impls de `Sha256`) → on attache
+        // alors ses méthodes en UFCS comme tout `impl Trait`. Un vrai blanket générique (`for: T`) n'a pas de
+        // `resolved_path` → il retombe au `continue` ci-dessous (tyfull `None`). Règle 100 % générale.
         // V9 (51600) : inhérent (`trait` null) OU `impl Trait for T` d'un trait **utile** (méthodes de
         // comportement : Digest, Datelike, Iterator, Read…). Les traits-bruit (Debug/Clone/From…) sautés.
         if let Some(tr) = imp["trait"]["path"].as_str() {
@@ -250,6 +251,12 @@ fn emit(v: &Json, crate_name: &str, crate_real: &str, versions: &HashMap<String,
                 foreign.insert(root.to_string());
             }
         }
+        // Pour un **impl blanket matérialisé** (`impl<D> Digest for D`), le générique `D` dénote le type
+        // concret (`Sha256`) → on le mappe vers `tyname`, comme `Self` ; sinon `new() -> D` serait sauté.
+        let mut blanket_self: Generics = Generics::new();
+        if let Some(g) = imp["blanket_impl"]["generic"].as_str() {
+            blanket_self.insert(g.to_string(), Some(tyname.clone()));
+        }
         for mid in imp["items"].as_array().into_iter().flatten() {
             let Some(id) = mid.as_u64() else { continue };
             method_ids.insert(id);
@@ -263,12 +270,16 @@ fn emit(v: &Json, crate_name: &str, crate_real: &str, versions: &HashMap<String,
                     skipped += 1;
                     continue;
                 }
-                // dedup par nom au sein du type (multi-`impl` → garder la 1ʳᵉ, 51100).
-                if !seen.entry(tyname.clone()).or_default().insert(name.to_string()) {
+                // dedup par nom **après projection réussie** : un même nom exposé par plusieurs impls (ex.
+                // `Digest::update` à arg générique non mappable PUIS `Update::update` à `&[u8]` concret) ne
+                // doit pas être « réservé » par la 1ʳᵉ tentative **ratée** — sinon la variante mappable est
+                // bloquée à tort (51100). On ne marque `seen` que quand on **binde** réellement.
+                if seen.get(&tyname).is_some_and(|s| s.contains(name)) {
                     continue;
                 }
-                match project(&m["inner"]["function"], &tyname) {
+                match project(&m["inner"]["function"], &tyname, &blanket_self) {
                     Some(sig) => {
+                        seen.entry(tyname.clone()).or_default().insert(name.to_string());
                         let entry = types.entry(tyname.clone()).or_default();
                         if sig.recv.is_some() {
                             // méthode de trait → chemin UFCS `crate::Trait::method` (évite `use Trait`) ;
@@ -307,7 +318,7 @@ fn emit(v: &Json, crate_name: &str, crate_real: &str, versions: &HashMap<String,
             Some(n) if !is_iron_keyword(n) => n,
             _ => continue,
         };
-        match project(&item["inner"]["function"], "") {
+        match project(&item["inner"]["function"], "", &Generics::new()) {
             Some(sig) if sig.recv.is_none() => {
                 free.push(render(name, &sig, Some(&format!("{crate_name}::{name}"))));
                 bound += 1;
@@ -436,7 +447,7 @@ fn is_local(paths: &Json, id: u64) -> bool {
 
 /// Projette la signature d'une `function` rustdoc-json vers Iron. `owner` = type si méthode (résolution
 /// du receveur). `None` si non mappable (générique de fonction, `unsafe`, type non projetable).
-fn project(f: &Json, owner: &str) -> Option<Sig> {
+fn project(f: &Json, owner: &str, extra_gen: &Generics) -> Option<Sig> {
     if f["header"]["is_unsafe"].as_bool() == Some(true) {
         return None;
     }
@@ -444,7 +455,9 @@ fn project(f: &Json, owner: &str) -> Option<Sig> {
     // sans borne mappable reste `None` → la fn est sautée si ce générique est réellement utilisé (via
     // `map_type` qui renverra `None`). Couvre `new(path: impl AsRef<Path>)` (ubiquitaire) sans débinder les
     // vraies fns génériques (`fn parse<T: FromStr>()` → `T` non mappable → sautée comme avant).
-    let mut gen: Generics = HashMap::new();
+    // `extra_gen` : alias du type Self apportés par le bloc `impl` — notamment le **générique d'un blanket**
+    // (`impl<D> Digest for D` → `D` dénote le type concret matérialisé, comme `Self`).
+    let mut gen: Generics = extra_gen.clone();
     // `Self` (type de retour des ctors `fn new(...) -> Self`) → le type impl'é. Sans ça `new` est sauté.
     if !owner.is_empty() {
         gen.insert("Self".to_string(), Some(owner.to_string()));
@@ -566,6 +579,13 @@ fn bound_to_iron(bounds: &Json) -> Option<String> {
             }
             ("ToString", _) => return Some("str".to_string()),
             _ => {}
+        }
+        // `AsRef<[u8]>` (entrée d'octets, ex. `Digest::digest`) → `str` : Iron passe une chaîne, source
+        // d'octets (`String: AsRef<[u8]>`). Règle standard (trait std), non spécifique à une crate.
+        if matches!(tname, "AsRef" | "Into" | "AsMut")
+            && arg.and_then(|t| t["slice"]["primitive"].as_str()) == Some("u8")
+        {
+            return Some("str".to_string());
         }
     }
     None
