@@ -46,7 +46,7 @@ pub fn bind(crate_dir: &Path, pkg: Option<&str>) -> CResult<String> {
     let v: serde_json::Value = serde_json::from_str(&json)
         .map_err(|e| CompileError::msg(format!("JSON rustdoc invalide : {e}")))?;
 
-    emit(&v, &target.replace('-', "_"))
+    emit(&v, &target.replace('-', "_"), &target)
 }
 
 type Json = serde_json::Value;
@@ -61,7 +61,7 @@ struct Sig {
     idioms: Vec<&'static str>,
 }
 
-fn emit(v: &Json, crate_name: &str) -> CResult<String> {
+fn emit(v: &Json, crate_name: &str, crate_real: &str) -> CResult<String> {
     let index = v["index"]
         .as_object()
         .ok_or_else(|| CompileError::msg("rustdoc-json : `.index` absent (format inattendu)"))?;
@@ -98,10 +98,17 @@ fn emit(v: &Json, crate_name: &str) -> CResult<String> {
         if !for_id.map_or(false, |id| is_local(paths, id)) {
             continue;
         }
-        // trait court d'un `impl Trait for T` (None = inhérent) → méthodes de trait appelées en UFCS.
-        let trait_short = imp["trait"]["path"]
-            .as_str()
-            .map(|t| t.rsplit("::").next().unwrap_or(t).to_string());
+        // Chemin **complet** du trait d'un `impl Trait for T` (None = inhérent) → méthodes appelées en UFCS.
+        // On résout via `paths[id]` (ex. `core::ops::Mul`, `core::fmt::Display`) — sinon les traits std/externes
+        // seraient mal préfixés `{crate}::Trait` (bug : `num_bigint::Mul` au lieu de `core::ops::Mul`).
+        let trait_short = imp["trait"]["id"]
+            .as_u64()
+            .and_then(|id| paths.get(&id.to_string()))
+            .and_then(|p| p["path"].as_array())
+            .map(|segs| segs.iter().filter_map(|s| s.as_str()).collect::<Vec<_>>().join("::"))
+            .or_else(|| {
+                imp["trait"]["path"].as_str().map(|t| t.to_string())
+            });
         for mid in imp["items"].as_array().into_iter().flatten() {
             let Some(id) = mid.as_u64() else { continue };
             method_ids.insert(id);
@@ -125,7 +132,7 @@ fn emit(v: &Json, crate_name: &str) -> CResult<String> {
                         if sig.recv.is_some() {
                             // méthode de trait → chemin UFCS `crate::Trait::method` (évite `use Trait`) ;
                             // méthode inhérente → nom court (syntaxe-méthode auto-ref/deref).
-                            let mpath = trait_short.as_ref().map(|tr| format!("{crate_name}::{tr}::{name}"));
+                            let mpath = trait_short.as_ref().map(|tr| format!("{tr}::{name}"));
                             entry.1.push(render(name, &sig, mpath.as_deref()));
                         } else {
                             // ctor → chemin complet `crate::Type::ctor`.
@@ -175,7 +182,9 @@ fn emit(v: &Json, crate_name: &str) -> CResult<String> {
     let opaque: Vec<String> = referenced.into_iter().filter(|n| !types.contains_key(n)).collect();
 
     // --- assemblage .iri ---
-    let mut iri = format!("# bindings auto-générés depuis `{crate_name}` (ironc bind)\ncrate {crate_name} = \"{version}\"\n");
+    // Directive `crate` = nom **publié** (clé Cargo, peut avoir des tirets) ; les chemins de types et le nom
+    // d'import restent en `crate_name` (underscore).
+    let mut iri = format!("# bindings auto-générés depuis `{crate_name}` (ironc bind)\ncrate {crate_real} = \"{version}\"\n");
     for ty in &opaque {
         iri.push_str(&format!("\nextern type {ty} = \"{crate_name}::{ty}\"\n")); // handle opaque (graphe fermé)
     }

@@ -72,8 +72,17 @@ pub fn compile_with(src: &str, file: FileId, base_dir: &Path, clean: bool) -> CR
             load_module(&m, base_dir, &mut ast.items, &mut ast.imports, &mut ext, &mut next_id, &mut next_file, &mut loaded, &mut loading)?;
             continue;
         }
-        if base_dir.join(format!("{m}.iri")).exists() {
-            ast.imports.push(format!("{m}.iri"));
+        // binding `.iri` : cherché à côté du source, puis à la **racine du projet** (parent) et dans le
+        // **cwd** — c'est là qu'`ironc add` l'écrit. On pousse le chemin **absolu** (load_bindings le résout
+        // tel quel : `base_dir.join(absolu) == absolu`).
+        let cands = [
+            base_dir.join(format!("{m}.iri")),
+            base_dir.join("..").join(format!("{m}.iri")),
+            PathBuf::from(format!("{m}.iri")),
+        ];
+        if let Some(found) = cands.iter().find(|p| p.exists()) {
+            let abs = std::fs::canonicalize(found).unwrap_or_else(|_| found.clone());
+            ast.imports.push(abs.to_string_lossy().into_owned());
             continue;
         }
         return Err(CompileError::msg(format!(

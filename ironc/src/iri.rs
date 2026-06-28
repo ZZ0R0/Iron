@@ -111,7 +111,14 @@ impl P {
                 }
             } else if self.kw("crate") {
                 self.adv();
-                let name = self.ident()?;
+                // nom de crate : peut contenir des tirets (`num-bigint`, `serde-json`) → on recolle
+                // `ident (- ident)*`. C'est le nom **publié** (clé Cargo), distinct du nom d'import Iron
+                // (underscore, = nom de fichier `.iri`).
+                let mut name = self.ident()?;
+                while self.eat(&TokenKind::Minus) {
+                    name.push('-');
+                    name.push_str(&self.ident()?);
+                }
                 self.expect(&TokenKind::Assign, "`=`")?;
                 let ver = self.string()?;
                 // features optionnelles (V9, 51900) : `crate serde = "1" features [derive]`.
