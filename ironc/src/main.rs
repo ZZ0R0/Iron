@@ -20,14 +20,29 @@ fn main() {
     if positional.first().map(|s| s.as_str()) == Some("update") {
         exit(if driver::update().is_ok() { 0 } else { 1 });
     }
-    if positional.len() < 2 {
-        eprintln!("usage: ironc <build|run|test|bind|new> [--audit] <fichier.irn | nom>");
+    let instrumented = args.iter().any(|a| a == "--instrumented"); // `emit` : garder les marqueurs
+    let cmd = positional.first().map(|s| s.as_str()).unwrap_or("");
+    // Projet Iron : `ironc build|run|emit|check|test` **sans fichier** → utilise `[iron] entry` de ironc.toml.
+    let usage = "usage: ironc <build|run|emit|test|check|fmt|new|add|bind> [--audit|--debug|--instrumented] <fichier.irn | nom>";
+    let input_owned: String = if positional.len() >= 2 {
+        positional[1].clone()
+    } else if matches!(cmd, "build" | "run" | "emit" | "check" | "test") {
+        match driver::manifest_entry() {
+            Some(e) => e,
+            None => {
+                eprintln!("{usage}");
+                exit(2);
+            }
+        }
+    } else {
+        eprintln!("{usage}");
         exit(2);
-    }
-    let input = Path::new(positional[1].as_str());
-    let res = match positional[0].as_str() {
+    };
+    let input = Path::new(&input_owned);
+    let res = match cmd {
         "build" if debug => driver::build_debug(input).map(|_| ()), // build + source-map I8 + launch.json (72300)
         "build" => driver::build(input, audit).map(|_| ()),
+        "emit" => driver::emit(input, instrumented), // transpile → Rust lisible (sans compiler) — `nimcache`
         "run" => driver::run(input, audit),
         "test" => driver::test(input),
         "new" => driver::new_project(positional[1].as_str()),

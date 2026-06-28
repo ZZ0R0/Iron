@@ -17,6 +17,7 @@ pub fn lower(
     own: &OwnershipMap,
     param_modes: &ParamModes,
     bindings: &Bindings,
+    clean: bool,
 ) -> (TokenStream, SourceMap, Vec<Span>) {
     let enums: HashSet<String> = ast
         .items
@@ -69,6 +70,7 @@ pub fn lower(
         param_modes,
         bindings,
         item_attrs: &ast.item_attrs,
+        clean,
         enums,
         structs,
         user_fns,
@@ -98,11 +100,23 @@ pub fn lower(
         })
         .collect();
     let body = quote! { #(#aliases)* #(#items)* };
+    // Mode propre (`ironc emit`) : pas de marqueurs de source-map → Rust lisible, reprenable à la main.
+    let (allow, mark_macro) = if clean {
+        (
+            quote! { #![allow(dead_code, unused_variables, unused_mut, unused_parens, unused_imports)] },
+            quote! {},
+        )
+    } else {
+        (
+            quote! { #![allow(dead_code, unused_macros, unused_variables, unused_mut, unused_parens, unused_imports)] },
+            quote! { macro_rules! __irn_mark { ($n:literal) => {}; } },
+        )
+    };
     let file = quote! {
         #![forbid(unsafe_code)]
-        #![allow(dead_code, unused_macros, unused_variables, unused_mut, unused_parens, unused_imports)]
+        #allow
 
-        macro_rules! __irn_mark { ($n:literal) => {}; }
+        #mark_macro
 
         #[derive(Debug)]
         pub struct IronError(pub String);
@@ -127,6 +141,7 @@ struct Cx<'a> {
     bindings: &'a Bindings,
     /// Attributs Rust pass-through par item (V9, 51900) : `NodeId` → `derive(Serialize)`/`repr(C)`…
     item_attrs: &'a HashMap<NodeId, Vec<String>>,
+    clean: bool,
     enums: HashSet<String>,
     structs: HashSet<String>,
     /// Fns définies par l'utilisateur — priment sur les built-ins homonymes (ex. un `fn add` perso).
@@ -908,7 +923,12 @@ impl Cx<'_> {
                 }
             }
         };
-        quote! { __irn_mark!(#mark); #body }
+        // Mode propre : pas de marqueur (Rust lisible). Sinon : marqueur de source-map (debug I8).
+        if self.clean {
+            body
+        } else {
+            quote! { __irn_mark!(#mark); #body }
+        }
     }
 
     /// Lowering du corps d'une boucle + son `else` (V11, DD-2). Sauve/restaure `loop_else` → les `break` du

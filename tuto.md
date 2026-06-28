@@ -21,6 +21,7 @@ exécutable tel quel — les sorties affichées sont réelles.
 ```sh
 ironc run    fichier.irn     # transpile → compile → exécute
 ironc build  fichier.irn     # compile seulement (binaire)
+ironc emit   fichier.irn     # transpile → Rust LISIBLE (sans compiler), pour le reprendre à la main
 ironc check  fichier.irn     # diagnostics riches (sans produire de binaire)
 ironc fmt    fichier.irn     # formate en place
 ironc repl                   # boucle interactive
@@ -325,6 +326,31 @@ déjà formaté : messy.irn
 **Doc & debug.** `ironc doc fichier.irn` génère la doc HTML (via rustdoc). `ironc build --debug fichier.irn`
 produit un binaire avec infos de debug **plus** une `sourcemap.json` qui relie les lignes Rust ↔ Iron — tu
 débogues avec gdb/lldb et tu retombes sur tes lignes `.irn`.
+
+**Émission du Rust (`ironc emit`).** À la Nim (`nimcache`) : Iron peut produire un **Rust lisible** —
+sans marqueurs de source-map — dans un dossier visible (un projet cargo complet), **sans compiler**.
+
+```sh
+$ ironc emit factor.irn
+Rust propre : factor-rust/src/main.rs
+  → édite-le, puis : cd factor-rust && cargo run
+```
+
+Tu obtiens du Rust **reprenable à la main** : noms préservés, structure 1:1, types clairs. Pratique pour
+**fignoler les perfs**, ou **interfacer haut/bas niveau** (tu écris un driver/algorithme en Rust, tu
+l'`import`es comme crate côté Iron, et tu vois le tout dans le `.rs` final). Dans un projet, le manifeste
+`ironc.toml` pilote ça :
+
+```toml
+[iron]
+entry    = "src/main.irn"
+emit     = "clean"     # "clean" (lisible) | "instrumented" (avec source-maps)
+rust-out = "rust"      # où ironc emit écrit le Rust
+```
+
+`ironc build`/`run` restent **instrumentés** (les erreurs `rustc` remontent sur ta ligne Iron) ; `ironc emit`
+est le mode « donne-moi le Rust propre ». Les `.clone()` restants signalent justement les points chauds à
+optimiser à la main (cf. `--audit`).
 
 **VSCode.** L'extension (`editors/vscode/`) reconnaît les `.irn` (icône + coloration), branche le serveur de
 langage (`ironc lsp` → diagnostics **live**, complétion, hover), souligne les erreurs **à la sauvegarde**

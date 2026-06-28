@@ -42,6 +42,12 @@ fn curated_iri(name: &str) -> Option<&'static str> {
 }
 
 pub fn compile(src: &str, file: FileId, base_dir: &Path) -> CResult<Compiled> {
+    compile_with(src, file, base_dir, false)
+}
+
+/// Comme `compile`, mais choisit l'**émission propre** (`clean = true` → Rust lisible sans marqueurs de
+/// source-map, pour `ironc emit` / la reprise à la main). `clean = false` = instrumenté (debug I8).
+pub fn compile_with(src: &str, file: FileId, base_dir: &Path, clean: bool) -> CResult<Compiled> {
     let tokens = lex::lex(src, file)?;
     let (mut ast, mut next_id) = parse::parse_with_id(tokens, 0)?;
     // 70200 : charger + fusionner **à plat** les modules Iron importés. NodeId continus (clés des
@@ -100,7 +106,7 @@ pub fn compile(src: &str, file: FileId, base_dir: &Path) -> CResult<Compiled> {
     // `rustc` (filet). Zéro faux-positif (n'agit que sur un `Struct` Iron résolu).
     infer::check_shapes(&ast, &types)?;
     let (own, param_modes) = resolve::resolve(&ast, &types);
-    let (ts, sm, audit) = lower::lower(&ast, &types, &own, &param_modes, &bindings);
+    let (ts, sm, audit) = lower::lower(&ast, &types, &own, &param_modes, &bindings, clean);
 
     let syn_file: syn::File = syn::parse2(ts)
         .map_err(|e| CompileError::msg(format!("lowering a produit du Rust invalide : {e}")))?;
@@ -506,6 +512,91 @@ pub fn run(input: &Path, audit: bool) -> CResult<()> {
     Ok(())
 }
 
+/// Configuration `[iron]` du manifeste `ironc.toml` (le « cargo » d'Iron). Tout est optionnel.
+struct IronCfg {
+    /// `emit = "clean"|"instrumented"` — lisibilité du Rust de `ironc emit` (défaut : `clean`).
+    emit_clean: bool,
+    /// `rust-out = "dir"` — où `ironc emit` écrit le projet Rust (défaut : `<stem>-rust/`).
+    rust_out: Option<String>,
+}
+
+fn iron_cfg(base_dir: &Path) -> IronCfg {
+    let mut cfg = IronCfg { emit_clean: true, rust_out: None };
+    let text = std::fs::read_to_string(base_dir.join("ironc.toml"))
+        .or_else(|_| std::fs::read_to_string("ironc.toml"))
+        .ok();
+    if let Some(t) = text {
+        let mut in_iron = false;
+        for line in t.lines() {
+            let l = line.trim();
+            if l.starts_with('[') {
+                in_iron = l == "[iron]";
+                continue;
+            }
+            if !in_iron {
+                continue;
+            }
+            if let Some((k, v)) = l.split_once('=') {
+                let (k, v) = (k.trim(), v.trim().trim_matches('"'));
+                match k {
+                    "emit" => cfg.emit_clean = v != "instrumented",
+                    "rust-out" | "rust_out" => cfg.rust_out = Some(v.to_string()),
+                    _ => {}
+                }
+            }
+        }
+    }
+    cfg
+}
+
+/// `[iron] entry` du manifeste `ironc.toml` du dossier courant — fichier source par défaut d'un projet.
+pub fn manifest_entry() -> Option<String> {
+    let t = std::fs::read_to_string("ironc.toml").ok()?;
+    let mut in_iron = false;
+    for line in t.lines() {
+        let l = line.trim();
+        if l.starts_with('[') {
+            in_iron = l == "[iron]";
+            continue;
+        }
+        if in_iron {
+            if let Some((k, v)) = l.split_once('=') {
+                if k.trim() == "entry" {
+                    return Some(v.trim().trim_matches('"').to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// `ironc emit <fichier>` : transpile en **Rust lisible** (sans marqueurs de source-map) dans un dossier
+/// **visible** (projet cargo complet `Cargo.toml` + `src/main.rs`), **sans compiler** — pour lire, éditer et
+/// fignoler le Rust à la main, puis `cargo run` dessus. C'est l'esprit `nimcache` : le `.rs` intermédiaire
+/// devient un artefact de premier ordre. Mode via `[iron] emit` (défaut `clean`), emplacement via
+/// `[iron] rust-out`. `--instrumented` force la version avec marqueurs (source-maps).
+pub fn emit(input: &Path, instrumented_flag: bool) -> CResult<()> {
+    let src = std::fs::read_to_string(input)
+        .map_err(|e| CompileError::msg(format!("lecture {} : {e}", input.display())))?;
+    let base_dir = input.parent().unwrap_or(Path::new("."));
+    let cfg = iron_cfg(base_dir);
+    let clean = if instrumented_flag { false } else { cfg.emit_clean };
+    let compiled = compile_with(&src, 0, base_dir, clean).map_err(|e| located(e, &src, input))?;
+    let stem = input.file_stem().and_then(|s| s.to_str()).unwrap_or("out");
+    let out_dir = match &cfg.rust_out {
+        Some(d) => base_dir.join(d),
+        None => base_dir.join(format!("{stem}-rust")),
+    };
+    emit_project(&out_dir, &compiled.rust_src, &compiled.crates)
+        .map_err(|e| CompileError::msg(format!("émission projet : {e}")))?;
+    let mode = if clean { "propre" } else { "instrumenté" };
+    println!(
+        "Rust {mode} : {0}/src/main.rs\n  → édite-le, puis : cd {0} && cargo run",
+        out_dir.display()
+    );
+    Ok(())
+}
+
 /// `ironc test <fichier>` : compile + lance `cargo test` (les `def test_*()` deviennent des `#[test]`).
 pub fn test(input: &Path) -> CResult<()> {
     let out_dir = build(input, false)?;
@@ -534,7 +625,11 @@ pub fn new_project(name: &str) -> CResult<()> {
     w(dir.join("src/main.irn"), "def main():\n    print(\"hello from Iron\")\n")?;
     w(
         dir.join("ironc.toml"),
-        &format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[iron]\nentry = \"src/main.irn\"\n"),
+        &format!(
+            "[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[iron]\nentry = \"src/main.irn\"\n\
+             # emit = \"clean\"      # Rust produit par `ironc emit` : clean (lisible) | instrumented (source-maps)\n\
+             # rust-out = \"rust\"   # dossier où `ironc emit` écrit le Rust (défaut : <stem>-rust/)\n"
+        ),
     )?;
     w(dir.join(".gitignore"), "/target\n/ironc-out\n")?;
     println!("Projet `{name}` créé.  cd {name} && ironc run src/main.irn");
