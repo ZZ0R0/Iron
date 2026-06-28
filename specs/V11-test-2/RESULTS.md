@@ -47,8 +47,8 @@ Chaque crate réel a exposé un trou ; tous corrigés sans régresser le gate-v1
 | 42 | Synthé / WAV | `hound` | ✅ **vert** | **B17** (struct/enum externes) + **B18** (arg par valeur) : écrit un WAV valide (`RIFF…WAVE`, en-tête 44 o, `sample_rate=44100`). Reste hors-mur : `write_sample<S: Sample>` (générique sur trait de crate). |
 | 05 | Renommeur regex | `regex` | ✅ **vert** (cœur) | **B15** : dédup retient `regex::Regex` (chemin court). `Regex.new("[0-9]+").unwrap()` → `is_match`/`find().as_str()` OK. `replace_all` reste non bindé (arg `R: Replacer` ; coercition `&String`→`&str` à part). |
 | 04 | Texte coloré | `colored` | ✅ **vert** | **B19** (méthodes de trait sur primitif `str` + méthodes fournies) : `"error".red()` → `\e[31m`, `"ok".green().bold()` → `\e[1;32m` (chaînage). |
-| 67 | Distances géo | `geo` | 🔴 | `Point` est **re-exporté de la dép `geo_types`** où vit `Point::new` → invisible au bind mono-crate. Mur : **crate façade** (binding multi-crate). |
-| 63 | Gzip | `flate2` | 🔴 | `GzEncoder::new(w: impl Write, …)` consomme un **puits d'octets** en streaming → cogne avec la sémantique par valeur. Mur : **modèle io `Write`/sink**. |
+| 67 | Distances géo | `geo` | 🟡 | **Façade corrigée** (52700, binding multi-crate) → `Point` porte ses méthodes geo_types. **Mais** `Point<T: CoordNum>` est générique sur le **scalaire** en entrée *et* en sortie (`new(x: T)`, `distance() -> T`) → monomorphiser `T`→`f64` exigerait de reconnaître `CoordNum`/`Num` (traits de crate) : **interdit par la règle globale**. Limite dure. |
+| 63 | Gzip | `flate2` | 🔴 | **Modèle io.** Tout passe par `Write`/`Read`/`BufRead` (puits/sources d'octets streaming) + params `&mut Vec` (out-params) + variantes `read`/`write`/`bufread`. Même en mappant `Write`/`Read` (std) → `list[u8]`, l'usage cogne sur : littéraux `list[u8]` (la liste est `i64`), `&[u8]` vs `&Vec` pour `BufRead`, out-params. Stack de features hors sémantique par valeur d'Iron. **Limite de modèle** (chantier io V12). |
 
 ## Murs — 4/5 corrigés (regex B15, sha2 B16, hound B17/B18, colored B19) ; 2 restants = **gros**
 
@@ -60,14 +60,18 @@ Tous corrigés en **règles globales** (zéro nom de crate) :
    (arg par valeur `own T`). Écrit un WAV valide.
 3. ✅ ~~**colored — extension de primitif**~~ → **B19** : `impl Trait for &str` rattaché au pseudo-type
    `__str`, routé en UFCS `Trait::m(&*x)` ; + binding des méthodes **fournies** (corps par défaut) du trait.
-4. 🔴 **geo — crate façade** : `Point` re-exporté de la dép `geo_types`, son ctor `Point::new` y vit →
-   invisible au bind mono-crate. → piste : binder les crates **sources** des re-exports. **Gros (multi-crate).**
-5. 🔴 **flate2 — modèle io `Write`/sink** : `GzEncoder::new(w: impl Write, …)` consomme un puits d'octets en
-   streaming → cogne avec la sémantique par valeur. **Gros (modèle io, pas qu'un binding).**
+4. 🟡 **geo — crate façade** → **52700 corrigé** (binding multi-crate : `rustdoc -p geo_types` + fusion).
+   `Point` porte ses méthodes. **Reste bloqué** par le scalaire générique `T: CoordNum` (entrée **et**
+   sortie) : monomorphiser `T`→`f64` exige de reconnaître `CoordNum`/`Num` (traits **de crate**) → interdit.
+   **Limite de modèle** : Iron ne suit pas les paramètres de type (`Point<T>`).
+5. 🔴 **flate2 — modèle io** : tout est `Write`/`Read`/`BufRead` + out-params `&mut Vec` + variantes
+   `read`/`write`/`bufread`. Stack de features hors sémantique par valeur. **Limite de modèle** (io V12).
 
 > regex était un **bug** → corrigé. sha2/hound/colored étaient des **features** → construites en règles
-> globales (B16–B19). Restent **geo** (façade multi-crate) et **flate2** (modèle io `Write`) — deux vrais
-> chantiers (plusieurs heures chacun).
+> globales (B16–B19). **geo** : façade corrigée (52700), mais scalaire générique = **limite de modèle**
+> (pas globalement contournable sans hack crate). **flate2** : modèle io streaming = **limite de modèle**.
+> Ces deux-là ne sont pas des bugs ni des features bindables — ce sont les **frontières dures** d'Iron sous
+> la contrainte « global-only » : suivi de paramètres de type générique, et io par flux. Vrais sujets V12.
 
 ## Constat & cadence (honnête)
 
