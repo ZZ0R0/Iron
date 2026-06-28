@@ -72,6 +72,7 @@ fn emit(v: &Json, crate_name: &str, crate_real: &str) -> CResult<String> {
     // --- POO : méthodes/ctors par type (51100) ---
     let mut method_ids: HashSet<u64> = HashSet::new();
     let mut types: BTreeMap<String, (Vec<String>, Vec<String>)> = BTreeMap::new(); // nom → (ctors, méthodes)
+    let mut type_paths: BTreeMap<String, String> = BTreeMap::new(); // nom court → chemin Rust complet (sous-modules)
     let mut seen: BTreeMap<String, HashSet<String>> = BTreeMap::new(); // dedup noms par type
 
     for item in index.values() {
@@ -90,14 +91,26 @@ fn emit(v: &Json, crate_name: &str, crate_real: &str) -> CResult<String> {
             }
         }
         let for_id = imp["for"]["resolved_path"]["id"].as_u64();
-        let tyname = match imp["for"]["resolved_path"]["path"].as_str() {
-            Some(n) => n.rsplit("::").next().unwrap_or(n).to_string(),
+        let tyfull = match imp["for"]["resolved_path"]["path"].as_str() {
+            Some(n) => n.to_string(),
             None => continue,
         };
+        let tyname = tyfull.rsplit("::").next().unwrap_or(&tyfull).to_string();
         // type local à la crate (crate_id 0) — sinon on n'a pas son chemin public.
         if !for_id.map_or(false, |id| is_local(paths, id)) {
             continue;
         }
+        // chemin Rust complet du type (sous-modules : `statrs::distribution::Beta`) — via `paths[id]`
+        // (canonique), sinon `resolved_path` puis `crate::Type`. Sinon `crate::Beta` serait introuvable.
+        type_paths.entry(tyname.clone()).or_insert_with(|| {
+            for_id
+                .and_then(|id| paths.get(&id.to_string()))
+                .and_then(|p| p["path"].as_array())
+                .map(|segs| segs.iter().filter_map(|s| s.as_str()).collect::<Vec<_>>().join("::"))
+                .filter(|p| p.contains("::"))
+                .map(|p| drop_private_mod(&p))
+                .unwrap_or_else(|| if tyfull.contains("::") { tyfull.clone() } else { format!("{crate_name}::{tyfull}") })
+        });
         // Chemin **complet** du trait d'un `impl Trait for T` (None = inhérent) → méthodes appelées en UFCS.
         // On résout via `paths[id]` (ex. `core::ops::Mul`, `core::fmt::Display`) — sinon les traits std/externes
         // seraient mal préfixés `{crate}::Trait` (bug : `num_bigint::Mul` au lieu de `core::ops::Mul`).
@@ -135,8 +148,14 @@ fn emit(v: &Json, crate_name: &str, crate_real: &str) -> CResult<String> {
                             let mpath = trait_short.as_ref().map(|tr| format!("{tr}::{name}"));
                             entry.1.push(render(name, &sig, mpath.as_deref()));
                         } else {
-                            // ctor → chemin complet `crate::Type::ctor`.
-                            let full = format!("{crate_name}::{tyname}::{name}");
+                            // ctor / fn associée : **inhérente** → `crate::Type::ctor` ; **associée à un
+                            // trait** (`One::one`, `Digest::new`, `FromPrimitive::from_u64`) → UFCS qualifié
+                            // `<crate::Type as Trait>::ctor` (sinon `crate::Type::one` n'existe pas). B5.
+                            let tp = type_paths.get(&tyname).cloned().unwrap_or_else(|| format!("{crate_name}::{tyname}"));
+                            let full = match &trait_short {
+                                Some(tr) => format!("<{tp} as {tr}>::{name}"),
+                                None => format!("{tp}::{name}"),
+                            };
                             entry.0.push(render(name, &sig, Some(&full)));
                         }
                         bound += 1;
@@ -192,7 +211,8 @@ fn emit(v: &Json, crate_name: &str, crate_real: &str) -> CResult<String> {
         if ctors.is_empty() && methods.is_empty() {
             continue;
         }
-        iri.push_str(&format!("\nextern type {ty} = \"{crate_name}::{ty}\":\n"));
+        let typath = type_paths.get(ty).cloned().unwrap_or_else(|| format!("{crate_name}::{ty}"));
+        iri.push_str(&format!("\nextern type {ty} = \"{typath}\":\n"));
         for line in ctors.iter().chain(methods.iter()) {
             iri.push_str(&format!("    {line}\n"));
         }
@@ -205,6 +225,22 @@ fn emit(v: &Json, crate_name: &str, crate_real: &str) -> CResult<String> {
     }
     iri.push_str(&format!("\n# {bound} item(s) bindé(s), {skipped} non mappable(s) sauté(s)\n"));
     Ok(iri)
+}
+
+/// Heuristique de re-export (rustdoc donne le chemin **canonique** = module privé interne ; le chemin
+/// **public** est le re-export). Cas très courant `mod beta { pub struct Beta }` re-exporté plus haut :
+/// `a::b::beta::Beta` → `a::b::Beta` (on retire le segment-module égal au type en minuscules).
+fn drop_private_mod(path: &str) -> String {
+    let segs: Vec<&str> = path.split("::").collect();
+    if segs.len() >= 2 {
+        let last = segs[segs.len() - 1];
+        if segs[segs.len() - 2] == last.to_lowercase() {
+            let mut s = segs.clone();
+            s.remove(segs.len() - 2);
+            return s.join("::");
+        }
+    }
+    path.to_string()
 }
 
 /// Nom = mot-clé Iron → ne peut pas être un identifiant de méthode/fonction (binder : on saute).
@@ -248,6 +284,9 @@ fn project(f: &Json, owner: &str) -> Option<Sig> {
             recv = Some(recv_kind(ty));
             continue;
         }
+        // param nommé comme un mot-clé Iron (`lambda`, `in`, `type`…) → renommé (le nom n'a pas
+        // d'importance, l'appel est positionnel) pour rester un identifiant valide.
+        let pn = if is_iron_keyword(pn) { format!("{pn}_") } else { pn.to_string() };
         match map_type(ty) {
             Some(t) => params.push(format!("{pn}: {t}")),
             None => return None,
