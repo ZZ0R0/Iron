@@ -647,6 +647,16 @@ fn project(f: &Json, owner: &str, extra_gen: &Generics) -> Option<Sig> {
             }
         }
     }
+    // Bornes en clause **`where`** (`fn http<A>(addr: A) where A: ToSocketAddrs`) — pas dans les bounds
+    // inline du param (B28). Sans ça `A` reste `None` et la fn est sautée à tort.
+    for w in f["generics"]["where_predicates"].as_array().into_iter().flatten() {
+        let bp = &w["bound_predicate"];
+        if let Some(name) = bp["type"]["generic"].as_str() {
+            if !matches!(gen.get(name), Some(Some(_))) {
+                gen.insert(name.to_string(), bound_to_iron(&bp["bounds"]));
+            }
+        }
+    }
     let inputs = f["sig"]["inputs"].as_array()?;
     let mut recv = None;
     let mut params = Vec::new();
@@ -771,6 +781,9 @@ fn bound_to_iron(bounds: &Json) -> Option<String> {
                 return Some("str".to_string())
             }
             ("ToString", _) => return Some("str".to_string()),
+            // `ToSocketAddrs` (std) : une adresse se passe en **chaîne** (`"127.0.0.1:8080"`) ;
+            // `&String: ToSocketAddrs` via le blanket `impl ToSocketAddrs for &T`. Trait std, pas crate.
+            ("ToSocketAddrs", _) => return Some("str".to_string()),
             _ => {}
         }
         // `AsRef<[u8]>` (entrée d'octets, ex. `Digest::digest`) → `str` : Iron passe une chaîne, source

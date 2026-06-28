@@ -1945,6 +1945,15 @@ impl Cx<'_> {
                     }
                 }
             }
+            // **tuple** à éléments numériques vers un param tuple **dimensionné** (`(200,150)` i64 →
+            // `(u32,u32)`, ex. dimensions plotters/tiny-skia) → coercer chaque élément (B29).
+            if let (Type::Tuple(elems), ExprKind::Tuple(items)) = (exp, &x.kind) {
+                if elems.len() == items.len() {
+                    let parts: Vec<TokenStream> =
+                        items.iter().zip(elems).map(|(it, et)| self.coerce_to(it, Some(et))).collect();
+                    return quote! { ( #(#parts),* ) };
+                }
+            }
         }
         // param **par valeur** (`own T` dans le binding) → pas de `&` (le handle est consommé/copié).
         if owned {
