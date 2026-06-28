@@ -327,6 +327,48 @@ fn emit(v: &Json, crate_name: &str, crate_real: &str, versions: &HashMap<String,
         }
     }
 
+    // --- structs à champs publics (construction par littéral) + enums à variantes (52400) ---
+    let mut struct_fields: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
+    let mut enum_variants: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (id, item) in index {
+        let Some(idn) = id.parse::<u64>().ok() else { continue };
+        if !is_local(paths, idn) || item["visibility"].as_str() != Some("public") {
+            continue;
+        }
+        let Some(tyname) = item["name"].as_str().map(str::to_string) else { continue };
+        // struct à **tous** champs publics nommés (sinon non constructible par littéral).
+        let plain = &item["inner"]["struct"]["kind"]["plain"];
+        if plain.is_object() && plain["has_stripped_fields"].as_bool() == Some(false) {
+            let mut fs = Vec::new();
+            let mut ok = true;
+            for fid in plain["fields"].as_array().into_iter().flatten().filter_map(|x| x.as_u64()) {
+                let Some(fm) = index.get(&fid.to_string()) else { ok = false; break };
+                match (fm["name"].as_str(), map_type(&fm["inner"]["struct_field"], &Generics::new())) {
+                    (Some(fname), Some(t)) if !is_iron_keyword(fname) => fs.push((fname.to_string(), t)),
+                    _ => { ok = false; break }
+                }
+            }
+            if ok && !fs.is_empty() {
+                struct_fields.insert(tyname.clone(), fs);
+                type_paths.entry(tyname.clone()).or_insert_with(|| resolve_type_path(Some(idn), &tyname, &public_paths, paths, crate_name));
+            }
+        }
+        // enum : variantes **nullaires** (`SampleFormat.Int`) ; les variantes à données sont ignorées.
+        if let Some(vars) = item["inner"]["enum"]["variants"].as_array() {
+            let vs: Vec<String> = vars
+                .iter()
+                .filter_map(|x| x.as_u64())
+                .filter_map(|vid| index.get(&vid.to_string()))
+                .filter(|vm| vm["inner"]["variant"]["kind"].as_str() == Some("plain"))
+                .filter_map(|vm| vm["name"].as_str().map(str::to_string))
+                .collect();
+            if !vs.is_empty() {
+                enum_variants.insert(tyname.clone(), vs);
+                type_paths.entry(tyname.clone()).or_insert_with(|| resolve_type_path(Some(idn), &tyname, &public_paths, paths, crate_name));
+            }
+        }
+    }
+
     // --- fermeture du graphe (51200) : déclarer en opaque tout type référencé non déjà typé ---
     let mut referenced: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     for (ctors, methods) in types.values() {
@@ -337,7 +379,10 @@ fn emit(v: &Json, crate_name: &str, crate_real: &str, versions: &HashMap<String,
     for line in &free {
         collect_type_refs(line, &mut referenced);
     }
-    let opaque: Vec<String> = referenced.into_iter().filter(|n| !types.contains_key(n)).collect();
+    let opaque: Vec<String> = referenced
+        .into_iter()
+        .filter(|n| !types.contains_key(n) && !struct_fields.contains_key(n) && !enum_variants.contains_key(n))
+        .collect();
 
     // --- assemblage .iri ---
     // Directive `crate` = nom **publié** (clé Cargo, peut avoir des tirets) ; les chemins de types et le nom
@@ -353,12 +398,26 @@ fn emit(v: &Json, crate_name: &str, crate_real: &str, versions: &HashMap<String,
     for ty in &opaque {
         iri.push_str(&format!("\nextern type {ty} = \"{crate_name}::{ty}\"\n")); // handle opaque (graphe fermé)
     }
-    for (ty, (ctors, methods)) in &types {
-        if ctors.is_empty() && methods.is_empty() {
+    // union des types ayant du contenu : ctors/méthodes, **champs** (struct) ou **variantes** (enum).
+    let mut all_types: std::collections::BTreeSet<&String> = types.keys().collect();
+    all_types.extend(struct_fields.keys());
+    all_types.extend(enum_variants.keys());
+    let empty: (Vec<String>, Vec<String>) = (Vec::new(), Vec::new());
+    for ty in all_types {
+        let (ctors, methods) = types.get(ty).unwrap_or(&empty);
+        let fields = struct_fields.get(ty);
+        let variants = enum_variants.get(ty);
+        if ctors.is_empty() && methods.is_empty() && fields.is_none() && variants.is_none() {
             continue;
         }
         let typath = type_paths.get(ty).cloned().unwrap_or_else(|| format!("{crate_name}::{ty}"));
         iri.push_str(&format!("\nextern type {ty} = \"{typath}\":\n"));
+        for (fname, fty) in fields.into_iter().flatten() {
+            iri.push_str(&format!("    field {fname}: {fty}\n"));
+        }
+        for v in variants.into_iter().flatten() {
+            iri.push_str(&format!("    case {v}\n"));
+        }
         for line in ctors.iter().chain(methods.iter()) {
             iri.push_str(&format!("    {line}\n"));
         }

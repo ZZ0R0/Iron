@@ -386,13 +386,24 @@ pub(crate) fn expr(cx: &mut Inf, e: &Expr, scope: &Scope) -> Type {
             for (_, v) in fields {
                 expr(cx, v, scope);
             }
-            // `Name(champ=val)` : appel à arguments nommés si `Name` est une fn → son type de retour.
-            match cx.sigs.get(name) {
-                Some((_, ret)) => ret.clone(),
-                None => Type::Struct(name.clone()),
+            // struct **externe** à champs publics (`WavSpec(channels=1, …)`, 52400) → handle externe.
+            if cx.etypes.contains_key(name) {
+                Type::Extern(name.clone())
+            } else {
+                // `Name(champ=val)` : appel à arguments nommés si `Name` est une fn → son type de retour.
+                match cx.sigs.get(name) {
+                    Some((_, ret)) => ret.clone(),
+                    None => Type::Struct(name.clone()),
+                }
             }
         }
         ExprKind::Field { base, name } => {
+            // variante d'un **enum externe** (`SampleFormat.Int`, 52400) → handle externe.
+            if let ExprKind::Var(n) = &base.kind {
+                if cx.etypes.get(n).is_some_and(|et| et.variants.iter().any(|v| v == name)) {
+                    return cx.set(e.id, Type::Extern(n.clone()));
+                }
+            }
             let bt = expr(cx, base, scope);
             match bt {
                 Type::Struct(s) => cx.field_type(&s, name),

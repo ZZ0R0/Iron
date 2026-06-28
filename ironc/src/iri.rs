@@ -248,14 +248,27 @@ impl P {
                     if self.is(&TokenKind::Dedent) || self.is(&TokenKind::Eof) {
                         break;
                     }
-                    self.expect(&TokenKind::Fn, "`fn` (méthode/constructeur)")?;
-                    let (fname, f) = self.parse_fn(Some(&path))?;
-                    if f.recv.is_some() {
-                        et.methods.push((fname, f));
+                    if self.ident_is("field") {
+                        // `field nom: type` (champ public d'une struct externe — construction par littéral).
+                        self.adv();
+                        let fname = self.ident()?;
+                        self.expect(&TokenKind::Colon, "`:`")?;
+                        let ty = self.parse_type()?;
+                        et.fields.push((fname, ty));
+                    } else if self.ident_is("case") {
+                        // `case Variant` (variante d'un enum externe — `Enum.Variant`).
+                        self.adv();
+                        et.variants.push(self.ident()?);
                     } else {
-                        // constructeur : aussi exposé en fn libre (appel `nom(...)`).
-                        b.fns.insert(fname.clone(), f.clone());
-                        et.ctors.push((fname, f));
+                        self.expect(&TokenKind::Fn, "`fn`/`field`/`case`")?;
+                        let (fname, f) = self.parse_fn(Some(&path))?;
+                        if f.recv.is_some() {
+                            et.methods.push((fname, f));
+                        } else {
+                            // constructeur : aussi exposé en fn libre (appel `nom(...)`).
+                            b.fns.insert(fname.clone(), f.clone());
+                            et.ctors.push((fname, f));
+                        }
                     }
                     self.skip_nl();
                 }

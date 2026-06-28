@@ -1219,6 +1219,14 @@ impl Cx<'_> {
                         let vid = format_ident!("{}", name);
                         return quote! { #eid::#vid };
                     }
+                    // variante d'enum **externe** (`SampleFormat.Int`, 52400) → `crate::path::Variant`.
+                    if let Some(et) = self.bindings.etypes.get(ename) {
+                        if et.variants.iter().any(|v| v == name) {
+                            let path = TokenStream::from_str(&et.rust_path).unwrap_or_else(|_| quote! { () });
+                            let vid = format_ident!("{}", name);
+                            return quote! { #path::#vid };
+                        }
+                    }
                 }
                 // index de tuple `t.0` (10400) → `syn::Index` (un ident ne peut pas être un chiffre).
                 if let Ok(n) = name.parse::<usize>() {
@@ -1302,6 +1310,21 @@ impl Cx<'_> {
                 quote! { { let mut __d = std::collections::HashMap::new(); #(#ins)* __d } }
             }
             ExprKind::StructLit { name, fields } => {
+                // struct **externe** à champs publics (52400) → `crate::path::S { champ: (val) as T, … }`
+                // (chemin Rust complet ; coercition numérique par champ, **sans** `&` — champs par valeur).
+                if let Some(et) = self.bindings.etypes.get(name).filter(|e| !e.fields.is_empty()).cloned() {
+                    let path = TokenStream::from_str(&et.rust_path).unwrap_or_else(|_| quote! { () });
+                    let fs: Vec<TokenStream> = fields
+                        .iter()
+                        .map(|(fname, fexpr)| {
+                            let fid = format_ident!("{}", fname);
+                            let declared = et.fields.iter().find(|(n, _)| n == fname).map(|(_, t)| t);
+                            let v = self.coerce_to(fexpr, declared);
+                            quote! { #fid: #v }
+                        })
+                        .collect();
+                    return quote! { #path { #(#fs),* } };
+                }
                 // `Name(champ=val)` : appel à **arguments nommés** si `Name` est une fn, sinon construction.
                 if self.user_fns.contains(name) {
                     let fid = format_ident!("{}", name);
@@ -1894,6 +1917,20 @@ impl Cx<'_> {
             }
         }
         self.extern_arg(x)
+    }
+
+    /// Valeur coercée au type numérique **dimensionné** attendu (`(v) as u16`), **sans** `&` (champ de
+    /// struct par valeur — 52400). Non numérique → valeur telle quelle.
+    fn coerce_to(&mut self, x: &Expr, expected: Option<&Type>) -> TokenStream {
+        let v = self.value(x);
+        match expected {
+            Some(Type::Num(k)) if matches!(self.type_of(x), Type::I64 | Type::Num(_) | Type::F64) && self.type_of(x) != Type::Num(*k) => {
+                let id = format_ident!("{}", num_kind_str(*k));
+                quote! { (#v) as #id }
+            }
+            Some(Type::F64) if matches!(self.type_of(x), Type::I64 | Type::Num(_)) => quote! { (#v) as f64 },
+            _ => v,
+        }
     }
 
     /// Constructeur externe namespacé (V8, 40200) : `Type.ctor(args)` → `crate::Type::ctor(args)`.

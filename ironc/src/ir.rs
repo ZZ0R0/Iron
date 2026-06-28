@@ -501,11 +501,17 @@ pub struct ExternFn {
 }
 
 /// Type Rust externe à API (V8, 50900) : handle opaque + constructeurs + méthodes (D2).
+/// V12 (52400) : `fields` (struct à champs publics → construction par littéral `WavSpec(channels=1, …)`)
+/// et `variants` (enum à variantes → `SampleFormat.Int`).
 #[derive(Debug, Clone, Default)]
 pub struct ExternType {
     pub rust_path: String,
     pub ctors: Vec<(String, ExternFn)>,
     pub methods: Vec<(String, ExternFn)>,
+    /// Champs publics d'une struct externe : `(nom, type)` → `path { nom: val, … }` au lowering.
+    pub fields: Vec<(String, Type)>,
+    /// Variantes d'un enum externe : `path::Variant` au lowering.
+    pub variants: Vec<String>,
 }
 
 /// Bindings chargés depuis les `.iri` importés (50200, étendu V8 50900).
