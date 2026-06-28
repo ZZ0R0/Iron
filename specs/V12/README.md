@@ -44,14 +44,16 @@
 
 Les fiches complètes (pas les bouts) toucheront sans doute **plus** que les bouts. À confirmer/ajouter si ça
 bloque vraiment :
-- **[83000] opérations fichier** au-delà de read/write : `rename`/`copy`/`remove` (renommeur #05, dédup #03).
+- ~~**[83000] opérations fichier**~~ → **🔧 RÉSOLU (B32)** : `rename`/`copy_file`/`remove_file`/`create_dir`/
+  `create_dir_all`/`remove_dir_all`/`path_exists` ajoutés **globalement** à `std.iri` (mêmes signatures que
+  `read_file`/`write_file`). Le **renommeur #05 est VERT** (regex `captures` → `rename` → `path_exists`,
+  vérifié sur disque). Le listage de répertoire passe déjà par **walkdir** (B30, vert). Restant mineur
+  (non bloquant) : `std::fs::metadata` (taille/mtime) pour la dédup #03 — à ajouter si un projet le force.
 - **[52600b] construction d'un `Value` dynamique** (et pas que le parser) : `serde_json::json!{}` /
-  `Value::Object.insert` pour le **CSV→JSON** (#06), au-delà de `Value.from_str` déjà ✅.
+  `Value::Object.insert` pour le **CSV→JSON** (#06) — **non bloquant en fait** : CSV→JSON ✅ construit le
+  JSON par assemblage de chaînes (la voie `json!{}` reste une ergonomie, pas un mur).
 - **dépaquetage d'un retour tuple** d'une fn externe (`(c, r) = size()`) — possiblement un **bug** réparable,
   pas une capacité ; à vérifier.
-
-> Ces trois ne sont **pas** encore prouvés bloquants — je les **confirmerai en écrivant les 25** et les
-> ajouterai (bug → corrigé ; capacité → ici), conformément à la règle.
 
 ### Trouvés en écrivant les programmes complets
 - **🔧 [24400] corrigé (B30)** — type d'élément d'itérateur externe local → **CSV→JSON complet ✅**.
@@ -62,6 +64,14 @@ bloque vraiment :
   donc son type. Sûr : aucun homonyme dans le gate ; geo est bloqué par les génériques scalaires de toute
   façon (pas par ce choix). **scraper select complet ✅** (`Selector.parse("li")` → `scraper::Selector::parse`,
   parse HTML → select → `inner_html` sur chaque `<li>`).
+- **🔧 [83000] opérations fichier RÉSOLU (B32)** — std fs élargie (`rename`/`copy_file`/`remove_file`/
+  `create_dir`/`create_dir_all`/`remove_dir_all`/`path_exists`), **globale**. **Renommeur #05 VERT** :
+  `IMG_001.JPG`→`photo_001.jpg`, `note.txt` ignoré (regex `captures`), vérifié sur disque.
+- **rusqlite #20 — partiel, bloqué par capacités existantes (pas un bug)** : `open_in_memory` +
+  `execute_batch` (CREATE+INSERT) + `total_changes`/`last_insert_rowid` ✅ ; mais `execute(sql, params)` et
+  `query_row(sql, params, |row| …)` sont **droppés au binding** (génériques `P: Params` = trait de crate
+  → [24100b] ; closure `|row| row.get::<T>(0)` → [40300]/[24100]). La **lecture** de lignes est donc bloquée
+  par **[24100]+[40300] déjà cadrés** — rien de neuf.
 
 ## Pourquoi ce sont des capacités (pas du durcissement)
 

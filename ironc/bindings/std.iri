@@ -2,6 +2,14 @@
 # Pas de ligne `crate` : la std n'est pas une dépendance Cargo.
 extern fn read_file(path: str) -> Result[str] = "std::fs::read_to_string"
 extern fn write_file(path: str, content: str) -> Result[unit] = "std::fs::write"
+# Opérations fichier de la std (B32) : globales, mêmes signatures que read/write_file.
+extern fn rename(from: str, to: str) -> Result[unit] = "std::fs::rename"
+extern fn copy_file(from: str, to: str) -> Result[u64] = "std::fs::copy"
+extern fn remove_file(path: str) -> Result[unit] = "std::fs::remove_file"
+extern fn create_dir(path: str) -> Result[unit] = "std::fs::create_dir"
+extern fn create_dir_all(path: str) -> Result[unit] = "std::fs::create_dir_all"
+extern fn remove_dir_all(path: str) -> Result[unit] = "std::fs::remove_dir_all"
+extern fn path_exists(path: str) -> bool = "(|p: &str| std::path::Path::new(p).exists())"
 extern fn env_var(name: str) -> Result[str] = "std::env::var"
 # Arguments de ligne de commande (V11-test) : `sys.argv` rebindé. Binding-expression itérateur→Vec.
 extern fn args() -> list[str] = "std::env::args().collect::<Vec<String>>"
