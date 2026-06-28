@@ -21,6 +21,8 @@
 | [24100] | **Génériques de type** suivis (`Point<T>`, `Vec<T>`, tenseurs) + monomorphisation scalaire | 2 | geo, nalgebra, ndarray, polars, rustfft, dialoguer, rapier2d, **ML** (candle/linfa/tract/smartcore) | spec'é |
 | [52800] | **io par flux** (`Write`/`Read`/`BufRead`, puits/sources, out-params) | 5 | flate2, printpdf(save), quick-xml, image(save-stream) | spec'é |
 | [52900] | **serde typé** (derive + de/serialize générique) | 5 | toml(doc), serde_yaml, bincode, jsonwebtoken | cadré |
+| [24300] | **Implémenter un trait EXTERNE** sur un type Iron (`impl eframe::App for MyApp`) | 2 | GUI (eframe/iced), tout framework à trait-utilisateur | **découvert tardivement** |
+| [40300] | **Closures rendant un trait-objet** (`Box<dyn FnOnce -> Box<dyn App>>`), HOF avancées | 4 | GUI, callbacks de crates | **découvert tardivement** |
 | [35000] | **Boucle d'événements & état mutable partagé** | 3 | **GUI** (26-30), **TUI complet** (31-32), **jeux** (46-50) | **cadré (nouveau)** |
 | [53000] | **Runtime async** (`tokio`/`async fn`/`.await` exécutés) | 5 | axum, teloxide, redis, tungstenite, hickory, rumqttc, web (16/19) | **cadré (nouveau)** |
 | [43000] | **Émission `no_std` + HAL encapsulé** (embarqué, sans violer I2) | 4 | esp-hal (ESP32), rppal, serialport, btleplug, linux-embedded-hal | **cadré (nouveau)** |
@@ -58,3 +60,22 @@
 
 > **Méthode.** Chaque capacité = un cycle 4-phases à part entière. On en planifie **une** à la fois (commencer
 > par [24100]). Tout nouveau mur **de même nature** s'ajoute ici, jamais en cas-par-cas.
+
+## ⚠️ Ce cadrage est une HYPOTHÈSE, pas une garantie
+
+**Honnêteté requise.** Je n'ai **exécuté que ~45 des 80** ; les ~35 autres sont classés par **architecture**,
+pas par essai. Et chaque capacité ci-dessus est **draft** : la *construire* est une vraie recherche qui
+**révélera des sous-problèmes**. Preuve : en sondant eframe au-delà du binding, j'ai découvert **[24300]
+impl-trait-externe** et **[40300] closures→trait-objets** que je n'avais **pas** vus — un seul projet GUI a
+fait apparaître **2 capacités manquantes**.
+
+Donc, à la question « avec tout V12, les 80 passeront-ils ? » → **NON, je ne peux pas le garantir** :
+- Les ~35 non-essayés cachent probablement **d'autres** capacités (comme eframe en a caché 2).
+- Certaines capacités **tensionnent avec les invariants d'Iron** et pourraient **ne pas se résoudre
+  proprement** : [35000] (état mutable partagé) vs la sémantique **par valeur** ; [43000] (`no_std`) vs **I2
+  (jamais d'`unsafe`)**. Ce sont des **arbitrages d'identité du langage**, pas de simples features.
+
+**Pour le SAVOIR vraiment**, il faudrait une *passe de validation* : essayer (au moins à la compilation)
+chaque projet non-testé pour en extraire les capacités réelles, puis prototyper la plus risquée ([35000])
+pour vérifier qu'elle est seulement *difficile* et pas *incompatible*. Tant que ce n'est pas fait, ce
+cadrage est la **meilleure carte connue**, à corriger au fil des essais — pas une promesse.
