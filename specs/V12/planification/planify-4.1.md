@@ -1,31 +1,33 @@
-# planify-4.1 — Bornes de ctor convertibles (Into<X>/TryFrom) — dérivée du pont
+# planify-4.1 — Stratégies « valeur » : bornes convertibles + octets/hex
 
-- Réalise (cadrage) : [24100b] (sous-cas de [24100])
+- Réalise (cadrage) : [24100b], [82000]
 - Version : V12 · Vague : 4 · Piste : 1 · Statut : todo
-- Dépend de : planify-3.1 (fondation close)
+- Dépend de : planify-3.1 (pont + stratégie scalaire en place)
 
 ## But
-Reconnaître les constructeurs bornés par une **conversion depuis chaîne/valeur** (`T: Into<X>`, `X: TryFrom<T>`,
-newtype-string de crate) → débloque `redis`/`tungstenite`/`ureq`/`clap` (construction). Une **entrée de table**
-sur le pont, plus du cas-par-cas.
+Ajouter au pont (RACINE 1) deux **stratégies de matérialisation** : (a) borne « convertible depuis chaîne »
+(`Into<String>`/`AsRef<Path>`/newtype-string) → chaîne Iron ; (b) octets `list[u8]` ↔ `&[u8]`/`Vec<u8>` + hex.
+Chacune = **une entrée** dans `STRATEGIES`/`BYTES`, pas un mécanisme neuf.
 
 ## Fichiers POSSÉDÉS (ownership disjoint)
-- **Édition** : `ironc/src/bridge.rs` (étendre la table `BOUND_TO_IRON` : motifs `Into<X>`/`TryFrom<T>` → type
-  source mappable), `ironc/src/bind.rs` (consommer l'entrée pour ne plus dropper le ctor).
-- Séquentielle (vague 4) : pas de piste concurrente sur ces fichiers.
+- **Édition** : `ironc/src/bridge.rs` (entrées `STRATEGIES`+`BYTES`), `ironc/src/bind.rs` (ne plus dropper le
+  ctor convertible), `ironc/src/lower.rs` (hex : `list[u8]`→`str`, `str`→`list[u8]`).
+- Séquentielle (vague 4).
 
 ## Interface produite / consommée
-- **Consomme** : la fondation [24000] (tables-données, suivi des params).
-- **Produit** : ctors convertibles bindés (`Command.new("x")` où `x: impl Into<clap::Str>`).
+- **Consomme** : `bridge::{accepts, materialize, STRATEGIES, BYTES}` (gelé en 1.1).
+- **Produit** : ctors convertibles bindés (`Command.new("x")`) ; `digest.to_hex()` → `str`.
 
 ## Étapes
-1. Table : `Into<X>`/`TryFrom<T>` où `X`/`T` se réduit à `str`/numérique → exposer le type source Iron.
-2. `bind.rs` : si la borne du param matche la table, projeter le param au type source (pas de drop).
-3. Vérifier que le lowering existant (coercition `str`→`&str`/`.into()`) couvre l'appel (sinon, NOTE pour 2.2-bis).
+1. `STRATEGIES` : borne `Into<X>`/`TryFrom<&str>` où `X` se réduit à `str`/numérique → `accepts = str`,
+   `materialize = (expr).into()`/`as_ref()`.
+2. `BYTES` : `list[u8]` ↔ `&[u8]`/`Vec<u8>` (déjà partiel) + hex sans crate tierce (`{:02x}` / parse).
+3. `bind.rs` : fallback d'un `T` à borne convertible = garder le param (plus de drop).
 
 ## Definition of Done (vérifiable)
-1. `clap`/`redis`/`ureq` régénérés : le ctor-clé **apparaît** et un appel trivial **compile**.
-2. **Gate VERT** ; aucune entrée hors `bridge` pour cette reconnaissance.
+1. clap/redis/ureq : ctor-clé **apparaît** et un appel trivial **compile**.
+2. sha2 : `digest` → **hex** affichable (programme complet, run réel).
+3. **Gate VERT** ; logique centralisée dans `bridge` (rien de re-dispersé).
 
 ## Notes
-- Si la conversion exige une closure ou un trait-objet → **hors périmètre** (relève de [40300]), à noter, pas à forcer.
+- `GenericArray<u8, N>` (taille fixe) = planify-4.2. Conversion exigeant une closure → planify-6.1 (Fn).

@@ -1,30 +1,34 @@
-# planify-5.1 — Ergonomie des octets (`bytes`, hex) — dérivée du pont
+# planify-5.1 — Stratégie **io** : `Read`→source, `Write`→puits
 
-- Réalise (cadrage) : [82000] (sous-cas de [24400] pour `u8`)
+- Réalise (cadrage) : [52800]
 - Version : V12 · Vague : 5 · Piste : 1 · Statut : todo
-- Dépend de : planify-3.1 (fondation close)
+- Dépend de : planify-3.1 (pont)
 
 ## But
-Rendre fluide le travail sur octets : `list[u8]` ⟷ `&[u8]`/`Vec<u8>`/`GenericArray<u8>` + **hex** (encode/decode).
-Débloque sha2 (digest→hex), PoW (octets). Une **entrée de la table octets** du pont + un helper hex.
+Matérialiser les bornes **io** sur le pont (RACINE 1) : un param `R: Read` accepte des bytes/un chemin Iron ; un
+param `W: Write` accepte un **buffer** rendu en retour. Débloque quick-xml, gpx, flate2, csv-reader, image-stream.
 
 ## Fichiers POSSÉDÉS (ownership disjoint)
-- **Édition** : `ironc/src/bridge.rs` (table `BYTES` : équivalences `list[u8]` ↔ formes Rust d'octets),
-  `ironc/src/lower.rs` (hex : `to_hex`/`from_hex` sur `list[u8]`/`str`).
+- **Édition** : `ironc/src/bridge.rs` (entrées `STRATEGIES` pour `Read`/`BufRead`/`Write`),
+  `ironc/src/lower.rs` (émission des wrappers).
 - Séquentielle (vague 5).
 
 ## Interface produite / consommée
-- **Consomme** : fondation [24000] (table octets, coercition table-pilotée de 2.2).
-- **Produit** : `digest.to_hex()` (ou équivalent) → `str` ; `bytes`-arg accepté là où Rust veut `&[u8]`/`Vec<u8>`.
+- **Consomme** : `bridge::{accepts, materialize, STRATEGIES}` (1.1).
+- **Produit** : appels io de crates sans fournir d'objet Rust à la main.
 
 ## Étapes
-1. Compléter `BYTES` : `list[u8]` ↔ `&[u8]`, `Vec<u8>`, `[u8; N]` (renvoyer vers [24200] pour la taille fixe).
-2. Hex : helper `bridge`/lowering — `list[u8] → str` (encode), `str → list[u8]` (decode), sans crate tierce (`format!("{:02x}")` / parse).
-3. Brancher dans la coercition d'arg (2.2) : un param Rust `&[u8]` accepte un `list[u8]` Iron sans cas-par-cas.
+1. **Read (entrée).** `accepts(Read) = str|list[u8]` ; `materialize` : `std::io::Cursor::new(bytes)` pour des
+   octets, `std::fs::File::open(path)?` pour un chemin (heuristique : type Iron source). BufRead → `BufReader`.
+2. **Write (sortie) — cas mémoire/fichier.** `accepts(Write) = ` sortie spéciale ; `materialize` : `Vec<u8>` (ou
+   `File::create`), passé `&mut`, puis **rendu** comme `list[u8]`/écrit sur disque. Émettre le glue de retour.
+3. Router via `try_extern_*` (lower) en consultant le pont — pas de `match` crate-spécifique.
 
 ## Definition of Done (vérifiable)
-1. sha2 : `Sha256.digest(s)` → octets → **hex** affichable (programme complet vert, run réel).
-2. **Gate VERT** ; logique octets centralisée dans `bridge` (pas re-dispersée).
+1. quick-xml/gpx : lecture d'un document depuis une **str/bytes** Iron (run réel) ; gpx parse une trace.
+2. flate2 : `compress(bytes)`→`list[u8]`→`decompress` round-trip (Write→buffer rendu).
+3. **Gate VERT** ; 0 `unsafe`.
 
 ## Notes
-- `GenericArray<u8, N>`/`[u8; N]` (taille fixe) = [24200] (planify-6.1) ; ici on couvre le `Vec`/slice dynamique + hex.
+- **Friction connue** : le streaming continu (`Write` au fil de l'eau, gros volumes) reste **partiel** au premier
+  jet — on couvre buffer-mémoire + fichier. À noter pour itération, pas à survendre.

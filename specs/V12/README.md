@@ -18,8 +18,10 @@
 
 | Spec | Capacité | Sous-sys. | Projets bloqués | État spec |
 |---|---|:--:|---|---|
-| **[24000]** | **FONDATION — le pont de correspondance Iron↔Rust (refactor)** + suivi des params de type. Tarit la dette B5→B33 ; prérequis de tout. | 2 | *(transverse — débloque la classe entière via [24100])* | **cadré + planifié** (`24000.md`, `planification/`) |
-| [24100] | **Génériques de type** suivis (`Point<T>`, `Vec<T>`, tenseurs) + monomorphisation scalaire — **réalisé par [24000]** (vagues 2-3) | 2 | geo, nalgebra, ndarray, polars, rustfft, dialoguer, rapier2d, **ML** (candle/linfa/tract/smartcore) | **planifié via [24000]** |
+| **[24000]** | **RACINE 1 — Le pont de matérialisation** (borne de trait → stratégie). Couvre [24100]/[24100b]/[52800]/[82000]/[24200]/[40300] + param [52900]. Tarit la dette B5→B33. | 2 | *(transverse — la grande majorité des 40)* | **cadré + planifié** (`24000.md`, `planification/`) |
+| **[44000]** | **RACINE 2 — La couche d'émission** (`#[derive]`, `impl ExternTrait for T`, `#![no_std]`). Couvre [40400]/[24300]/[43000]. | 4 | serde typé, GUI-à-trait, embarqué | **cadré + planifié** (`44000.md`, `planification/`) |
+| *(RACINE 3)* | **Runtime/exécution** : [53000] async (tokio injecté), [35000] event-loop (= callback+impl+`shared`). **À prototyper** (faisabilité fine). | 3/5 | web/bots/IoT, GUI/jeux/TUI | planifié (vagues 11-12, gate prototype) |
+| [24100] | **Génériques de type** suivis — **stratégie n°1 de [24000]** (vagues 2-3) | 2 | geo, nalgebra, ndarray, polars, rustfft, dialoguer, rapier2d, **ML** | **planifié via [24000]** |
 | [52800] | **io par flux** (`Write`/`Read`/`BufRead`, puits/sources, out-params) | 5 | flate2, printpdf(save), quick-xml, image(save-stream) | spec'é |
 | [52900] | **serde typé** (derive + de/serialize générique) | 5 | toml(doc), serde_yaml, bincode, jsonwebtoken | cadré |
 | [24300] | **Implémenter un trait EXTERNE** sur un type Iron (`impl eframe::App for MyApp`) | 2 | GUI (eframe/iced), tout framework à trait-utilisateur | **confirmé par essai** (Iron parse `impl App for MyApp` mais émet un Rust faux : chemin/signatures) |
@@ -106,26 +108,32 @@ le reste butant sur les capacités V12 ci-dessus.
 - **[52900] serde typé / [24100].** `from_str::<T>` exige un `T` **dérivé** ; pas de macros derive en Iron.
   La voie **dynamique** `Value` marche déjà (serde_json ✅) — c'est le **typé** qui manque.
 
-## Priorisation suggérée (rentabilité) — RÉVISÉE : fondation-refactor d'abord
+## Architecture V12 — **3 causes racines**, pas 14 capacités
 
-> **Décision de planification (phase 2)** : on ne traite plus les capacités en cas-par-cas. Le census de la
-> frontière de types (`planification/README.md` §0) montre que les crate-bugs (B5→B33) naissent **d'un seul
-> endroit encodé 3×**. D'où une **fondation-refactor `[24000]`** (le **pont** de correspondance) **avant** toute
-> capacité — pour **tarir la dette à la source**, pas la déplacer.
+> **Décision de planification (phase 2), corrigée** : les 14 « capacités » sont des **symptômes** de **3 causes
+> racines**. V12 attaque les **racines** (architecture cohérente), pas les symptômes un par un. Détail complet et
+> carte des vagues : `planification/README.md`. Les leaf-specs ci-dessous restent les **contrats** ; elles se
+> rangent sous une racine.
 
-0. **[24000] FONDATION (le pont)** — source unique de la correspondance Iron↔Rust + suivi des paramètres de
-   type. **Prérequis de tout.** Cf. `24000.md` + `planification/24000.{1..4}.md`.
-1. **[24100] génériques** — n'est plus un chantier séparé : c'est **le remplissage** de `[24000]` (vagues 2-3).
-   Débloque geo/nalgebra/ndarray/polars/rustfft + base ML d'un coup, et **fait disparaître** le besoin de
-   whitelister les bornes de trait-crate (on instancie par l'argument).
-2. **Dérivées** (petites, sur le pont) : [24100b] bornes ctor · [82000] octets · [24200] arrays · [50500] consts · [30200] retours empruntés.
-3. **Clusters séparés** (autres fondations) : [52800] io-flux (d'abord — flate2/quick-xml/gpx), puis [40300]/[40400]/[52900]/[24300].
-4. **À PROTOTYPER avant planif** : [35000] event-loop (vs sémantique-valeur), [43000] no_std (vs I2),
-   [53000] async, [24300] impl-extern — faisabilité/compat-invariants à trancher par l'essai.
+- **RACINE 1 — `[24000]` Le pont de matérialisation** (param générique borné par un trait → table « borne →
+  stratégie »). Couvre **[24100]** (numérique), **[24100b]** (`Into<str>`), **[52800]** (`Read`/`Write`),
+  **[82000]/[24200]** (octets/arrays), **[40300]** (`Fn`), + le param de **[52900]** (`Deserialize`). La dominante.
+- **RACINE 2 — `[44000]` La couche d'émission** (`#[derive]`, `impl ExternTrait for T`, `#![no_std]`). Couvre
+  **[40400]** (derive→[52900]), **[24300]** (impl-trait), **[43000]** (no_std).
+- **RACINE 3 — Runtime/exécution** : **[53000]** async (tokio déjà injecté), **[35000]** event-loop (= callback
+  racine 1 + impl racine 2 + `shared` existant).
 
-> **Méthode.** La **fondation** est la 1ʳᵉ vague (squelette→fan-out→unification, e2e vert en continu).
-> Les capacités dérivées s'ajoutent ensuite en **une entrée de donnée** chacune ; les clusters sont des cycles
-> 4-phases distincts. Tout nouveau mur **de même nature** s'ajoute ici, jamais en cas-par-cas.
+> **Deux « incompatibilités invariants » que j'avais annoncées TOMBENT** : [43000] no_std n'émet pas d'`unsafe`
+> (il est dans le HAL — I2 intact) ; [35000] event-loop a ses échappatoires (`shared`/`shared_sync`/`inout`).
+> Restent à **prototyper** pour la *faisabilité fine* (pas la compat) : async lourd, ergonomie event-loop.
+
+**La seule limite permanente (pas un bug) = l'ENVIRONNEMENT** : libs système (rodio/cpal), écran (minifb),
+matériel (esp/rppal), réseau au run. Ces projets **compilent** mais exigent du hardware/des libs **à
+l'exécution** — aucune racine ne les « répare » (~5-8 projets). Hors périmètre de toute V.
+
+> **Méthode.** Racine 1 d'abord (vagues 1-6, débloque le plus), puis racine 2 (vagues 8-10), puis racine 3
+> (vagues 11-12, **après prototype**). [50500] consts = orthogonale (vague 7). Squelette→fan-out→unification,
+> e2e vert en continu. Un motif nouveau = **une entrée** (stratégie ou émission), jamais du cas-par-cas.
 
 ## ✅ Passe de validation FAITE — ce cadrage reste une hypothèse, mais affinée
 

@@ -1,52 +1,73 @@
-# V12 — PLANIFICATION (phase 2)
+# V12 — PLANIFICATION (phase 2) — attaque des **3 causes racines**
 
-> **Découpage d'EXÉCUTION** de la V12 (vagues × pistes). Le **cadrage** (le *quoi/contrats*) vit dans
-> `../*.md` (`24000.md`, `24100.md`, `24200.md`, `82000.md`, `50500.md`…). Ici = le *dans quel ordre, qui
-> possède quoi, en parallèle de qui*. **Nommage : `planify-<vague>.<piste>.md`** — la vague = rang séquentiel,
-> la piste = track parallèle (ownership disjoint). Le numéro **n'est PAS** celui d'une spec ; chaque planif
-> **cite** la/les spec(s) qu'elle réalise. (Cadrage ≠ planification.)
+> **Découpage d'EXÉCUTION** (vagues × pistes). Cadrage (le *quoi*) dans `../*.md`. Nommage
+> `planify-<vague>.<piste>.md` (vague = rang séquentiel, piste = track parallèle à ownership disjoint ; **PAS**
+> un n° de spec — chaque planif **cite** sa/ses spec(s)). Cadrage ≠ planification.
 
-## Périmètre de la V12 (tranche cohérente)
-Le **sous-système de types** : la **fondation-refactor** `[24000]` (le pont de correspondance Iron↔Rust) +
-les **génériques** `[24100]` qu'elle réalise + les **dérivées** qui tombent de la même machinerie
-([24100b], [82000], [24200], [50500]). **Hors V12** (versions futures, autres fondations) : [30200] retours
-empruntés, [52800] io-flux, [40300] closures→dyn, [40400] derive, [52900] serde typé, [24300] impl-extern,
-et les **à-prototyper** [35000] event-loop / [53000] async / [43000] no_std (cf. `../README.md` §priorisation).
+## Le principe (corrigé) : 3 causes racines, pas 14 capacités
 
-## Pourquoi une fondation d'abord (rappel du constat)
-La frontière de types est encodée **3×** (projection `bind.rs` / inférence `infer/` / coercition `lower.rs`) ;
-les crate-bugs B5→B33 sont des cas-par-cas dispersés dans ces 3 endroits. La V12 **tarit la source** : un pont
-= source unique + suivi des paramètres de type. Détail : `../24000.md`.
+Les ~40 projets encore bloqués après une V12 « génériques seuls » ne sont **pas** 14 problèmes indépendants —
+ils remontent à **3 causes** (analyse complète : `../24000.md`, `../44000.md`) :
 
-## Carte des vagues × pistes
+- **RACINE 1 — `[24000]` Le pont de matérialisation** : un paramètre générique borné par un trait que le binder
+  ne sait pas matérialiser. UNE table « borne → stratégie » : numérique→argument, `Into<str>`→chaîne,
+  `Read`→Cursor/File, `Write`→buffer, `Fn`→lambda, `Serialize`→struct. **Couvre [24100]/[24100b]/[52800]/[82000]/
+  [24200]/[40300] + le param de [52900].** La dominante : débloque la plus grosse part des 40.
+- **RACINE 2 — `[44000]` La couche d'émission** : émettre un item/attribut qu'Iron ne produit pas encore.
+  `#[derive(X)]` ([40400]→[52900]), `impl ExternTrait for T` ([24300]), `#![no_std]` ([43000]).
+- **RACINE 3 — Runtime/exécution** : `[53000]` async (tokio déjà injecté ; reste binder+await), `[35000]`
+  event-loop (= **callback racine 1 + impl-trait racine 2 + état partagé `shared`/`shared_sync` qui existe déjà**).
 
-| Planif | Vague | Piste | Réalise | Rôle | Possède (fichiers) |
-|---|:--:|:--:|---|---|---|
-| `planify-1.1` | 1 | 1 | [24000] | **Squelette** : module `bridge` + `Type::ExternApp` + `.iri` `Name[args]` + `params` (contrat **gelé**, pass-through vert) | bridge.rs(création), ir.rs, lower.rs(ExternApp), iri.rs, bind.rs(émission si params) |
-| `planify-2.1` | 2 | 1 | [24000],[24100] | **Projection** : binder produit les args génériques + tables pilotées-donnée | **bind.rs** (exclusif) |
-| `planify-2.2` | 2 | 2 | [24000],[24100] | **Coercition** : numérique unifié + monomorphisation `path::<args>` | **lower.rs** (exclusif) |
-| `planify-2.3` | 2 | 3 | [24000],[24100] | **Inférence** : substitution des params (`Point[f64]`.m→`T`=`f64`) | **infer/** (exclusif) |
-| `planify-3.1` | 3 | 1 | [24000],[24100] | **Unification** : greffe + e2e RÉEL (geo/nalgebra construisent & calculent) → **Gate [24100]** | jonctions + tests |
-| `planify-4.1` | 4 | 1 | [24100b] | Dérivée : bornes de ctor convertibles (`Into<X>`/`TryFrom`) | bridge.rs, bind.rs |
-| `planify-5.1` | 5 | 1 | [82000] | Dérivée : ergonomie octets (`bytes`, hex) | bridge.rs, lower.rs |
-| `planify-6.1` | 6 | 1 | [24200] | Dérivée : tableaux taille fixe (`[u8;N]`/`GenericArray`) | ir.rs, bridge.rs, lower.rs, bind.rs |
-| `planify-7.1` | 7 | 1 | [50500] | Orthogonale : constantes publiques (`pub const`) | bind.rs, iri.rs, infer/, lower.rs |
+> **Deux « incompatibilités » que j'avais annoncées TOMBENT** : [43000] no_std ne viole pas I2 (l'`unsafe` est
+> dans le HAL, Iron en émet 0) ; [35000] event-loop ne viole pas la sémantique-valeur (Iron a `shared`/
+> `shared_sync`/`inout`). Ce sont des chantiers, pas des murs.
 
-> **Vagues 1-3 = la fondation + [24100]** (le cœur, fan-out réel sur 3 fichiers disjoints en vague 2).
-> **Vagues 4-7 = dérivées**, **séquentielles** entre elles : elles partagent `bind.rs`/`bridge.rs`, donc **pas**
-> parallélisables (la règle d'ownership disjoint l'interdit) → une vague chacune, par rentabilité. Elles se
-> **re-décomposent finement** au début de leur cycle, une fois la forme finale du pont connue (vague 3 close).
+## La SEULE limite vraiment permanente (et ce n'est PAS un bug)
+**L'ENVIRONNEMENT** : rodio/cpal (libs audio système), minifb (fenêtre), esp/rppal/btleplug (matériel),
+serveur/réseau au run. Ces projets **compilent** (Iron les exprime) mais exigent hardware/libs/écran **à
+l'exécution**. **Aucune** architecture de langage ne répare ça (~5-8 projets). Ce n'est pas une dette V12.
++ **friction résiduelle** sur les cas les plus durs (Write-stream continu, event-loop à état complexe, traits
+async lourds type `tower::Service`) : premier jet **partiel**, à compléter au besoin.
 
-## Ordre & gates
-1. `planify-1.1` → **Gate de fondation** (traversée `ExternApp` e2e, pass-through vert).
-2. `planify-2.1‖2.2‖2.3` (parallèle, ownership disjoint) → chacune verte isolément.
-3. `planify-3.1` → **Gate [24100]** (geo/nalgebra compilent **et tournent**).
-4. `planify-4.1` → `5.1` → `6.1` → `7.1`, gate vert à chaque greffe.
+## Carte des vagues × pistes (toute la V12, 3 racines)
 
-## Invariant méthodo (dur)
-La colonne **passe l'e2e à chaque étape** : squelette pass-through d'abord, fan-out par fichier, unification,
-e2e réel — jamais de big-bang. `.iri` du gate commités ⇒ le gate reste le filet pendant tout le refactor.
+| Planif | Vague | Réalise | Racine | Rôle | Possède |
+|---|:--:|---|:--:|---|---|
+| `planify-1.1` | 1 | [24000] | 1 | **Squelette du pont** : table `STRATEGIES` + `ExternApp` + `.iri` (contrat gelé, pass-through vert) | bridge.rs(création), ir.rs, lower.rs(ExternApp), iri.rs, bind.rs(émission) |
+| `planify-2.1` | 2 | [24000][24100] | 1 | Projection : stratégie scalaire + tables-donnée | **bind.rs** |
+| `planify-2.2` | 2 | [24000][24100] | 1 | Coercition : numérique unifié + monomorphisation | **lower.rs** |
+| `planify-2.3` | 2 | [24000][24100] | 1 | Inférence : substitution des params | **infer/** |
+| `planify-3.1` | 3 | [24100] | 1 | Unification + e2e réel (geo/nalgebra) → **Gate [24100]** | jonctions + tests |
+| `planify-4.1` | 4 | [24100b][82000] | 1 | Stratégies « valeur » : `Into<str>`/bornes convertibles + octets/hex | bridge.rs, bind.rs, lower.rs |
+| `planify-4.2` | 4* | [24200] | 1 | Stratégie « taille fixe » `[u8;N]`/`GenericArray` | bridge.rs, lower.rs, ir.rs |
+| `planify-5.1` | 5 | [52800] | 1 | Stratégie **io** : `Read`→Cursor/File, `Write`→buffer rendu | bridge.rs, lower.rs |
+| `planify-6.1` | 6 | [40300] | 1 | Stratégie **closure** : `Fn`-borné → lambda Iron | bridge.rs, lower.rs, infer/ |
+| `planify-7.1` | 7 | [50500] | — | Constantes publiques (`pub const`), orthogonale | bind.rs, iri.rs, infer/, lower.rs |
+| `planify-8.1` | 8 | [40400] | 2 | Émission de **derives** (`#[derive(X)]`) | lower.rs, ir.rs, bind.rs |
+| `planify-8.2` | 8* | [52900] | 1+2 | serde **typé** = param `Deserialize` (r1) + derive émis (r2) | lower.rs, infer/ |
+| `planify-9.1` | 9 | [24300] | 2 | Émission **`impl ExternTrait for T`** (signatures via bindings) | lower.rs, bind.rs |
+| `planify-10.1` | 10 | [43000] | 2 | Mode d'émission **`#![no_std]`** + HAL béni (0 `unsafe` côté Iron) | lower.rs, driver.rs |
+| `planify-11.1` | 11 | [53000] | 3 | **async** : binder+await les fns async (tokio déjà injecté) — ⚠️ **gate prototype** | infer/, lower.rs |
+| `planify-12.1` | 12 | [35000] | 3 | **event-loop** = callback(6)+impl-trait(9)+`shared` — ⚠️ **gate prototype** | lower.rs (intégration) |
 
-## Test mental de non-collision (validé)
-Vague 2 : `2.1`=bind.rs, `2.2`=lower.rs, `2.3`=infer/ → **disjoints**, et tous contre le **schéma gelé** par
-`1.1` (aucune interface non figée attendue). ✅ Parallélisables. Vagues 4-7 : partagent bind/bridge → **séquentielles**. ✅
+`*` = piste parallèle de la même vague **si** ownership disjoint ; sinon séquentielle.
+
+## Gates de prototype (honnêteté : on ne planifie pas l'aveugle)
+Avant `planify-11.1`/`12.1`, un **prototype** tranche la faisabilité **fine** :
+- **async** : intégrer une fn async d'une vraie crate (ex. `reqwest::get`) + `.await` → tourne ? Les traits lourds
+  (`tower::Service`, `axum::Handler`) peuvent rester partiels — à mesurer, pas à promettre.
+- **event-loop** : exprimer `eframe::run(|ctx| { … })` capturant un `shared[State]` muté chaque frame → compile
+  **et** affiche (dans un env avec écran). Si l'ergonomie de l'état partagé est trop lourde → noter, itérer.
+Le prototype **tranche** ; il ne se contourne pas.
+
+## Ordre & invariant
+1. Vagues 1-3 (RACINE 1 cœur) → Gate [24100]. 2. Vagues 4-6 (stratégies r1, une entrée chacune). 3. Vague 7
+(consts). 4. Vagues 8-10 (RACINE 2 émission). 5. Vagues 11-12 (RACINE 3, après prototype). **La colonne passe
+l'e2e à chaque greffe** (skeleton pass-through → fan-out par fichier → unification). `.iri` du gate commités ⇒ filet permanent.
+
+## Ce que V12 garantit (honnête)
+- **Tarit les bugs racine** : un motif de crate = **une entrée** (stratégie ou émission), plus jamais 3 correctifs dispersés.
+- Débloque **la grande majorité** des 40 (math, io, closures, serde, GUI-à-trait, embarqué, web simple).
+- **Ne résout PAS** : l'environnement (hardware/libs/écran — hors langage, ~5-8 projets) ni la friction des cas
+  async/event-loop les plus lourds (premier jet partiel). Et un refactor de cette taille porte un **risque de
+  régression** maîtrisé par le squelette-d'abord + gate-vert-continu.

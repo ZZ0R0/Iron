@@ -18,12 +18,18 @@ en parallèle sans collision. Séquentiel : rien d'autre ne démarre tant que c'
 > En vague 1 c'est UNE piste séquentielle : pas de conflit possible. La disjonction stricte commence en vague 2.
 
 ## Interface produite / consommée
-**Produit (gelé, consommé par 2.1/2.2/2.3)** :
+**Produit (gelé, consommé par TOUTES les vagues suivantes)** :
 - Module `bridge` avec signatures **définitives** (corps en délégation pass-through pour l'instant) :
   - `project(rd, cx) -> Option<Type>` (façade projection) · `coerce_arg(expr, from, target) -> TokenStream`
     (façade coercition) · `cast_numeric(expr, from, to) -> TokenStream` (point numérique unique) ·
     `rust_num_name(NumKind) -> &str` (table canonique, reprend `num_kind_str`).
-  - Tables-**données** exposées en lecture : `CONTAINERS`, `BOUND_TO_IRON`, `BYTES`.
+  - **Le mécanisme « borne → stratégie » (RACINE 1, extensible)** — l'interface que les vagues 4-6/8.2 remplissent
+    sans toucher au pont : `accepts(bound) -> Option<Type>` (face projection : quel type Iron une borne accepte)
+    et `materialize(bound, iron_expr, target) -> TokenStream` (face coercition : comment produire la valeur Rust).
+    Table `STRATEGIES` (borne→stratégie) **vide en vague 1** sauf l'entrée scalaire (vague 2) — l'ajout d'une
+    stratégie (io/closure/serde…) = **une entrée**, jamais une modif du pont. **C'est ce hook qui rend l'archi
+    cohérente** : io/closures/serde-param ne sont pas des refontes, ce sont des entrées.
+  - Tables-**données** exposées en lecture : `CONTAINERS`, `BOUND_TO_IRON`, `BYTES`, `STRATEGIES`.
 - ABI génériques : `Type::ExternApp(String /*rust_path*/, Vec<Type> /*args*/)` **additive** ; lowering
   `ExternApp(p,[])` → `p` et `ExternApp(p,args)` → `p::<args>`.
 - Schéma `.iri` : `extern type Name[T,…] = "path":` → `ExternType.params: Vec<String>` ; `Name[args]` en
