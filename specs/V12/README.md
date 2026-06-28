@@ -1,46 +1,60 @@
-# V12 — Binder avancé & frontières de modèle
+# V12 — Capacités de langage révélées par le stress-test des 80
 
-> **Cadrage** (phase 1). V12 regroupe les **limites de fond** d'Iron révélées par le stress-test V11-test-2
-> (80 crates). Ce ne sont **ni des bugs ni des bindings ratés** : ce sont les deux **frontières dures** du
-> modèle, infranchissables sous la contrainte « **correction globale, zéro cas-par-cas** » sans étendre le
-> langage lui-même. Le durcissement V11-test-2 a corrigé tout le reste (B5–B19 : 10 crates verts, 4/5 murs).
+> **Cadrage** (phase 1). Le stress-test V11-test-2 (80 crates) a tranché : Iron passe le **tiers “valeur
+> concrète”** du catalogue, et le reste bute sur des **capacités que le langage n'a pas encore**. Ce ne sont
+> **ni des bugs ni des bindings ratés** (tout ça a été corrigé : B5–B29, gate VERT) — ce sont de **vraies
+> extensions** du langage. V12 = la liste **complète** de ces capacités, chacune reliée aux projets qu'elle
+> débloque.
+>
+> **Axe unique et honnête** (l'ancienne distinction « 🔵 limite / 🟥 mur » ne voulait rien dire) : un projet
+> qui ne passe pas relève soit d'un **bug** (réparé), soit d'une **capacité** (ici).
 
-## Contexte — ce qui est déjà fait (V11-test-2, hors V12)
+## Bilan des 80 (cf. `../V11-test-2/CARTE-80.md`)
 
-Tous corrigés en **règles globales** (aucun nom de crate dans le compilo), gate VERT à chaque pas :
-- B16 **traits blanket matérialisés** · B17 **struct/enum externes par littéral** · B18 **args par valeur** ·
-  B19 **méthodes de trait sur primitifs + méthodes fournies** · 52700 **binding multi-crate des façades**.
+- **~24 ✅ marchent** · **~4 🔧 bugs réparés** (B27–B29 : `encode/decode`, bornes `where`, coercition tuple) ·
+  **~52 🧱 capacités manquantes** (ci-dessous).
 
-## Les deux chantiers V12
+## Les capacités V12 (complètes)
 
-| Spec | Titre | Sous-système | Révélé par |
-|---|---|---|---|
-| [24100] | Suivi des paramètres de type génériques + monomorphisation des scalaires | 2 (types/inférence) | `geo`, `nalgebra`, `rustfft` |
-| [52800] | Modèle d'io par flux (`Write`/`Read`/`BufRead`, puits/sources d'octets) | 5 (interop) | `flate2` (`GzEncoder<W: Write>`) |
-| [52900] | Interop **serde typé** (derive + de/serialize générique) — *note*, pas encore spec'é | 5 (interop) | `toml` (doc), `jsonwebtoken`, `bincode` |
-| [50500] | Binder des **constantes** publiques d'un crate (`pub const X`) — *gap mineur* | 5 (interop) | `base64` (`STANDARD`) |
-| [30200] | **Retour emprunté lié à l'entrée** (parseurs zéro-copie : `Smf::parse(&buf) -> Smf<'a>`) — la valeur emprunte son entrée ; durée de vie à suivre. *note* | 3 (ownership) | `midly` |
-| [82000] | **Ergonomie des octets** : type `bytes`, `str.encode()/.decode()`, type d'élément d'un itérateur externe (`for b in digest` → `b: u8`), hex. *note* | 8 (stdlib) | `sha2` (hex/PoW), `flate2` |
+| Spec | Capacité | Sous-sys. | Projets bloqués | État spec |
+|---|---|:--:|---|---|
+| [24100] | **Génériques de type** suivis (`Point<T>`, `Vec<T>`, tenseurs) + monomorphisation scalaire | 2 | geo, nalgebra, ndarray, polars, rustfft, dialoguer, rapier2d, **ML** (candle/linfa/tract/smartcore) | spec'é |
+| [52800] | **io par flux** (`Write`/`Read`/`BufRead`, puits/sources, out-params) | 5 | flate2, printpdf(save), quick-xml, image(save-stream) | spec'é |
+| [52900] | **serde typé** (derive + de/serialize générique) | 5 | toml(doc), serde_yaml, bincode, jsonwebtoken | cadré |
+| [35000] | **Boucle d'événements & état mutable partagé** | 3 | **GUI** (26-30), **TUI complet** (31-32), **jeux** (46-50) | **cadré (nouveau)** |
+| [53000] | **Runtime async** (`tokio`/`async fn`/`.await` exécutés) | 5 | axum, teloxide, redis, tungstenite, hickory, rumqttc, web (16/19) | **cadré (nouveau)** |
+| [43000] | **Émission `no_std` + HAL encapsulé** (embarqué, sans violer I2) | 4 | esp-hal (ESP32), rppal, serialport, btleplug, linux-embedded-hal | **cadré (nouveau)** |
+| [30200] | **Retour emprunté lié à l'entrée** (parseurs zéro-copie, `<'a>`) | 3 | midly, plotters(backend) | cadré |
+| [24200] | **Tableaux à taille fixe** (const-génériques, `[u8; 32]`/`GenericArray`) | 2 | aes-gcm, chacha20poly1305 | cadré |
+| [82000] | **Ergonomie des octets** (`bytes`, type d'élément d'itérateur externe `u8`, hex) | 8 | sha2(hex), PoW(80) | partiel (encode/decode faits B27) |
+| [50500] | **Constantes** publiques d'un crate (`pub const`) | 5 | base64 | gap mineur |
 
-## Pourquoi ce sont des frontières (et pas du durcissement)
+> Hors-langage (environnement, pas une spec) : `rodio`/`cpal`/`minifb` exigent des **libs système / une
+> fenêtre** au build/run ; le ML est aussi **lourd** (dépendances). Ils relèvent de [24100]/[35000] pour le
+> *langage*, mais ne tourneront de toute façon que dans un environnement équipé.
 
-- **24100 — généricité de type.** Iron ne **suit pas** les paramètres de type d'un type externe : `Point<f64>`
-  et `Point<i32>` sont le même `Extern("Point")`. Les API génériques sur le **scalaire** (`new(x: T) -> Self`,
-  `distance() -> T`) ne se bindent pas : `T` n'est mappable que si on reconnaît sa borne comme numérique —
-  or `CoordNum`/`Num` sont des **traits de crate** (interdits). C'est une extension du **système de types**.
-- **52800 — io par flux.** L'écosystème io (`flate2`, `image`, lecteurs/écrivains…) repose sur `Write`/`Read`
-  consommant des **puits/sources d'octets en streaming**, avec out-params `&mut Vec`. Iron est **par valeur** :
-  pas d'état mutable partagé en flux. C'est une extension du **modèle d'exécution/interop**.
-- **52900 — serde typé.** `from_str::<T>`/`to_string(&T)` exigent un `T` **dérivant** `Serialize`/`Deserialize`
-  ; Iron n'a pas de **macros derive** ni de génériques de type suivis. La voie **dynamique** (`Value` :
-  `serde_json` ✅, `toml::Value` partiel) marche déjà — c'est la voie **typée** qui est la frontière. Lié à
-  [24100] (génériques de type). À spec'er si un besoin concret le justifie.
+## Pourquoi ce sont des capacités (pas du durcissement)
 
-> **Note de méthode.** On n'ajoute ici **que** des frontières de modèle confirmées par tentative (pas des
-> suppositions). Si le déroulé restant des 80 en révèle d'autres de même nature, on les **ajoute à ce
-> cadrage** (nouvelle spec `Vn/XXXXX.md`), on ne les patche pas en cas-par-cas.
+- **[24100] généricité de type.** Iron ne suit pas `T` dans `Foo<T>` : `Point<f64>` ≡ `Point<i32>` ≡
+  `Extern("Point")`. Les API scalaires (`new(x: T)`, `-> T`) ne bindent que si on reconnaît la borne comme
+  numérique — or `CoordNum`/`Scalar` sont des **traits de crate** (interdits). Extension du **système de types**.
+- **[35000] event-loop & état mutable.** GUI/jeux tournent sur `loop { handle(&mut state) }` : un **état
+  mutable partagé** muté à chaque frame. Iron est **par valeur, sans état global mutable** (I-sémantique).
+  C'est la frontière la plus structurante — elle touche le **modèle d'exécution**, pas le binder.
+- **[53000] async.** Iron a `await` en surface mais **pas d'exécuteur** : pas de `tokio`, pas de `Future`
+  piloté. Web/bots/IoT en dépendent. Extension **runtime + codegen**.
+- **[43000] no_std.** Iron émet du `std` et **jamais d'`unsafe`** (I2) ; l'embarqué exige `no_std` + un HAL
+  qui *encapsule* l'`unsafe`. Piste : un mode d'émission `no_std` + une crate-HAL bénie.
+- **[52900] serde typé / [24100].** `from_str::<T>` exige un `T` **dérivé** ; pas de macros derive en Iron.
+  La voie **dynamique** `Value` marche déjà (serde_json ✅) — c'est le **typé** qui manque.
 
-## Murs « durs du langage » déjà connus (non-objectifs V12, sauf décision)
+## Priorisation suggérée (rentabilité)
 
-- **`no_std` / embarqué (ESP32)** — Iron émet du `std` et jamais d'`unsafe` (I2). Mur déclaré dès V11-test-2.
-- **GUI / jeux / async lourd** — boucles d'événements + état mutable global vs sémantique par valeur.
+1. **[24100]** — débloque le plus de projets d'un coup (geo, nalgebra, ndarray, polars, rustfft + base ML) et
+   conditionne [52900]/[24200]. **Le meilleur premier pas.**
+2. **[52800]** io par flux — débloque flate2/printpdf/quick-xml, et complète [82000].
+3. **[35000]** event-loop — gros, structurant (tout GUI/jeux/TUI), mais c'est un **changement de modèle**.
+4. **[53000]** async, **[43000]** no_std — gros chantiers ciblés (web ; embarqué).
+
+> **Méthode.** Chaque capacité = un cycle 4-phases à part entière. On en planifie **une** à la fois (commencer
+> par [24100]). Tout nouveau mur **de même nature** s'ajoute ici, jamais en cas-par-cas.
