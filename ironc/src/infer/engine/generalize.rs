@@ -170,7 +170,8 @@ pub fn writeback(ast: &mut Ast, env: &Env, subst: &Subst, bounds: &HashMap<u32, 
                     }
                 }
             }
-            ItemKind::Impl { type_name, methods, .. } => {
+            // `impl` ET méthodes par défaut de `trait` : réécrit les params/retours non annotés résolus.
+            ItemKind::Impl { type_name, methods, .. } | ItemKind::Trait { name: type_name, methods } => {
                 for m in methods {
                     let Some(sig) = env.methods.get(&(type_name.clone(), m.name.clone())) else { continue };
                     let off = if sig.has_self { 1 } else { 0 };

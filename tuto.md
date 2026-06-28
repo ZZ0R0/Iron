@@ -5,8 +5,9 @@
 > jamais d'`unsafe`** : le pire cas est une erreur `rustc` remontée sur ta ligne Iron.
 >
 > Deux principes :
-> - **Inférence locale** : tu n'annotes **que ce qui n'est pas déductible**. La plupart des fonctions
->   s'écrivent sans aucune annotation, comme en Python.
+> - **Inférence pilotée par l'usage *et les appels*** : Iron compile le programme **entier**, donc il déduit
+>   le type d'un paramètre de **la façon dont tu l'appelles**. Résultat : tu n'annotes **presque rien** — du
+>   Python qui compile en Rust. (Si un type reste vraiment indéductible, Iron te le dit **sur ta ligne**.)
 > - **Zéro bibliothèque Iron** : les primitives du langage sont intégrées ; *tout le reste* (fichiers, JSON,
 >   HTTP, regex, crypto…) se fait en **important un crate Rust**. L'écosystème d'Iron, c'est **crates.io**.
 
@@ -113,7 +114,7 @@ $ ironc add strsim
 ```python
 import strsim
 
-def closest(query: str, names: list[str]):
+def closest(query, names):
     best = names[0]
     for n in names:
         if levenshtein(query, n) < levenshtein(query, best):
@@ -132,10 +133,10 @@ Alice
 Bob
 ```
 
-`levenshtein` vient de la **crate Rust `strsim`**, compilée par `cargo`. Ici on annote `query: str` et
-`names: list[str]` : `query` n'est consommé que par une fonction externe (Iron ne lit pas sa signature),
-et le **type d'élément** d'une liste-paramètre n'est pas déductible localement. Le retour `best`, lui,
-s'infère (`names[0]` est un `str`).
+`levenshtein` vient de la **crate Rust `strsim`**, compilée par `cargo`. **Zéro annotation** : Iron voit le
+site d'appel `closest("Alise", names)` où `names` est une `list[str]` → il en déduit `query: str` et
+`names: list[str]`, et le retour `best` (`names[0]` est un `str`). C'est l'inférence **pilotée par les
+appels** : pas besoin de décrire les paramètres, Iron regarde comment tu t'en sers.
 
 ---
 
@@ -151,7 +152,7 @@ enum ValidationError:
     EmptyName
     TooYoung
 
-def validate(name: str, age) -> Result[str, ValidationError]:
+def validate(name, age) -> Result[str, ValidationError]:
     if len(name) == 0:
         raise ValidationError.EmptyName
     if age < 18:                        # `age` inféré i64 (comparé à un nombre)
@@ -171,10 +172,10 @@ refusé
 refusé
 ```
 
-`age` est inféré (`age < 18`). On annote `name: str` (utilisé via `len`, ambigu sinon) et le retour
-`Result[str, ValidationError]` : le **type d'erreur concret est explicite par choix** — c'est ce qui
-permet à `?`/`try`/`except` de propager exactement cette erreur. (Sans annotation, `Result[T]` reste un
-fourre-tout `IronError`.)
+`name` et `age` sont inférés (appels `validate("Alice", 25)` + usages `len(name)`, `age < 18`). La **seule**
+annotation est le retour `Result[str, ValidationError]` : déclarer le type d'erreur `E` est un **choix
+explicite** — c'est l'opt-in qui permet à `?`/`try`/`except` de propager exactement cette erreur. (Sans lui,
+`Result[T]` reste un fourre-tout `IronError`.)
 
 ---
 
@@ -224,24 +225,81 @@ d'une closure renvoyée** (`fn(i64) -> i64`).
 
 ---
 
-## 6. L'outillage du développeur
+## 5b. Traits, opérateurs, motifs
 
-**Diagnostics (`ironc check`).** Iron s'appuie sur `rustc` comme filet : une erreur de type est remontée
-**sur ta ligne Iron**.
+Iron a de quoi modéliser proprement : **traits** (avec méthodes par défaut), **surcharge d'opérateurs**
+(méthodes `__dunder__` → opérateurs Rust), et **motifs** riches (`match`).
+
+`shapes.irn` :
 
 ```python
-# bug.irn
+# Trait avec méthode par défaut
+trait Shape:
+    fn area(self) -> i64
+    def describe(self):                       # méthode par défaut : réutilise area()
+        return f"aire = {self.area()}"
+
+class Square(Shape):
+    side: i64
+    def area(self):
+        return self.side * self.side
+
+# Surcharge d'opérateurs : `__add__` → l'opérateur `+`
+class Vec2:
+    x: i64
+    y: i64
+    def __add__(self, o):
+        return Vec2(x=self.x + o.x, y=self.y + o.y)
+
+# Motifs : alternatives `|`, intervalles `..`
+def band(n):
+    match n:
+        0 | 1 | 2: return "bas"
+        3 .. 10:   return "moyen"
+        _:         return "haut"
+
+def main():
+    print(Square(side=5).describe())          # aire = 25
+    v = Vec2(x=1, y=2) + Vec2(x=3, y=4)        # `+` surchargé
+    print(f"({v.x}, {v.y})")                   # (4, 6)
+    print(band(7))                             # moyen
+```
+
+```sh
+$ ironc run shapes.irn
+aire = 25
+(4, 6)
+moyen
+```
+
+Là encore, **presque rien n'est annoté** : seuls les **champs** (`side`, `x`, `y`) et la **signature
+abstraite** du trait (`fn area(self) -> i64`) le sont. `describe`, `area` (impl), `__add__` infèrent leurs
+types. L'ensemble béni des dunders : `__add__`/`__sub__`/`__mul__`/`__div__` (arithmétique), `__eq__`/`__lt__`
+(comparaisons), `__str__` (affichage). Autres motifs utiles : `or`-patterns, intervalles, et `while/for … else`.
+
+---
+
+## 6. L'outillage du développeur
+
+**Diagnostics (`ironc check`).** Iron a son **propre vérificateur de types** : il signale beaucoup d'erreurs
+**lui-même, sur ta ligne Iron, avant `rustc`** (champ/méthode inconnus, mauvaise arité, conflit de types…).
+`rustc` ne sert que de filet pour le reste.
+
+```python
 def add(a, b):
     return a + b
 
 def main():
-    print(add(1, "deux"))   # str au lieu d'un nombre
+    print(add(1, "deux"))   # str, pas un nombre
 ```
 
 ```sh
 $ ironc check bug.irn
-ironc: erreur: bug.irn:5:5: error[E0308]: mismatched types
+ironc: erreur: bug.irn:5:11: type : `i64` attendu, trouvé `str`
 ```
+
+Iron a inféré `a: i64` (premier appel) puis vu `"deux"` au second argument : conflit, signalé en clair.
+C'est ce diagnostic que VSCode souligne **en direct**.
 
 **REPL (`ironc repl`).** Pour explorer :
 
@@ -269,29 +327,39 @@ produit un binaire avec infos de debug **plus** une `sourcemap.json` qui relie l
 débogues avec gdb/lldb et tu retombes sur tes lignes `.irn`.
 
 **VSCode.** L'extension (`editors/vscode/`) reconnaît les `.irn` (icône + coloration), branche le serveur de
-langage (diagnostics live, complétion, hover, go-to-définition), et expose les commandes *Iron: Build / Run
-/ Format / Add crate / Build (debug)*.
+langage (`ironc lsp` → diagnostics **live**, complétion, hover), souligne les erreurs **à la sauvegarde**
+(`ironc check`), et expose les commandes *Iron: Build / Run / Format / Add crate / Debug* + un **CodeLens
+▶ Run** au-dessus de `def main()`. Mise en route :
+
+```sh
+cargo build --release                          # construit `ironc` (puis mets-le sur ton PATH)
+cd editors/vscode && npm install && npm run compile   # compile l'extension
+# puis F5 (Extension Development Host) ou `npx vsce package` → installe le .vsix
+```
 
 ---
 
 ## 7. Quand faut-il annoter ?
 
-Iron infère **localement** (à partir de l'usage dans le corps). Il n'y a **pas** d'inférence globale
-Hindley-Milner : certaines annotations restent nécessaires. La règle pratique :
+Iron infère depuis **l'usage dans le corps** *et* **les sites d'appel** (il compile tout le programme). Il
+n'y a **pas** d'inférence globale Hindley-Milner, mais en pratique tu n'annotes presque rien. La règle :
 
 | Tu écris… | Annotation requise ? |
 |---|---|
 | arithmétique / comparaison à un nombre (`x * 2`, `age < 18`) | **non** — inféré `i64` |
 | f-string / concaténation (`f"{x}"`, `s + "!"`) | **non** — inféré `str` |
 | retour d'un calcul, d'une liste, d'une struct, d'un index | **non** — inféré |
+| **paramètre** (même passé à une fonction externe, même `list[str]`) | **non** — inféré du **site d'appel** |
+| param appelé avec des **types incompatibles** à deux endroits | **non** — devient **générique** automatiquement |
 | **champ** de `class` | **oui** (`name: str`) — comme un dataclass |
-| **générique** | **oui** (`def f[T](x: T)`) |
-| **erreur typée** `Result[T, E]` | **oui** — c'est l'opt-in qui rend `E` concret |
+| **générique déclaré** | **oui** (`def f[T](x: T)`) |
+| **erreur typée** `Result[T, E]` | **oui** — l'opt-in qui rend `E` concret |
 | **closure renvoyée** | **oui** (`-> fn(i64) -> i64`) |
-| param passé **seulement** à une fonction externe / élément d'une liste-paramètre | **oui** (`query: str`, `names: list[str]`) |
 
-En cas de doute : écris sans annotation, lance `ironc run`. Si Iron ne peut pas déduire, `rustc` te le dit
-**sur ta ligne** — tu ajoutes l'annotation pile où il faut.
+> En clair : il ne reste **que 4 endroits** où tu annotes — **champs de classe**, **génériques déclarés
+> `[T]`**, **erreurs typées `Result[T, E]`**, **type d'une closure renvoyée**. Tout le reste (params,
+> retours, locaux) s'infère. En cas de doute : écris sans annotation, lance `ironc run` ; si un type reste
+> indéductible, Iron te le dit **sur ta ligne**.
 
 ---
 

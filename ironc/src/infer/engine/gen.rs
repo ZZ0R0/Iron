@@ -50,7 +50,8 @@ impl<'a> Gen<'a> {
                     }
                     self.block(&mut scope, &sig.ret, body);
                 }
-                ItemKind::Impl { type_name, methods, .. } => {
+                // `impl` ET méthodes par défaut de `trait` (self = type/trait) — sinon params non inférés.
+                ItemKind::Impl { type_name, methods, .. } | ItemKind::Trait { name: type_name, methods } => {
                     for m in methods {
                         let Some(sig) = self.env.methods.get(&(type_name.clone(), m.name.clone())).cloned() else {
                             continue;

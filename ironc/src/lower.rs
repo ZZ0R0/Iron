@@ -26,6 +26,14 @@ pub fn lower(
             _ => None,
         })
         .collect();
+    let structs: HashSet<String> = ast
+        .items
+        .iter()
+        .filter_map(|it| match &it.kind {
+            ItemKind::Struct { name, .. } => Some(name.clone()),
+            _ => None,
+        })
+        .collect();
     let user_fns: HashSet<String> = ast
         .items
         .iter()
@@ -62,6 +70,7 @@ pub fn lower(
         bindings,
         item_attrs: &ast.item_attrs,
         enums,
+        structs,
         user_fns,
         fn_params,
         fn_defaults,
@@ -119,6 +128,7 @@ struct Cx<'a> {
     /// Attributs Rust pass-through par item (V9, 51900) : `NodeId` → `derive(Serialize)`/`repr(C)`…
     item_attrs: &'a HashMap<NodeId, Vec<String>>,
     enums: HashSet<String>,
+    structs: HashSet<String>,
     /// Fns définies par l'utilisateur — priment sur les built-ins homonymes (ex. un `fn add` perso).
     user_fns: HashSet<String>,
     /// Noms des params par fn (surface Python) : pour réordonner les arguments nommés `f(x=1, y=2)`.
@@ -1447,6 +1457,14 @@ impl Cx<'_> {
                         return quote! { #recv.join().unwrap() };
                     }
                 }
+            }
+        }
+        // construction d'une classe **sans champ** : `Name()` où Name est un struct connu → `Name {}`
+        // (une classe avec champs se construit en `Name(champ=...)` → StructLit, géré ailleurs).
+        if let ExprKind::Var(name) = &callee.kind {
+            if args.is_empty() && self.structs.contains(name) {
+                let id = format_ident!("{}", name);
+                return quote! { #id {} };
             }
         }
         // construction de variante d'enum : `Enum.Variant(args)`

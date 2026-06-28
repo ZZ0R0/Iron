@@ -139,23 +139,28 @@ pub fn build_env(ast: &Ast, bindings: &Bindings, subst: &mut Subst) -> Env {
         }
     }
 
+    // Méthodes d'`impl` ET de `trait` (méthodes par défaut) : self = type implémenté / trait. Les params
+    // non annotés des méthodes par défaut de trait sont sinon laissés sentinelles (`__infer__`) → leak.
     for it in &ast.items {
-        if let ItemKind::Impl { type_name, methods, .. } = &it.kind {
-            for m in methods {
-                let mut ps: Vec<Type> = Vec::new();
-                if m.self_param {
-                    ps.push(Type::Struct(type_name.clone()));
-                }
-                ps.extend(m.params.iter().map(|(_, t)| var_if_infer(t, subst)));
-                let rsig = ret_var_if_infer(&m.ret, m.body.as_deref().unwrap_or(&[]), subst);
-                if let Type::Var(id) = &rsig {
-                    env.ret_vars.insert(*id);
-                }
-                env.methods.insert(
-                    (type_name.clone(), m.name.clone()),
-                    FnSig { params: ps, ret: rsig, generics: Vec::new(), has_self: m.self_param },
-                );
+        let (recv, methods) = match &it.kind {
+            ItemKind::Impl { type_name, methods, .. } => (type_name.clone(), methods),
+            ItemKind::Trait { name, methods } => (name.clone(), methods),
+            _ => continue,
+        };
+        for m in methods {
+            let mut ps: Vec<Type> = Vec::new();
+            if m.self_param {
+                ps.push(Type::Struct(recv.clone()));
             }
+            ps.extend(m.params.iter().map(|(_, t)| var_if_infer(t, subst)));
+            let rsig = ret_var_if_infer(&m.ret, m.body.as_deref().unwrap_or(&[]), subst);
+            if let Type::Var(id) = &rsig {
+                env.ret_vars.insert(*id);
+            }
+            env.methods.insert(
+                (recv.clone(), m.name.clone()),
+                FnSig { params: ps, ret: rsig, generics: Vec::new(), has_self: m.self_param },
+            );
         }
     }
 
