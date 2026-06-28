@@ -9,6 +9,31 @@
 > ce sont les frontières cadrées (V12) et les murs durs déclarés. Tout le **durcissement possible** est fait
 > (B5–B26, gate VERT). Soit **~31 projets utilisables** (✅ + 🟡 dont la brique marche) sur 80.
 
+## ⚠️ PASSE DE VALIDATION (essais réels, pas inférence) — corrections importantes
+
+> Après reproche justifié (« tu n'as fait qu'inférer »), j'ai **essayé** les ~35 classés `A`. Plusieurs
+> inférences étaient **fausses** — l'inférence architecturale était **trop pessimiste**. Corrections :
+
+| # | Crate | Avant | **Après essai réel** |
+|---|---|:--:|---|
+| 73 | serialport | 🟥 | ✅ **vert** — `available_ports()` → **4 ports** listés. |
+| 75 | linux-embedded-hal | 🟥 | 🟡 **compile** (`I2cdev.new(path)`) — lecture I²C = matériel au *run*, pas un mur de langage. |
+| 30 | notify-rust / rfd | 🟥/🟡 | 🟡 **compile** (builder/`FileDialog.new`) — `show()` = D-Bus/display au *run*. |
+| 77 | minifb | 🟥 | 🟡 **compile** (`Window.new`) — fenêtre = display au *run* (échec runtime, pas compile). |
+| 71 | esp-hal | 🟥🟥 | 🟥 **confirmé** — `ironc add` **échoue** (no_std, pas de build hôte) → [43000]. |
+| 09 | bincode | 🔵 | 🔧 **tooling** — `rustdoc` « could not document » (pas une capacité ; flag à creuser). |
+| 14/23/16/01 | redis/tungstenite/ureq/clap | 🔵 | **ctor à borne de trait-crate** (`IntoConnectionInfo`/`IntoClientRequest`/`Uri:TryFrom`/`Into<Str>`) → sous-cas de [24100] (reconnaissance de bornes). |
+| 26 | eframe (impl trait) | 🟥 | Iron **parse** `impl App for MyApp` mais le Rust généré est **faux** (chemin/signatures) → [24300] précis. |
+
+> **Nouvel axe découvert : ENVIRONNEMENT ≠ langage.** Des crates **compilent** (Iron sait les exprimer) mais
+> exigent **matériel / écran / serveur / D-Bus au runtime** (linux-embedded-hal, minifb, rppal, notify-rust,
+> rfd, redis-serveur, rodio/cpal-libs). Ce **n'est pas** une capacité V12 manquante — ça tournerait dans un
+> environnement équipé. Je les avais comptés à tort comme « murs de langage ».
+>
+> **Donc : la barre « ce qu'Iron peut EXPRIMER » est plus haute que ma carte initiale** (+1 vert confirmé,
+> ~4 « compile mais env »). Les vrais murs de **langage** restent : génériques de type, impl-trait-externe,
+> closures→trait-objets, event-loop, async, no_std, consts, derive-macros.
+
 ## 1. CLI & fichiers
 | # | Crate | Statut | Base | Note |
 |---|---|:--:|:--:|---|

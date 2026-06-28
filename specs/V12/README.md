@@ -21,8 +21,10 @@
 | [24100] | **Génériques de type** suivis (`Point<T>`, `Vec<T>`, tenseurs) + monomorphisation scalaire | 2 | geo, nalgebra, ndarray, polars, rustfft, dialoguer, rapier2d, **ML** (candle/linfa/tract/smartcore) | spec'é |
 | [52800] | **io par flux** (`Write`/`Read`/`BufRead`, puits/sources, out-params) | 5 | flate2, printpdf(save), quick-xml, image(save-stream) | spec'é |
 | [52900] | **serde typé** (derive + de/serialize générique) | 5 | toml(doc), serde_yaml, bincode, jsonwebtoken | cadré |
-| [24300] | **Implémenter un trait EXTERNE** sur un type Iron (`impl eframe::App for MyApp`) | 2 | GUI (eframe/iced), tout framework à trait-utilisateur | **découvert tardivement** |
-| [40300] | **Closures rendant un trait-objet** (`Box<dyn FnOnce -> Box<dyn App>>`), HOF avancées | 4 | GUI, callbacks de crates | **découvert tardivement** |
+| [24300] | **Implémenter un trait EXTERNE** sur un type Iron (`impl eframe::App for MyApp`) | 2 | GUI (eframe/iced), tout framework à trait-utilisateur | **confirmé par essai** (Iron parse `impl App for MyApp` mais émet un Rust faux : chemin/signatures) |
+| [40300] | **Closures rendant un trait-objet** (`Box<dyn FnOnce -> Box<dyn App>>`), HOF avancées | 4 | GUI, callbacks de crates | confirmé (eframe `app_creator`) |
+| [40400] | **Macros derive** (`#[derive(Parser)]`/`#[derive(Serialize)]`) émises sur un type Iron | 4 | pest (grammaire), serde typé (cf. 52900) | **découvert (essai pest)** |
+| [24100b] | Reconnaissance de **bornes de ctor convertibles depuis chaîne** (`Into<X>`/`X: TryFrom<T>`/trait-crate) | 2 | redis, tungstenite, ureq, clap (construction bloquée) | **découvert (essais)** — sous-cas [24100] |
 | [35000] | **Boucle d'événements & état mutable partagé** | 3 | **GUI** (26-30), **TUI complet** (31-32), **jeux** (46-50) | **cadré (nouveau)** |
 | [53000] | **Runtime async** (`tokio`/`async fn`/`.await` exécutés) | 5 | axum, teloxide, redis, tungstenite, hickory, rumqttc, web (16/19) | **cadré (nouveau)** |
 | [43000] | **Émission `no_std` + HAL encapsulé** (embarqué, sans violer I2) | 4 | esp-hal (ESP32), rppal, serialport, btleplug, linux-embedded-hal | **cadré (nouveau)** |
@@ -61,21 +63,20 @@
 > **Méthode.** Chaque capacité = un cycle 4-phases à part entière. On en planifie **une** à la fois (commencer
 > par [24100]). Tout nouveau mur **de même nature** s'ajoute ici, jamais en cas-par-cas.
 
-## ⚠️ Ce cadrage est une HYPOTHÈSE, pas une garantie
+## ✅ Passe de validation FAITE — ce cadrage reste une hypothèse, mais affinée
 
-**Honnêteté requise.** Je n'ai **exécuté que ~45 des 80** ; les ~35 autres sont classés par **architecture**,
-pas par essai. Et chaque capacité ci-dessus est **draft** : la *construire* est une vraie recherche qui
-**révélera des sous-problèmes**. Preuve : en sondant eframe au-delà du binding, j'ai découvert **[24300]
-impl-trait-externe** et **[40300] closures→trait-objets** que je n'avais **pas** vus — un seul projet GUI a
-fait apparaître **2 capacités manquantes**.
+J'ai **essayé** (compilation réelle) les ~35 classés par architecture. Résultats (détail :
+`../V11-test-2/CARTE-80.md` § Passe de validation) :
+- **Découvert 4 capacités non vues** : [24300] impl-trait-externe, [40300] closures→trait-objets, [40400]
+  derive-macros (pest), [24100b] bornes de ctor convertibles (redis/tungstenite/ureq/clap).
+- **Corrigé des inférences fausses** : serialport est **vert** ; linux-embedded-hal / rfd / notify-rust /
+  minifb **compilent** (Iron les exprime) — leur blocage est l'**environnement** (matériel/écran/D-Bus au
+  *run*), **pas le langage**. Donc moins de murs de langage que je ne l'avais dit.
+- **Nouvel axe : ENVIRONNEMENT ≠ langage.** Plusieurs « murs » étaient des besoins runtime (device/display/
+  serveur/libs système), pas des capacités V12. À ne **pas** mettre dans V12.
 
-Donc, à la question « avec tout V12, les 80 passeront-ils ? » → **NON, je ne peux pas le garantir** :
-- Les ~35 non-essayés cachent probablement **d'autres** capacités (comme eframe en a caché 2).
-- Certaines capacités **tensionnent avec les invariants d'Iron** et pourraient **ne pas se résoudre
-  proprement** : [35000] (état mutable partagé) vs la sémantique **par valeur** ; [43000] (`no_std`) vs **I2
-  (jamais d'`unsafe`)**. Ce sont des **arbitrages d'identité du langage**, pas de simples features.
-
-**Pour le SAVOIR vraiment**, il faudrait une *passe de validation* : essayer (au moins à la compilation)
-chaque projet non-testé pour en extraire les capacités réelles, puis prototyper la plus risquée ([35000])
-pour vérifier qu'elle est seulement *difficile* et pas *incompatible*. Tant que ce n'est pas fait, ce
-cadrage est la **meilleure carte connue**, à corriger au fil des essais — pas une promesse.
+**Réponse à « les 80 passeront-ils avec V12 ? » → toujours NON garanti**, mais maintenant **mesuré** : les
+capacités de langage restantes sont [24100]/[24300]/[40300]/[40400] (génériques, trait-externe, closures,
+derive), [35000] (event-loop), [53000] (async), [43000] (no_std) — et **deux d'entre elles tensionnent avec
+les invariants** : [35000] vs sémantique par valeur, [43000] vs I2. Celles-là pourraient **ne pas se
+résoudre proprement** ; il faudra les **prototyper** pour trancher (difficile vs incompatible).
