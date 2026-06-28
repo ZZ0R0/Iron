@@ -14,6 +14,13 @@ fn arg0_ty(cx: &Inf, args: &[Expr]) -> Type {
 /// Type de retour d'une méthode built-in (str/list/dict, 80500) ; `None` si inconnue.
 fn builtin_method_ret(bt: &Type, name: &str) -> Option<Type> {
     Some(match (bt, name) {
+        // `.unwrap()`/`.expect(msg)` sur `Option[T]`/`Result[T]` → `T`. Sans ça le type se **perd**
+        // (→ `Unit`) au milieu d'une chaîne `ctor().unwrap().m()` : au lowering, `m` n'est plus routée
+        // comme méthode externe → une **méthode de trait** (UFCS requis) casse (B8, statrs
+        // `Beta.new(a,b).unwrap().mean()`). Les méthodes *inhérentes* survivaient par chance (Rust les
+        // résout en syntaxe-méthode même type perdu) ; les méthodes de trait, non.
+        (Type::Option(e) | Type::Result(e), "unwrap" | "expect") => (**e).clone(),
+        (Type::ResultE(e, _), "unwrap" | "expect") => (**e).clone(),
         (Type::Str, "upper" | "lower" | "strip" | "replace" | "join") => Type::Str,
         (Type::Str, "split" | "splitlines") => Type::List(Box::new(Type::Str)),
         (Type::Str, "count") => Type::I64,

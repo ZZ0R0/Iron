@@ -7,7 +7,7 @@
 //! Cible rustdoc-json **v57** (nightly) ; dégrade proprement.
 
 use crate::ir::*;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::path::Path;
 use std::process::Command;
 
@@ -61,12 +61,80 @@ struct Sig {
     idioms: Vec<&'static str>,
 }
 
+/// `id → chemin **public**` en parcourant l'arbre des modules **publics** + les re-exports `pub use`
+/// (y compris globs `pub use m::*`). rustdoc donne le chemin **canonique**, qui peut traverser des
+/// modules **privés/restreints** (ex. `statrs::statistics::traits::Distribution`) ; le chemin réellement
+/// compilable est le **re-export** (`statrs::statistics::Distribution`). Sans ça, une méthode de trait
+/// dont le trait vit dans un module privé glob-réexporté donne un chemin UFCS qui ne compile pas
+/// (`error[E0603]: module \`traits\` is private`). BFS ⇒ on garde le chemin le plus **court** par id.
+fn build_public_paths(index: &serde_json::Map<String, Json>, root: u64, crate_name: &str) -> HashMap<u64, String> {
+    let mut out: HashMap<u64, Vec<String>> = HashMap::new();
+    let mut visited: HashSet<u64> = HashSet::new();
+    let mut queue: VecDeque<(u64, Vec<String>)> = VecDeque::new();
+    queue.push_back((root, vec![crate_name.to_string()]));
+    let shorter = |out: &mut HashMap<u64, Vec<String>>, id: u64, p: Vec<String>| match out.get(&id) {
+        Some(old) if old.len() <= p.len() => {}
+        _ => {
+            out.insert(id, p);
+        }
+    };
+    let is_module = |id: u64| index.get(&id.to_string()).is_some_and(|t| t["inner"]["module"].is_object());
+    while let Some((mid, prefix)) = queue.pop_front() {
+        if !visited.insert(mid) {
+            continue;
+        }
+        let Some(items) = index.get(&mid.to_string()).and_then(|m| m["inner"]["module"]["items"].as_array())
+        else {
+            continue;
+        };
+        for cid in items.iter().filter_map(|c| c.as_u64()) {
+            let Some(child) = index.get(&cid.to_string()) else { continue };
+            let inner = &child["inner"];
+            let public = child["visibility"].as_str() == Some("public");
+            if inner["use"].is_object() {
+                // `pub use` seulement (un `use` privé ne crée pas de chemin public).
+                if !public {
+                    continue;
+                }
+                let Some(tgt) = inner["use"]["id"].as_u64() else { continue };
+                if inner["use"]["is_glob"].as_bool() == Some(true) {
+                    // `pub use m::*` : réexporte les items publics de `m` **au niveau courant** (même prefix).
+                    queue.push_back((tgt, prefix.clone()));
+                } else {
+                    let name = inner["use"]["name"].as_str().unwrap_or("");
+                    let mut p = prefix.clone();
+                    p.push(name.to_string());
+                    shorter(&mut out, tgt, p.clone());
+                    if is_module(tgt) {
+                        queue.push_back((tgt, p));
+                    }
+                }
+            } else if !public {
+                continue;
+            } else if inner["module"].is_object() {
+                let mut p = prefix.clone();
+                p.push(child["name"].as_str().unwrap_or("").to_string());
+                shorter(&mut out, cid, p.clone());
+                queue.push_back((cid, p));
+            } else if let Some(name) = child["name"].as_str() {
+                let mut p = prefix.clone();
+                p.push(name.to_string());
+                shorter(&mut out, cid, p);
+            }
+        }
+    }
+    out.into_iter().map(|(k, v)| (k, v.join("::"))).collect()
+}
+
 fn emit(v: &Json, crate_name: &str, crate_real: &str) -> CResult<String> {
     let index = v["index"]
         .as_object()
         .ok_or_else(|| CompileError::msg("rustdoc-json : `.index` absent (format inattendu)"))?;
     let paths = &v["paths"];
     let version = v["crate_version"].as_str().unwrap_or("*");
+    // Chemins **publics** (re-exports inclus) des items locaux — corrige les chemins canoniques qui
+    // traversent des modules privés glob-réexportés (B9).
+    let public_paths = v["root"].as_u64().map(|r| build_public_paths(index, r, crate_name)).unwrap_or_default();
     let (mut bound, mut skipped) = (0usize, 0usize);
 
     // --- POO : méthodes/ctors par type (51100) ---
@@ -103,25 +171,32 @@ fn emit(v: &Json, crate_name: &str, crate_real: &str) -> CResult<String> {
         // chemin Rust complet du type (sous-modules : `statrs::distribution::Beta`) — via `paths[id]`
         // (canonique), sinon `resolved_path` puis `crate::Type`. Sinon `crate::Beta` serait introuvable.
         type_paths.entry(tyname.clone()).or_insert_with(|| {
+            // chemin public (re-export, B9) d'abord ; sinon `paths[id]` canonique + heuristique sous-module.
             for_id
-                .and_then(|id| paths.get(&id.to_string()))
-                .and_then(|p| p["path"].as_array())
-                .map(|segs| segs.iter().filter_map(|s| s.as_str()).collect::<Vec<_>>().join("::"))
-                .filter(|p| p.contains("::"))
-                .map(|p| drop_private_mod(&p))
+                .and_then(|id| public_paths.get(&id).cloned())
+                .or_else(|| {
+                    for_id
+                        .and_then(|id| paths.get(&id.to_string()))
+                        .and_then(|p| p["path"].as_array())
+                        .map(|segs| segs.iter().filter_map(|s| s.as_str()).collect::<Vec<_>>().join("::"))
+                        .filter(|p| p.contains("::"))
+                        .map(|p| drop_private_mod(&p))
+                })
                 .unwrap_or_else(|| if tyfull.contains("::") { tyfull.clone() } else { format!("{crate_name}::{tyfull}") })
         });
         // Chemin **complet** du trait d'un `impl Trait for T` (None = inhérent) → méthodes appelées en UFCS.
         // On résout via `paths[id]` (ex. `core::ops::Mul`, `core::fmt::Display`) — sinon les traits std/externes
         // seraient mal préfixés `{crate}::Trait` (bug : `num_bigint::Mul` au lieu de `core::ops::Mul`).
-        let trait_short = imp["trait"]["id"]
-            .as_u64()
-            .and_then(|id| paths.get(&id.to_string()))
-            .and_then(|p| p["path"].as_array())
-            .map(|segs| segs.iter().filter_map(|s| s.as_str()).collect::<Vec<_>>().join("::"))
+        let trait_id = imp["trait"]["id"].as_u64();
+        let trait_short = trait_id
+            .and_then(|id| public_paths.get(&id).cloned()) // chemin public (re-export, B9) d'abord
             .or_else(|| {
-                imp["trait"]["path"].as_str().map(|t| t.to_string())
-            });
+                trait_id
+                    .and_then(|id| paths.get(&id.to_string()))
+                    .and_then(|p| p["path"].as_array())
+                    .map(|segs| segs.iter().filter_map(|s| s.as_str()).collect::<Vec<_>>().join("::"))
+            })
+            .or_else(|| imp["trait"]["path"].as_str().map(|t| t.to_string()));
         for mid in imp["items"].as_array().into_iter().flatten() {
             let Some(id) = mid.as_u64() else { continue };
             method_ids.insert(id);
