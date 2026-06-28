@@ -382,8 +382,10 @@ fn emit(v: &Json, crate_name: &str, crate_real: &str, versions: &HashMap<String,
 
     // --- fonctions libres (51000) ---
     let mut free = Vec::new();
+    let mut seen_free: HashSet<String> = HashSet::new();
     for (id, item) in index {
-        if id.parse::<u64>().map_or(false, |n| method_ids.contains(&n)) {
+        let Some(idn) = id.parse::<u64>().ok() else { continue };
+        if method_ids.contains(&idn) {
             continue;
         }
         if !item["inner"]["function"].is_object() || item["visibility"].as_str() != Some("public") {
@@ -395,7 +397,24 @@ fn emit(v: &Json, crate_name: &str, crate_real: &str, versions: &HashMap<String,
         };
         match project(&item["inner"]["function"], "", &Generics::new()) {
             Some(sig) if sig.recv.is_none() => {
-                free.push(render(name, &sig, Some(&format!("{crate_name}::{name}"))));
+                if !seen_free.insert(name.to_string()) {
+                    continue; // dedup par nom (une fn libre homonyme dans deux modules → garder la 1ʳᵉ)
+                }
+                // chemin **public** de la fn (re-export/sous-module, ex. `zstd::bulk::compress`), pas
+                // `crate::name` qui suppose le top-level (B23).
+                let fpath = public_paths
+                    .get(&idn)
+                    .cloned()
+                    .or_else(|| {
+                        paths
+                            .get(&idn.to_string())
+                            .and_then(|p| p["path"].as_array())
+                            .map(|segs| segs.iter().filter_map(|s| s.as_str()).collect::<Vec<_>>().join("::"))
+                            .filter(|p| p.contains("::"))
+                            .map(|p| collapse_std_private(&p))
+                    })
+                    .unwrap_or_else(|| format!("{crate_name}::{name}"));
+                free.push(render(name, &sig, Some(&fpath)));
                 bound += 1;
             }
             _ => skipped += 1,

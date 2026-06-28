@@ -1849,9 +1849,15 @@ impl Cx<'_> {
             }
             // fonction externe (`.iri`) → chemin Rust (50200/40200).
             if self.bindings.fns.contains_key(name) {
-                let path = TokenStream::from_str(&self.bindings.fns[name].path).unwrap_or_else(|_| quote! { () });
-                let is_result = matches!(self.bindings.fns[name].ret, Type::Result(_));
-                let a: Vec<TokenStream> = args.iter().map(|x| self.extern_arg(x)).collect();
+                let ef = self.bindings.fns[name].clone();
+                let path = TokenStream::from_str(&ef.path).unwrap_or_else(|_| quote! { () });
+                let is_result = matches!(ef.ret, Type::Result(_));
+                // coercition par type de param comme pour ctors/méthodes (numérique B10, octets B22, `own` B18).
+                let a: Vec<TokenStream> = args
+                    .iter()
+                    .enumerate()
+                    .map(|(i, x)| self.extern_arg_to(x, ef.params.get(i), ef.param_owned.get(i).copied().unwrap_or(false)))
+                    .collect();
                 let call = quote! { #path( #(#a),* ) };
                 // erreur du crate → `IronError` unifié (I13) pour que `?`/`try` propagent.
                 return if is_result {
@@ -1920,6 +1926,19 @@ impl Cx<'_> {
                     let v = self.value(x);
                     let id = format_ident!("{}", t);
                     return quote! { (#v) as #id };
+                }
+            }
+            // liste d'entiers vers un param **`list[u8]`/`list[u32]`…** → coercer les **éléments** : `[104,
+            // 105]` est `list[i64]`, mais un param d'octets veut `Vec<u8>` (B22, ex. `zstd.compress`,
+            // `sha2.update`). `&v.iter().map(|e| *e as T).collect()` (→ `&Vec<T>`, coerce en `&[T]`).
+            if let (Type::List(elem), Type::List(at_elem)) = (exp, self.type_of(x)) {
+                if let Type::Num(k) = **elem {
+                    if *at_elem != Type::Num(k) {
+                        let v = self.value(x);
+                        let id = format_ident!("{}", num_kind_str(k));
+                        let body = quote! { #v.iter().map(|__e| *__e as #id).collect::<Vec<#id>>() };
+                        return if owned { body } else { quote! { &#body } };
+                    }
                 }
             }
         }
