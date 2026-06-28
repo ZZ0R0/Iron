@@ -44,39 +44,45 @@ Chaque crate réel a exposé un trou ; tous corrigés sans régresser le gate-v1
 | 03/04 | Parcours d'arbo | `walkdir` | ✅ **vert** | `for e in WalkDir.new("."): n += 1`. A révélé B13 (ctor `AsRef<Path>` + `Self`) et B14 (itération). |
 | 06 | CSV → JSON | `csv` | ✅ **vert** | `Reader.from_path(p).unwrap()` + `for rec in rdr.records()` → 3 lignes. Débloqué par B13 + B14. |
 | 02/80 | Hash / PoW | `sha2` | 🟡 | `Sha256` : `new`/`finalize` vivent dans le trait **blanket** `Digest` (`impl<T> Digest for T`) → le binder les saute (les blankets sont partout). Seul `update` (impl direct `Update`) est bindé. **Mur : API de convenance via trait blanket.** |
-| 05 | Renommeur regex | `regex` | 🟡 | Le binder a retenu `regex::bytes::Regex` (variante octets) au lieu de `regex::Regex` (str) sur collision de nom court → `replace_all("…","X")` veut un `bytes::Replacer`. Mur : **dédup choisit la mauvaise variante** (préférer le chemin le plus court). |
+| 05 | Renommeur regex | `regex` | ✅ **vert** (cœur) | **B15** : dédup retient `regex::Regex` (chemin court). `Regex.new("[0-9]+").unwrap()` → `is_match`/`find().as_str()` OK. `replace_all` reste non bindé (arg `R: Replacer` ; coercition `&String`→`&str` à part). |
 | 04 | Texte coloré | `colored` | 🔴 | `.red()` est ajouté à `&str` via le trait `Colorize` ; Iron `str` est un builtin (pas un type externe) → impossible d'y greffer une méthode de trait. **Mur dur : extension d'un type primitif.** |
 | 67 | Distances géo | `geo` | 🟡 | `Point<T: CoordNum>` est **générique sur le type scalaire** → ses méthodes prennent/rendent `T` (borne non mappable) → type opaque, `Point.new` non bindé. Même classe que nalgebra/ndarray. |
 | 42 | Synthé / WAV | `hound` | 🟡 | `WavSpec` est une **struct à champs publics** (config) ; Iron ne sait construire un type externe que par ctor, pas par littéral `WavSpec(channels=1, …)`. |
 | 63 | Gzip | `flate2` | ☐ | `import` OK ; usage réel (Encoder/Write, io) à tester. |
 
-## Murs identifiés (frontière) — chantiers de fond, pas des bugs ponctuels
+## Murs restants — ce sont des **features**, pas des bugs (≠ regex qui était un vrai bug, corrigé)
 
-1. **Traits blanket de convenance** (sha2 `Digest`, et tout `Read`/`Write`/`Iterator` blanket) : l'API
-   utile (`new`/`finalize`/`read`/`collect`) est dans un `impl<T> Trait for T` (le `for` est un `T`
-   générique, pas un type concret) → sauté par nécessité (sinon explosion). → piste : *whitelist* de
-   traits-blanket utiles + synthèse de leurs méthodes sur les types concrets qui satisfont les bornes.
-2. **Génériques sur le type scalaire** (geo `Point<T: CoordNum>`, nalgebra, ndarray) : les méthodes
-   prennent/rendent `T` borné par un trait **numérique** (`CoordNum`/`Num`/`Float`) → non mappable. → piste :
-   monomorphiser les bornes numériques vers `f64` (risqué : suppose le cas `f64`).
-3. **Construction de struct externe par littéral** (hound `WavSpec`, structs de config à champs publics) :
-   binder les **champs** des structs publiques + émettre `crate::S { champ: val, … }` au lowering.
-4. **Dédup variante de type** (regex `Regex` vs `bytes::Regex`) : sur collision de nom court, préférer le
-   chemin **public le plus court**. Nécessite un pré-passage type.
-5. **Extension d'un type primitif** (colored sur `str`) : Iron ne peut greffer une méthode de trait sur son
-   `str` builtin. Mur dur (sémantique du langage).
+Ordre de difficulté croissante (estimation après tentative) :
 
-> Ces 5 murs sont des **features de fond** (chacune mérite un cadrage), pas des bugs de durcissement. Ils
-> relèvent d'une V12 « binder avancé » plutôt que de la Vague 0.
+1. **sha2 — traits blanket de convenance** (`Digest::new/finalize`, aussi `Read`/`Write`). L'API utile vit
+   dans un `impl<T> Trait for T` (le `for` est un `T` générique, pas un type concret) → sauté par nécessité
+   (sinon explosion de bindings). → piste : *whitelist* (`Digest`…) + attacher ses méthodes en UFCS
+   `<Sha256 as Digest>::new` aux types concrets listés par les `impls` du trait. **Moyen, faisable.**
+2. **hound — construction de struct externe par littéral** (`WavSpec`, structs de config à champs publics).
+   Multi-couches : binder les **champs** publics + nouvelle syntaxe `.iri` + `StructLit` externe au lowering
+   + **variantes d'enum externe** (`SampleFormat.Int`). **Moyen-gros (plusieurs sous-features).**
+3. **geo — crate façade** : `Point` est **re-exporté de `geo_types`** (une dép) et son ctor `Point::new`
+   vit là-bas, **invisible** au bind d'une seule crate (le binder ne lit que les impls locales). Les bornes
+   sont aussi en `where` (non lues). → piste : binder les crates **sources** des re-exports. **Gros (binding
+   multi-crate).** *(Tentative B16 — monomorphisation numérique + génériques d'impl — annulée : ne suffit
+   pas, geo a besoin du multi-crate.)*
+4. **flate2 — modèle io `Write`/sink** : `GzEncoder::new(w: impl Write, …)` consomme un puits d'octets en
+   streaming → cogne avec la sémantique par valeur d'Iron. **Gros (modèle io, pas qu'un binding).**
+5. **colored — extension d'un type primitif** : `.red()` greffé sur `&str` via `Colorize` ; Iron `str` est
+   un builtin, pas un type externe → router `x.red()` vers `<str as Colorize>::red(&x)` exige de traiter les
+   méthodes de trait importées sur les primitifs. **Dur (touche le modèle du langage).**
+
+> regex était un **bug** (variante mal choisie) → corrigé (B15). Les 5 ci-dessus sont des **features de
+> fond** : chacune mérite un cadrage V12, pas un patch dans la vague de durcissement.
 
 > ✔ *Résolu cette session* : « ctors sur types génériques » (csv `Reader<R>`) — c'était la borne
 > `impl AsRef<Path>` non monomorphisée, corrigée par **B13**.
 
 ## Constat & cadence (honnête)
 
-- Le binder est **solide** et nettement durci : **6 crates réels verts** (whatlang, statrs, chrono,
-  num-bigint, walkdir, csv), **14 trous bouchés**, dont **6 généraux** (B8/B9/B10/B12/B13/B14). Le gate
-  reste VERT à chaque pas.
+- Le binder est **solide** et nettement durci : **7 crates réels verts** (whatlang, statrs, chrono,
+  num-bigint, walkdir, csv, regex), **15 trous bouchés** (B5–B15), dont **6 généraux**
+  (B8/B9/B10/B12/B13/B14). Le gate reste VERT à chaque pas.
 - **« Tous les 80 un par un » reste un grind séquentiel** : chaque crate peut révéler un bug à corriger dans
   `ironc/src` (non parallélisable). Réaliste : **plusieurs sessions**.
 - **Plan** : continuer les feuilles 🟢/🟡 (CLI/données/temps/maths à API simples) ; adresser les 3 murs
