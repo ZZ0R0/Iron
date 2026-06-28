@@ -19,6 +19,8 @@ Tous corrigés en **règles globales** (aucun nom de crate dans le compilo), gat
 | [52800] | Modèle d'io par flux (`Write`/`Read`/`BufRead`, puits/sources d'octets) | 5 (interop) | `flate2` (`GzEncoder<W: Write>`) |
 | [52900] | Interop **serde typé** (derive + de/serialize générique) — *note*, pas encore spec'é | 5 (interop) | `toml` (doc), `jsonwebtoken`, `bincode` |
 | [50500] | Binder des **constantes** publiques d'un crate (`pub const X`) — *gap mineur* | 5 (interop) | `base64` (`STANDARD`) |
+| [30200] | **Retour emprunté lié à l'entrée** (parseurs zéro-copie : `Smf::parse(&buf) -> Smf<'a>`) — la valeur emprunte son entrée ; durée de vie à suivre. *note* | 3 (ownership) | `midly` |
+| [82000] | **Ergonomie des octets** : type `bytes`, `str.encode()/.decode()`, type d'élément d'un itérateur externe (`for b in digest` → `b: u8`), hex. *note* | 8 (stdlib) | `sha2` (hex/PoW), `flate2` |
 
 ## Pourquoi ce sont des frontières (et pas du durcissement)
 

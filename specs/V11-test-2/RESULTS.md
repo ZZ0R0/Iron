@@ -34,6 +34,7 @@ Chaque crate réel a exposé un trou ; tous corrigés sans régresser le gate-v1
 | B21 | **Param déstructuré** (`fn index(&self, (x, y): …)`) → nom non-identifiant → assaini en `argN`. | binder | ✅ |
 | B22 | **Octets `list[u8]`** : un littéral `[104,…]` est `list[i64]` → vers un param `list[u8]`, coercer les éléments (`v.iter().map(|e| *e as u8).collect()`). | lower | ✅ |
 | B23 | **Fn libre en sous-module** (`zstd::bulk::compress`) pathée `zstd::compress` → chemin **public** + dédup ; + les appels de fn libre passent par `extern_arg_to` (coercition). | binder/lower | ✅ |
+| B24 | **Variante d'enum non-référençable** (`case None`/`True`/`False` = littéral Iron, ou non-identifiant) → cassait le parseur `.iri` → **sautée** (le reste de l'enum reste). | binder | ✅ |
 
 **Gains généraux B8/B9/B10/B12/B13/B14** (débloquent des classes entières) :
 - B8 → tout le motif `ctor().unwrap().méthode()` (omniprésent).
@@ -68,6 +69,9 @@ Chaque crate réel a exposé un trou ; tous corrigés sans régresser le gate-v1
 | 07 | TOML | `toml` | 🟡 | `Value.from_str` + `get`/`as_integer` **bindent et chaînent** ; mais `Value::FromStr` parse une **valeur**, pas un **document** `clé=val` (ça, c'est `from_str::<Table>` = serde-générique). |
 | 65 | JWT | `jsonwebtoken` | 🟡 | `Header.new(Algorithm.HS256)` binde ; `encode/decode` exigent des claims **serde** (typé) → hors-portée. |
 | 43 | FFT spectre | `rustfft` | 🟡 | `FftPlanner.new()` binde ; `FftPlanner<T>`/`Complex<T>` **scalaire générique** + `dyn Fft<T>` → **24100**. |
+| 10 | Parseur XML | `quick-xml` | 🟡 | `Reader.from_str` binde ; lecture = **lecteur d'événements** (io, 52800). |
+| 68 | Générateur PDF | `printpdf` | 🟡 | **B24** : le `.iri` (2320 items) parse ; mais `save(writer)` = **Write** (io, 52800). |
+| 45 | Parseur MIDI | `midly` | 🔴 | `Smf::parse(&buf)` rend un `Smf<'a>` qui **emprunte** ses octets d'entrée → durée de vie liée à l'entrée, hors sémantique par valeur → **[30200]** (V12). |
 | — | (sanity, hors-80) | `uuid` | ✅ **vert** | `Uuid.nil().to_string()` → `00000000-…`. |
 | 51 | Algèbre linéaire | `nalgebra` | 🟡 | `Vector3<T>` générique sur le **scalaire** → `Vector3.new` non bindé. **Même limite que geo → [24100]** (V12). |
 | 67 | Distances géo | `geo` | 🟡 | **Façade corrigée** (52700, binding multi-crate) → `Point` porte ses méthodes geo_types. **Mais** `Point<T: CoordNum>` est générique sur le **scalaire** en entrée *et* en sortie (`new(x: T)`, `distance() -> T`) → monomorphiser `T`→`f64` exigerait de reconnaître `CoordNum`/`Num` (traits de crate) : **interdit par la règle globale**. Limite dure. |
