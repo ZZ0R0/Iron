@@ -994,6 +994,14 @@ impl Cx<'_> {
             // `s + c` gérés pour les `char` (cf. ord/Binary). Python n'a pas de type char : `c` se comporte
             // comme une chaîne d'un caractère.
             Type::Str => quote! { #it.chars() },
+            // type externe **itérable** (`impl IntoIterator` : `WalkDir`, lecteurs…) → itération **par
+            // valeur** (la boucle `for` Rust appelle `into_iter`) ; les externes non itérables gardent
+            // `.iter()` (fallback, échouera proprement si pas itérable non plus).
+            Type::Extern(n)
+                if self.bindings.etypes.get(&n).is_some_and(|et| et.methods.iter().any(|(m, _)| m == "into_iter")) =>
+            {
+                quote! { #it }
+            }
             _ => quote! { #it.iter().cloned() },
         }
     }
