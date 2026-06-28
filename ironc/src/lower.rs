@@ -193,7 +193,10 @@ fn body_has_yield(body: &[Stmt]) -> bool {
 fn param_reassigned(name: &str, body: &[Stmt]) -> bool {
     body.iter().any(|s| match &s.kind {
         StmtKind::Let { name: n, .. } => n == name,
-        StmtKind::Assign { target, .. } => matches!(&target.kind, ExprKind::Var(n) if n == name),
+        // réassignation OU mutation d'élément/champ : `p = …`, `p[i] = …`, `p.f = …` → le param doit être `mut`.
+        StmtKind::Assign { target, .. } => target_base_var(target) == Some(name),
+        // mutation par méthode : `p.append(x)`, `p.sort()`, … → idem `mut`.
+        StmtKind::ExprStmt(e) => expr_mutates_var(e, name),
         StmtKind::If { then, elifs, els, .. } => {
             param_reassigned(name, then)
                 || elifs.iter().any(|(_, b)| param_reassigned(name, b))
@@ -206,6 +209,27 @@ fn param_reassigned(name: &str, body: &[Stmt]) -> bool {
         }
         _ => false,
     })
+}
+
+/// Variable de **base** d'une lvalue (`p` dans `p`, `p[i]`, `p.f`, `p[i].f`…).
+fn target_base_var(e: &Expr) -> Option<&str> {
+    match &e.kind {
+        ExprKind::Var(n) => Some(n),
+        ExprKind::Index { base, .. } | ExprKind::Field { base, .. } => target_base_var(base),
+        _ => None,
+    }
+}
+
+/// `name.append(x)` / `.sort()` / … (méthode mutante sur la variable `name`).
+fn expr_mutates_var(e: &Expr, name: &str) -> bool {
+    if let ExprKind::Call { callee, .. } = &e.kind {
+        if let ExprKind::Field { base, name: m } = &callee.kind {
+            if is_mutating_method(m) {
+                return target_base_var(base) == Some(name);
+            }
+        }
+    }
+    false
 }
 
 /// Une méthode mute-t-elle `self` → `&mut self` : affectation à `self.champ`/`self[i]` OU appel d'une
@@ -1126,6 +1150,11 @@ impl Cx<'_> {
                     {
                         let r = self.value(rhs);
                         quote! { format!("{}{}", #l, #r) }
+                    }
+                    // `a + b` sur listes (Python) : concaténation → nouvelle liste.
+                    BinOp::Add if matches!(self.type_of(lhs), Type::List(_)) => {
+                        let r = self.value(rhs);
+                        quote! { { let mut __v = #l; __v.extend(#r); __v } }
                     }
                     // comparaisons : `char` vs littéral chaîne d'1 caractère → comparaison de `char` (rapide).
                     BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {

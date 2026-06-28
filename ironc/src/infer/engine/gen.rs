@@ -444,6 +444,13 @@ impl<'a> Gen<'a> {
             {
                 Type::Str
             }
+            // Concaténation de listes (Python `a + b`) : mêmes listes → résultat liste, sans borne `Add`.
+            Add if matches!(self.subst.apply(&tl), Type::List(_))
+                || matches!(self.subst.apply(&tr), Type::List(_)) =>
+            {
+                self.eq(tl.clone(), tr, sp);
+                tl
+            }
             Add | Sub | Mul | Div | Rem | Pow | FloorDiv | BitAnd | BitOr | BitXor | Shl | Shr => {
                 self.eq(tl.clone(), tr, sp);
                 let b = match op {
