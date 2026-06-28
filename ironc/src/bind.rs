@@ -454,7 +454,15 @@ fn emit(v: &Json, crate_name: &str, crate_real: &str, versions: &HashMap<String,
                 .filter_map(|x| x.as_u64())
                 .filter_map(|vid| index.get(&vid.to_string()))
                 .filter(|vm| vm["inner"]["variant"]["kind"].as_str() == Some("plain"))
-                .filter_map(|vm| vm["name"].as_str().map(str::to_string))
+                .filter_map(|vm| vm["name"].as_str())
+                // variante **non référençable** depuis Iron (nom = mot-clé/littéral `None`/`True`, ou
+                // non-identifiant) → sautée, sinon le `.iri` ne parse pas (B24). Le reste de l'enum reste OK.
+                .filter(|n| {
+                    !is_iron_keyword(n)
+                        && n.chars().next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+                        && n.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                })
+                .map(str::to_string)
                 .collect();
             if !vs.is_empty() {
                 enum_variants.insert(tyname.clone(), vs);
@@ -604,6 +612,8 @@ fn is_iron_keyword(name: &str) -> bool {
             | "continue" | "raise" | "try" | "except" | "with" | "lambda" | "yield" | "async"
             | "await" | "true" | "false" | "none" | "self" | "enum" | "trait" | "impl" | "struct"
             | "fn" | "let" | "const" | "type" | "mut" | "inout" | "shared" | "extern"
+            // littéraux Python capitalisés (le lexer en fait des tokens, pas des idents).
+            | "True" | "False" | "None"
     )
 }
 
