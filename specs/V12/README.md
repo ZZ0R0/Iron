@@ -36,6 +36,21 @@
 > Hors-langage (environnement, pas une spec) : `rodio`/`cpal`/`minifb` exigent des **libs système / une
 > fenêtre** au build/run ; le ML est aussi **lourd** (dépendances). Ils relèvent de [24100]/[35000] pour le
 > *langage*, mais ne tourneront de toute façon que dans un environnement équipé.
+>
+> Hors-V12 (tooling) : `bincode` → `rustdoc` « could not document » (flag rustdoc à creuser, pas une capacité).
+
+## À SURVEILLER pendant la passe des « 25 complets » (anticipé, non confirmé)
+
+Les fiches complètes (pas les bouts) toucheront sans doute **plus** que les bouts. À confirmer/ajouter si ça
+bloque vraiment :
+- **[83000] opérations fichier** au-delà de read/write : `rename`/`copy`/`remove` (renommeur #05, dédup #03).
+- **[52600b] construction d'un `Value` dynamique** (et pas que le parser) : `serde_json::json!{}` /
+  `Value::Object.insert` pour le **CSV→JSON** (#06), au-delà de `Value.from_str` déjà ✅.
+- **dépaquetage d'un retour tuple** d'une fn externe (`(c, r) = size()`) — possiblement un **bug** réparable,
+  pas une capacité ; à vérifier.
+
+> Ces trois ne sont **pas** encore prouvés bloquants — je les **confirmerai en écrivant les 25** et les
+> ajouterai (bug → corrigé ; capacité → ici), conformément à la règle.
 
 ## Pourquoi ce sont des capacités (pas du durcissement)
 
