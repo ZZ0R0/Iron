@@ -24,6 +24,8 @@ struct Parser {
     next_id: u32,
     /// Types opaques déclarés `extern type Name = "rust::path"` (50400) : nom → chemin Rust.
     extern_types: Vec<(String, String)>,
+    /// Ascriptions de type des `let` annotés (V12 [52900]) : `NodeId` du Let → type annoté.
+    ascriptions: std::collections::HashMap<NodeId, Type>,
 }
 
 fn same(a: &TokenKind, b: &TokenKind) -> bool {
@@ -57,7 +59,7 @@ fn aug_op(t: &TokenKind) -> Option<BinOp> {
 
 impl Parser {
     fn new(toks: Vec<Token>) -> Self {
-        Parser { toks, i: 0, next_id: 0, extern_types: Vec::new() }
+        Parser { toks, i: 0, next_id: 0, extern_types: Vec::new(), ascriptions: std::collections::HashMap::new() }
     }
 
     fn fresh(&mut self) -> NodeId {
@@ -200,7 +202,14 @@ impl Parser {
             attr_target(it.id, &mut item_attrs, &attrs); // attributs sur fn/struct/enum (51900)
             items.push(it);
         }
-        Ok(Ast { items, imports, modules, extern_types: std::mem::take(&mut self.extern_types), item_attrs })
+        Ok(Ast {
+            items,
+            imports,
+            modules,
+            extern_types: std::mem::take(&mut self.extern_types),
+            item_attrs,
+            ascriptions: std::mem::take(&mut self.ascriptions),
+        })
     }
 
     fn item(&mut self) -> CResult<Item> {
@@ -1058,6 +1067,20 @@ impl Parser {
         let start = self.i;
         let id = self.fresh();
         let lhs = self.expr()?;
+        // Ascription de type (V12 [52900]) : `x: T = value` → `Let` annoté. Le lowering émet `let x: T = …`,
+        // ce qui laisse `rustc` **inférer les génériques** de l'appel (`from_str::<T>`). Désérialisation typée.
+        if let ExprKind::Var(name) = &lhs.kind {
+            if self.is(&TokenKind::Colon) {
+                let name = name.clone();
+                self.adv();
+                let ty = self.parse_type()?;
+                self.expect(&TokenKind::Assign, "`=`")?;
+                let value = self.expr()?;
+                self.stmt_end()?;
+                self.ascriptions.insert(id, ty);
+                return Ok(self.node(start, id, StmtKind::Let { name, value }));
+            }
+        }
         // Déstructuring `a, b = …` (10400) : cible = liste d'identifiants.
         if self.is(&TokenKind::Comma) {
             let mut targets = match &lhs.kind {

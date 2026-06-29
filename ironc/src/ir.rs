@@ -442,6 +442,10 @@ pub struct Ast {
     /// Attributs Rust pass-through (V9, 51900) : `NodeId` de l'item → attributs bruts (`derive(Serialize)`,
     /// `repr(C)`…), émis en `#[…]`. Side-map pour éviter de toucher chaque variante d'`ItemKind`.
     pub item_attrs: std::collections::HashMap<NodeId, Vec<String>>,
+    /// Ascription de type (V12 [52900]) : `NodeId` d'un `Let` → type **annoté** (`cfg: Config = …`). Le
+    /// lowering émet `let cfg: Config = …` → `rustc` infère les génériques de l'appel (ex. `from_str::<Config>`).
+    /// Side-map pour ne pas toucher `StmtKind::Let`.
+    pub ascriptions: std::collections::HashMap<NodeId, Type>,
 }
 
 // ---------------------------------------------------------------- Tables annexes

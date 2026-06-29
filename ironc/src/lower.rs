@@ -70,6 +70,7 @@ pub fn lower(
         param_modes,
         bindings,
         item_attrs: &ast.item_attrs,
+        ascriptions: &ast.ascriptions,
         clean,
         enums,
         structs,
@@ -141,6 +142,8 @@ struct Cx<'a> {
     bindings: &'a Bindings,
     /// Attributs Rust pass-through par item (V9, 51900) : `NodeId` → `derive(Serialize)`/`repr(C)`…
     item_attrs: &'a HashMap<NodeId, Vec<String>>,
+    /// Ascriptions de type (V12 [52900]) : `NodeId` d'un `Let` → type annoté (`cfg: Config = …`).
+    ascriptions: &'a HashMap<NodeId, Type>,
     clean: bool,
     enums: HashSet<String>,
     structs: HashSet<String>,
@@ -426,13 +429,13 @@ impl Cx<'_> {
                     Type::ResultE(_, e) => Some((**e).clone()),
                     _ => None,
                 };
-                let mut locals: Vec<(String, Type)> = Vec::new();
-                collect_locals(body, &param_names, self.types, &mut locals);
+                let mut locals: Vec<(String, Type, bool)> = Vec::new();
+                collect_locals(body, &param_names, self.types, self.ascriptions, &mut locals);
                 let decls: Vec<TokenStream> = locals
                     .iter()
-                    .map(|(n, t)| {
+                    .map(|(n, t, ascribed)| {
                         let id = format_ident!("{}", n);
-                        if is_annotatable(t) {
+                        if *ascribed || is_annotatable(t) {
                             let ty = lower_type(t);
                             quote! { let mut #id: #ty; }
                         } else {
@@ -629,13 +632,13 @@ impl Cx<'_> {
         let param_names: HashSet<String> = m.params.iter().map(|(n, _)| n.clone()).collect();
         self.inout_params =
             m.params.iter().filter_map(|(n, t)| matches!(t, Type::Ref(_)).then(|| n.clone())).collect();
-        let mut locals: Vec<(String, Type)> = Vec::new();
-        collect_locals(body, &param_names, self.types, &mut locals);
+        let mut locals: Vec<(String, Type, bool)> = Vec::new();
+        collect_locals(body, &param_names, self.types, self.ascriptions, &mut locals);
         let decls: Vec<TokenStream> = locals
             .iter()
-            .map(|(n, t)| {
+            .map(|(n, t, ascribed)| {
                 let id = format_ident!("{}", n);
-                if is_annotatable(t) {
+                if *ascribed || is_annotatable(t) {
                     let ty = lower_type(t);
                     quote! { let mut #id: #ty; }
                 } else {
@@ -2256,41 +2259,55 @@ impl Cx<'_> {
 
 /// Collecte (ordonnée, dédupliquée) les variables locales liées par `Let`, avec leur type inféré,
 /// récursivement, hors params. Pour le hoisting (scoping Python) + annotation de type.
-fn collect_locals(body: &[Stmt], params: &HashSet<String>, types: &TypeMap, out: &mut Vec<(String, Type)>) {
+fn collect_locals(
+    body: &[Stmt],
+    params: &HashSet<String>,
+    types: &TypeMap,
+    asc: &HashMap<NodeId, Type>,
+    out: &mut Vec<(String, Type, bool)>,
+) {
     for s in body {
         match &s.kind {
             StmtKind::Let { name, value } => {
-                if !params.contains(name) && !out.iter().any(|(n, _)| n == name) {
-                    let t = types.get(&value.id).cloned().unwrap_or(Type::Unit);
-                    out.push((name.clone(), t));
+                if !params.contains(name) && !out.iter().any(|(n, _, _)| n == name) {
+                    // V12 [52900] : une **ascription** (`cfg: Config = …`) fixe le type déclaré → `rustc`
+                    // infère les génériques de la valeur (`from_str::<Config>`). Le booléen = « ascrit » →
+                    // on **annote toujours** (type explicite). Sinon, type inféré de la valeur (annoté si primitif).
+                    match asc.get(&s.id) {
+                        Some(t) => out.push((name.clone(), t.clone(), true)),
+                        None => {
+                            let t = types.get(&value.id).cloned().unwrap_or(Type::Unit);
+                            out.push((name.clone(), t, false));
+                        }
+                    }
                 }
             }
             StmtKind::If { then, elifs, els, .. } => {
-                collect_locals(then, params, types, out);
+                collect_locals(then, params, types, asc, out);
                 for (_, b) in elifs {
-                    collect_locals(b, params, types, out);
+                    collect_locals(b, params, types, asc, out);
                 }
-                collect_locals(els, params, types, out);
+                collect_locals(els, params, types, asc, out);
             }
             StmtKind::While { body, els, .. } => {
-                collect_locals(body, params, types, out);
-                collect_locals(els, params, types, out);
+                collect_locals(body, params, types, asc, out);
+                collect_locals(els, params, types, asc, out);
             }
             StmtKind::For { body, els, .. } => {
-                collect_locals(body, params, types, out);
-                collect_locals(els, params, types, out);
+                collect_locals(body, params, types, asc, out);
+                collect_locals(els, params, types, asc, out);
             }
             StmtKind::Match { arms, .. } => {
                 for arm in arms {
-                    collect_locals(&arm.body, params, types, out);
+                    collect_locals(&arm.body, params, types, asc, out);
                 }
             }
             StmtKind::TryExcept { body, handler, .. } => {
-                collect_locals(body, params, types, out);
-                collect_locals(handler, params, types, out);
+                collect_locals(body, params, types, asc, out);
+                collect_locals(handler, params, types, asc, out);
             }
             // séquence désucrée (affectation chaînée…) : ses Let sont des locaux de la fonction (hoistés).
-            StmtKind::Seq(ss) => collect_locals(ss, params, types, out),
+            StmtKind::Seq(ss) => collect_locals(ss, params, types, asc, out),
             // PAS de descente dans une `Closure` : ses locaux sont à elle (déclarés dans son corps Rust).
             _ => {}
         }
