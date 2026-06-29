@@ -15,14 +15,26 @@ deux maps.
 - **NEUTRALITÉ PROUVÉE** : `ironc emit` raytracer avant/après → **diff VIDE** (Rust généré identique). 4 suites
   tests + corpus échantillon verts. → Le plumbing passe par le plan **sans régression**.
 
+### Vague 3.1 (partie) — **modes de méthode** (exploitation) — **WIN MAJEUR**
+- `resolve.rs` : analyse **uniquement** les méthodes **inhérentes** (trait_name vide) → les méthodes de trait
+  restent by-value (matchent la signature du trait). `lower.rs` : `lower_method(type_name, m, use_modes)` émet
+  `&T` pour les params ByRef (inhérentes) ; le site d'appel résout la méthode via `TypeMap` → modes `Type::m`
+  → `&arg` (double-`&` absorbé par la déréf-coercition Rust). `use_modes=false` pour trait/dunder (sûr).
+- **Effet (raytracer)** : `fn hit(&self, r: &Ray, …)` ; `obj.hit(&r)` sans `.clone()` ; et **surtout**
+  `Vec3.add/sub/dot/scale(&Vec3)` — plus de clone de `Vec3` par appel (**des millions** sur le hot path).
+- **MESURE** : **0.102 s** vs 0.301 s (V16) vs **0.51 s baseline** → **~5× plus rapide que baseline**. Le Rust
+  émis **compile + run + image valide**. Corpus large vert (semver/nalgebra/num-rational/rust_decimal/arrayvec/roaring).
+- **Résiduel** : **7 clones** dans tout le raytracer, **majoritairement légitimes** (construction de données
+  possédées : `HitRecord` possède son `Material`, `Ray` possède origin/direction). Seul `nearest = rec.clone()`
+  est un candidat **last-use** (HitRecord mineur).
+
 ## 🔲 Reste (greffes sur le socle, à corpus vert)
 | Reste | Spec | Rayon de souffle |
 |---|---|---|
-| **`emit_use` unifié** : un seul point de consommation dans `lower` (args/récepteur/for/retours/champs/captures), subsume `byref_params`/for-élément/`extern_arg` | [40500] | élevé (toute l'émission) |
-| **Modes de méthode** : `hit(&self, r: &Ray)` — exige `byref_params` dans les corps de méthode (absent) | [30800] 3.1 | élevé (toutes les méthodes du corpus) |
-| **Last-use réel** : move/clone intra-expression (retire `.copy()`/`rec.clone()`) | [30800] 3.1 | moyen-élevé |
+| **Last-use réel** : move/clone intra-expression (retire le `rec.clone()` résiduel / le `.copy()` manuel) | [30800] 3.1 | moyen-élevé |
 | **Désucrage opérateurs** : `a+b`→`a.__op__(b)` (parse) | [40500] 3.2 | moyen (garde primitifs) |
-| **Gate raytracer** : clones résiduels éliminés + perf | 4.1 | — |
+| **`emit_use` pleinement unifié** : finir de router tous les sites par un seul point (le site d'appel l'est déjà pour fns+méthodes) | [40500] | moyen |
+| **Gate raytracer final** : clones résiduels (mineurs/légitimes) + perf consignée | 4.1 | — |
 
 ## Verdict honnête
 Le **socle est posé et neutre** (la décision structurante du cadrage : le plan = vérité unique, prouvé sans
