@@ -475,6 +475,19 @@ pub enum ParamMode {
 /// `fn_name → modes de ses paramètres`.
 pub type ParamModes = HashMap<String, Vec<ParamMode>>;
 
+/// [30800] **Plan d'ownership unifié** (V17) : la **seule** sortie du moteur d'ownership, consommée
+/// **uniformément** par le lowering ([40500] `emit_use`). Subsume `OwnershipMap` (dispositions par site de
+/// lecture de valeur) **et** `ParamModes` (modes par fonction/méthode). Étape **neutre** : reproduit
+/// l'existant (diff Rust vide) ; **exploité** ensuite (modes de méthode, last-use réel, opérateurs) — les
+/// améliorations vivent **dans le moteur** (les décisions), pas en règles ad-hoc dispersées.
+#[derive(Debug, Clone, Default)]
+pub struct OwnershipPlan {
+    /// Disposition par site de lecture de valeur (`NodeId` → `Move`/`Clone`/`Borrow`).
+    pub sites: OwnershipMap,
+    /// Modes par clé : **fn libre** (`nom`) ou **méthode** (`"Type::m"`) → modes de ses paramètres.
+    pub params: ParamModes,
+}
+
 /// Mode de réception d'une méthode externe (V8, 50900) : `self`/`&self`/`&mut self`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Recv {

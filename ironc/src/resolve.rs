@@ -44,7 +44,7 @@ fn type_name(t: &Type) -> Option<String> {
     }
 }
 
-pub fn resolve(ast: &Ast, types: &TypeMap) -> (OwnershipMap, ParamModes) {
+pub fn resolve(ast: &Ast, types: &TypeMap) -> OwnershipPlan {
     // 1. Recenser toutes les fonctions analysables : fns libres (clé = nom) + méthodes d'impl (clé = `Type::m`).
     let mut fns: Vec<FnDef> = Vec::new();
     for it in &ast.items {
@@ -118,7 +118,9 @@ pub fn resolve(ast: &Ast, types: &TypeMap) -> (OwnershipMap, ParamModes) {
             _ => {}
         }
     }
-    (own, modes)
+    // [30800] V17 : la **seule** sortie du moteur = l'`OwnershipPlan` (sites = dispositions de move/clone,
+    // params = modes interprocéduraux). Étape **neutre** : mêmes valeurs qu'avant, juste regroupées.
+    OwnershipPlan { sites: own, params: modes }
 }
 
 /// I1 — `move` à la dernière utilisation. Heuristique **single-use** saine : une variable lue **une seule

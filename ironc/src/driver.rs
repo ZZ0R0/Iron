@@ -132,8 +132,9 @@ pub fn compile_with(src: &str, file: FileId, base_dir: &Path, clean: bool) -> CR
     // Diagnostics de forme (V11, DA-3) : champ/méthode inconnus + arité, sur type concret connu, avant
     // `rustc` (filet). Zéro faux-positif (n'agit que sur un `Struct` Iron résolu).
     infer::check_shapes(&ast, &types)?;
-    let (own, param_modes) = resolve::resolve(&ast, &types);
-    let (ts, sm, audit) = lower::lower(&ast, &types, &own, &param_modes, &bindings, clean);
+    // V17 [30800] : le moteur d'ownership produit un `OwnershipPlan` unique (étape neutre : mêmes valeurs).
+    let plan = resolve::resolve(&ast, &types);
+    let (ts, sm, audit) = lower::lower(&ast, &types, &plan.sites, &plan.params, &bindings, clean);
 
     let syn_file: syn::File = syn::parse2(ts)
         .map_err(|e| CompileError::msg(format!("lowering a produit du Rust invalide : {e}")))?;
