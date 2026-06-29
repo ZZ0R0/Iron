@@ -119,9 +119,15 @@ impl Inf<'_> {
     }
     /// Type de retour d'une méthode externe (V8, 21100) : `obj.m(...)` où `obj : Extern(name)`.
     pub(crate) fn extern_method_ret(&self, iron_name: &str, method: &str) -> Option<Type> {
-        self.etypes
-            .get(iron_name)
-            .and_then(|et| et.methods.iter().find(|(n, _)| n == method))
+        let et = self.etypes.get(iron_name)?;
+        if let Some((_, f)) = et.methods.iter().find(|(n, _)| n == method) {
+            return Some(f.ret.clone());
+        }
+        // [50600 C1+] fallback : méthode héritée du type de **base** de l'alias (Vector3 → Matrix).
+        et.base
+            .as_ref()
+            .and_then(|b| self.etypes.get(b))
+            .and_then(|bet| bet.methods.iter().find(|(n, _)| n == method))
             .map(|(_, f)| f.ret.clone())
     }
     pub(crate) fn field_type(&self, struct_name: &str, field: &str) -> Type {

@@ -24,11 +24,16 @@
 - **Run réel** : `Vector3.new(1.0,2.0,3.0)` → un vrai `nalgebra::Vector3` affiché (matrice 3×1). nalgebra :
   `Vector2..6.new`, `Matrix2/3.new` bindés ; couverture **39.7 → 40.8 %** (+103 items). Le mécanisme
   s'applique à **tout** crate à alias-de-monomorphisation (ndarray, rustfft… même pattern).
-- **Limite honnête** : C1 débloque la **construction** (ctors par-dimension, qui étaient le mur). Les
-  **méthodes partagées** (`norm`/`dot`/`+`) vivent sur `Matrix` (générique) → un `Vector3` ne les **hérite
-  pas encore** (`Vector3 ≠ Matrix` dans le typage Iron). Rendre nalgebra *pleinement* utilisable = une règle
-  d'**héritage alias→base** (extension future de C1, non faite) ou de la curation. Donc nalgebra est
-  **constructible**, pas encore *pleinement opérable* — je le dis net.
+### C1+ — héritage alias→base (extension, FAITE) : nalgebra devient *opérable*
+- `ExternType.base: Option<String>` ; bind émet `base Matrix` dans le bloc de l'alias ; infer (`extern_method_ret`)
+  et lower (`try_extern_method`) **retombent sur les méthodes du type de base** quand l'alias ne les a pas.
+  Un `Vector3` EST un `Matrix` en Rust → la méthode compile. **Zéro nom de crate** (lien lu de l'alias).
+- **Run réel** : `Vector3.new(3.0,4.0,0.0).norm()` → **5**. Les méthodes **unaires/scalaires** de Matrix
+  (norm, magnitude, …) sont héritées et marchent.
+- **Limite honnête mesurée** : les méthodes **binaires** prenant le **type de base en argument**
+  (`dot(rhs: Matrix)`, `+`, `cross`) **échouent** (E0308) — le Rust généré n'unifie pas `Vector3` avec le
+  paramètre `Matrix`. Donc nalgebra est **opérable en unaire** (construction + norm/magnitude…), **pas encore
+  en binaire**. Fixer = traiter un arg de type-base comme « accepte tout alias de cette base » (non fait).
 
 ## 🔬 Investigué avec preuves — pas des gains nets comme C1
 

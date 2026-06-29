@@ -528,6 +528,10 @@ pub struct ExternType {
     /// Paramètres de type du type externe (V12, [24000]) : `extern type Point[T] = …` → `["T"]`. Base de la
     /// **substitution** en inférence (`Point[f64]`.méthode rendant `T` → `f64`). Vide = type non générique.
     pub params: Vec<String>,
+    /// [50600 C1+] Type de **base** dont cet alias-nominal hérite les méthodes (`Vector3` → `Matrix`). Quand
+    /// une méthode n'est pas trouvée sur ce type, infer/lower la cherchent sur le type de base (un `Vector3`
+    /// EST un `Matrix` en Rust → `v.norm()` compile). Émis en `.iri` par `base Nom`. `None` = pas de base.
+    pub base: Option<String>,
 }
 
 /// Bindings chargés depuis les `.iri` importés (50200, étendu V8 50900).

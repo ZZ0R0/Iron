@@ -304,6 +304,10 @@ impl P {
                         // `case Variant` (variante d'un enum externe — `Enum.Variant`).
                         self.adv();
                         et.variants.push(self.ident()?);
+                    } else if self.ident_is("base") {
+                        // [50600 C1+] `base Nom` : type de base dont l'alias hérite les méthodes (Vector3 → Matrix).
+                        self.adv();
+                        et.base = Some(self.ident()?);
                     } else {
                         self.expect(&TokenKind::Fn, "`fn`/`field`/`case`")?;
                         let (fname, f) = self.parse_fn(Some(&path))?;

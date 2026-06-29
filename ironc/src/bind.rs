@@ -441,6 +441,9 @@ fn emit(
     // --- POO : méthodes/ctors par type (51100) ---
     let mut method_ids: HashSet<u64> = HashSet::new();
     let mut types: BTreeMap<String, (Vec<String>, Vec<String>)> = BTreeMap::new(); // nom → (ctors, méthodes)
+    // [50600 C1+] alias-nominal → type de **base** dont il hérite les méthodes (Vector3 → Matrix). Émis
+    // en `base Matrix` dans le bloc de l'alias ; infer/lower y retombent pour les méthodes partagées.
+    let mut alias_base: BTreeMap<String, String> = BTreeMap::new();
     let mut type_paths: BTreeMap<String, String> = BTreeMap::new(); // nom court → chemin Rust complet (sous-modules)
     let mut seen: BTreeMap<String, HashSet<String>> = BTreeMap::new(); // dedup noms par type
     // V12 [24000] : paramètres de type d'un type externe générique (`Point<T>` → `["T"]`) → entête
@@ -552,6 +555,8 @@ fn emit(
             alias_shapes.get(&sig_of(&imp["for"], index, 0)).cloned()
         };
         if let Some((aname, _, _)) = &alias_override {
+            // base = nom **pré-override** (la base générique `Matrix`) → l'alias en hérite les méthodes.
+            alias_base.entry(aname.clone()).or_insert_with(|| tyname.clone());
             tyname = aname.clone();
         }
         if is_prim {
@@ -926,6 +931,10 @@ fn emit(
             _ => ty.clone(),
         };
         iri.push_str(&format!("\nextern type {hdr} = \"{typath}\":\n"));
+        // [50600 C1+] héritage alias→base : `Vector3` hérite des méthodes de `Matrix` (un Vector3 EST un Matrix).
+        if let Some(b) = alias_base.get(ty) {
+            iri.push_str(&format!("    base {b}\n"));
+        }
         for (fname, fty) in fields.into_iter().flatten() {
             iri.push_str(&format!("    field {fname}: {fty}\n"));
         }

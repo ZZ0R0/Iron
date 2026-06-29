@@ -2056,7 +2056,17 @@ impl Cx<'_> {
         let ef = match self.bindings.etypes.get(&iron_name) {
             Some(et) => match et.methods.iter().find(|(n, _)| n == name) {
                 Some((_, f)) => f.clone(),
-                None => return None,
+                // [50600 C1+] fallback : méthode héritée du type de **base** (Vector3 → Matrix). Un Vector3
+                // EST un Matrix en Rust → `v.norm()` compile via la résolution de méthode/Deref.
+                None => match et
+                    .base
+                    .as_ref()
+                    .and_then(|b| self.bindings.etypes.get(b))
+                    .and_then(|bet| bet.methods.iter().find(|(n, _)| n == name))
+                {
+                    Some((_, f)) => f.clone(),
+                    None => return None,
+                },
             },
             None => return None,
         };
