@@ -1028,6 +1028,10 @@ impl Cx<'_> {
                 if n == "self" {
                     return quote! { self };
                 }
+                // constante externe (V12 [50500]) `BASE64_STANDARD` → chemin Rust complet.
+                if let Some((_, path)) = self.bindings.consts.get(n) {
+                    return TokenStream::from_str(path).unwrap_or_else(|_| quote! { () });
+                }
                 let id = format_ident!("{}", n);
                 if matches!(self.type_of(e), Type::Ref(_)) {
                     return quote! { (*#id) };
@@ -1488,6 +1492,10 @@ impl Cx<'_> {
         match &e.kind {
             // return d'une variable = dernière utilisation → move (pas de clone).
             ExprKind::Var(n) => {
+                // constante externe (V12 [50500]) → chemin Rust complet (même en position de place/réception).
+                if let Some((_, path)) = self.bindings.consts.get(n) {
+                    return TokenStream::from_str(path).unwrap_or_else(|_| quote! { () });
+                }
                 let id = format_ident!("{}", n);
                 quote! { #id }
             }

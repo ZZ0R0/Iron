@@ -533,6 +533,32 @@ fn emit(v: &Json, crate_name: &str, crate_real: &str, versions: &HashMap<String,
         }
     }
 
+    // --- constantes publiques (V12 [50500]) : `pub const NAME: T` → `extern const NAME: T = "path"` ---
+    let mut consts: Vec<(String, String, String)> = Vec::new(); // (nom, type Iron, chemin Rust)
+    for (id, item) in index {
+        let Some(idn) = id.parse::<u64>().ok() else { continue };
+        if !is_local(paths, idn) || item["visibility"].as_str() != Some("public") {
+            continue;
+        }
+        let Some(c) = item["inner"].get("constant") else { continue };
+        let Some(name) = item["name"].as_str() else { continue };
+        if is_iron_keyword(name) || !name.chars().next().is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_') {
+            continue;
+        }
+        if let Some(t) = map_type(&c["type"], &Generics::new()) {
+            let path = resolve_type_path(Some(idn), name, &public_paths, paths, crate_name);
+            // Nom RÉFÉRENÇABLE = dernier segment du chemin **public** (re-export prélude), p.ex.
+            // `base64::prelude::BASE64_STANDARD` → `BASE64_STANDARD` (et non l'item canonique `STANDARD`,
+            // qui collisionne avec `alphabet::STANDARD`).
+            let pub_name = path.rsplit("::").next().unwrap_or(name).to_string();
+            if pub_name.chars().next().is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_') && !is_iron_keyword(&pub_name) {
+                consts.push((pub_name, t, path));
+            }
+        }
+    }
+    consts.sort();
+    consts.dedup_by(|a, b| a.0 == b.0); // dédup par nom (collisions de re-export)
+
     // --- fermeture du graphe (51200) : déclarer en opaque tout type référencé non déjà typé ---
     let mut referenced: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     for (ctors, methods) in types.values() {
@@ -595,6 +621,13 @@ fn emit(v: &Json, crate_name: &str, crate_real: &str, versions: &HashMap<String,
         iri.push('\n');
         for line in &free {
             iri.push_str(&format!("extern {line}\n")); // fn libre au top-level → `extern fn …`
+        }
+    }
+    // constantes publiques (V12 [50500]) : `extern const NOM: T = "chemin"`.
+    if !consts.is_empty() {
+        iri.push('\n');
+        for (name, ty, path) in &consts {
+            iri.push_str(&format!("extern const {name}: {ty} = \"{path}\"\n"));
         }
     }
     iri.push_str(&format!("\n# {bound} item(s) bindé(s), {skipped} non mappable(s) sauté(s)\n"));

@@ -539,6 +539,9 @@ pub struct Bindings {
     pub crates: Vec<(String, String, Vec<String>)>,
     /// Namespacing (V8, 51500) : nom de module → noms d'items qu'il regroupe.
     pub mods: HashMap<String, Vec<String>>,
+    /// Constantes publiques d'un crate (V12 [50500]) : `NOM` → (type, chemin Rust). `BASE64_STANDARD` →
+    /// (`Extern("…GeneralPurpose")`, `"base64::engine::general_purpose::STANDARD"`). Référencé en `Var`.
+    pub consts: HashMap<String, (Type, String)>,
 }
 
 // ---------------------------------------------------------------- SourceMap (§4.6)

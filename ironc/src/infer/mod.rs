@@ -68,7 +68,7 @@ pub fn infer(ast: &Ast, bindings: &Bindings) -> TypeMap {
     for it in &ast.items {
         if let ItemKind::Fn { params, body, .. } = &it.kind {
             let mut scope: HashMap<String, Type> = params.iter().cloned().collect();
-            let mut cx = Inf { sigs: &sigs, structs: &structs, enums: &enums, methods: &methods_tbl, etypes: &bindings.etypes, tm: &mut tm };
+            let mut cx = Inf { sigs: &sigs, structs: &structs, enums: &enums, methods: &methods_tbl, etypes: &bindings.etypes, consts: &bindings.consts, tm: &mut tm };
             for s in body {
                 local::stmt(&mut cx, s, &mut scope);
             }
@@ -89,7 +89,7 @@ pub fn infer(ast: &Ast, bindings: &Bindings) -> TypeMap {
                 if m.self_param {
                     scope.insert("self".to_string(), Type::Struct(self_ty.clone()));
                 }
-                let mut cx = Inf { sigs: &sigs, structs: &structs, enums: &enums, methods: &methods_tbl, etypes: &bindings.etypes, tm: &mut tm };
+                let mut cx = Inf { sigs: &sigs, structs: &structs, enums: &enums, methods: &methods_tbl, etypes: &bindings.etypes, consts: &bindings.consts, tm: &mut tm };
                 for s in body {
                     local::stmt(&mut cx, s, &mut scope);
                 }
@@ -107,6 +107,8 @@ pub(crate) struct Inf<'a> {
     pub methods: &'a Methods,
     /// Types externes à API (V8, 21100) : nom Iron → `ExternType` (méthodes/ctors).
     pub etypes: &'a HashMap<String, ExternType>,
+    /// Constantes externes (V12 [50500]) : `NOM` → (type, chemin Rust).
+    pub consts: &'a HashMap<String, (Type, String)>,
     pub tm: &'a mut TypeMap,
 }
 

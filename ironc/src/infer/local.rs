@@ -261,7 +261,12 @@ pub(crate) fn expr(cx: &mut Inf, e: &Expr, scope: &Scope) -> Type {
             if n == "none" {
                 Type::Option(Box::new(Type::Unit))
             } else {
-                scope.get(n).cloned().unwrap_or(Type::Unit)
+                // local d'abord ; sinon **constante externe** (V12 [50500]) `BASE64_STANDARD` → son type.
+                scope
+                    .get(n)
+                    .cloned()
+                    .or_else(|| cx.consts.get(n).map(|(t, _)| t.clone()))
+                    .unwrap_or(Type::Unit)
             }
         }
         ExprKind::Unary { op, expr: inner } => {

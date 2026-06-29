@@ -109,8 +109,17 @@ impl P {
                 } else if self.kw("mod") {
                     self.adv();
                     self.parse_mod_decl(&mut b)?;
+                } else if self.kw("const") {
+                    // constante publique (V12 [50500]) : `extern const NOM: T = "chemin"`.
+                    self.adv();
+                    let name = self.ident()?;
+                    self.expect(&TokenKind::Colon, "`:`")?;
+                    let ty = self.parse_type()?;
+                    self.expect(&TokenKind::Assign, "`=`")?;
+                    let path = self.string()?;
+                    b.consts.entry(name).or_insert((ty, path));
                 } else {
-                    return Err(self.err("`extern fn`, `extern type` ou `extern mod` attendu"));
+                    return Err(self.err("`extern fn`, `extern type`, `extern const` ou `extern mod` attendu"));
                 }
             } else if self.kw("crate") {
                 self.adv();
