@@ -124,9 +124,10 @@ struct Sig {
     params: Vec<String>,
     ret: String,
     idioms: Vec<&'static str>,
-    /// V12 [52800] : index d'un paramètre `impl Read`/`BufRead` (source io) — la fn libre est alors émise
-    /// avec un **chemin-closure** qui enveloppe l'argument str dans un `std::io::Cursor`. `None` si aucun.
-    read_param: Option<usize>,
+    /// V12 [52800]/[24200] : params à **envelopper** dans un chemin-closure. `(index, "cursor")` = source io
+    /// `impl Read` → `std::io::Cursor::new(arg)` ; `(index, "array")` = `&[u8; N]` → `(&arg[..]).try_into()`.
+    /// La fn libre/ctor à chemin complet est alors émise comme `(|args| ORIG(wrap(args)…))`.
+    wraps: Vec<(usize, &'static str)>,
 }
 
 /// `id → chemin **public**` en parcourant l'arbre des modules **publics** + les re-exports `pub use`
@@ -793,7 +794,7 @@ fn project(f: &Json, owner: &str, extra_gen: &Generics) -> Option<Sig> {
     let mut recv = None;
     let mut params = Vec::new();
     let mut idioms = Vec::new();
-    let mut read_param: Option<usize> = None;
+    let mut wraps: Vec<(usize, &'static str)> = Vec::new();
     for (i, inp) in inputs.iter().enumerate() {
         let pn = inp[0].as_str().unwrap_or("x");
         let ty = &inp[1];
@@ -815,16 +816,18 @@ fn project(f: &Json, owner: &str, extra_gen: &Generics) -> Option<Sig> {
             pn.to_string()
         };
         match map_type(ty, &gen) {
-            // V12 [52800] : source io → param `str`, mémoriser l'index pour le chemin-closure (un seul supporté).
+            // V12 [52800] : source io → param `str`, enveloppée dans un `Cursor` via le chemin-closure.
             Some(t) if t == "@read" => {
-                if read_param.is_some() {
-                    return None; // deux sources io dans une même fn : non géré → on saute (honnête)
-                }
-                read_param = Some(params.len());
+                wraps.push((params.len(), "cursor"));
                 params.push(format!("{pn}: str"));
             }
-            // `@read` **imbriqué** (`list[@read]`, `(@read, …)`) : non représentable → on saute la fn (honnête).
-            Some(t) if t.contains("@read") => return None,
+            // V12 [24200] : `&[u8; N]` → param `list[u8]`, matérialisée via `(&arg[..]).try_into()`.
+            Some(t) if t == "@arr" => {
+                wraps.push((params.len(), "array"));
+                params.push(format!("{pn}: list[u8]"));
+            }
+            // `@read`/`@arr` **imbriqué** (`list[@read]`…) : non représentable → on saute la fn (honnête).
+            Some(t) if t.contains("@read") || t.contains("@arr") => return None,
             Some(t) => {
                 // param **par valeur** (pas d'emprunt Rust) d'un *handle* (type externe/struct, PascalCase) →
                 // marqué `own` pour que le lowering **ne mette pas** de `&` (ex. `create(spec: WavSpec)`).
@@ -855,12 +858,12 @@ fn project(f: &Json, owner: &str, extra_gen: &Generics) -> Option<Sig> {
     } else {
         map_type(out, &gen)?
     };
-    // `@read` est une sentinelle de **param** (source io) ; en position de retour/imbriquée elle n'a pas de
-    // sens → saute la fn plutôt que d'émettre un `.iri` illisible.
-    if ret.contains("@read") {
+    // `@read`/`@arr` sont des sentinelles de **param** ; en position de retour elles n'ont pas de sens →
+    // saute la fn plutôt que d'émettre un `.iri` illisible.
+    if ret.contains("@read") || ret.contains("@arr") {
         return None;
     }
-    Some(Sig { recv, params, ret, idioms, read_param })
+    Some(Sig { recv, params, ret, idioms, wraps })
 }
 
 fn recv_kind(ty: &Json) -> &'static str {
@@ -916,16 +919,24 @@ fn render(name: &str, sig: &Sig, free_path: Option<&str>) -> String {
     // chemin : fn libre → chemin complet fourni ; méthode → nom court (résolu par la lower) ; ctor → nom court.
     let mut path = free_path.map(|p| p.to_string()).unwrap_or_else(|| name.to_string());
     // V12 [52800] : source io → chemin-closure qui enveloppe l'argument str dans un `Cursor` (fn libre/ctor à
-    // chemin complet). `read("…")` → `(|__a0| gpx::read(std::io::Cursor::new(__a0)))(&*"…")`.
-    if let Some(ri) = sig.read_param {
-        if path.contains("::") {
-            let n = sig.params.len();
-            let names: Vec<String> = (0..n).map(|j| format!("__a{j}")).collect();
-            let call: Vec<String> = (0..n)
-                .map(|j| if j == ri { format!("std::io::Cursor::new({})", names[j]) } else { names[j].clone() })
-                .collect();
-            path = format!("(|{}| {}({}))", names.join(", "), path, call.join(", "));
-        }
+    // chemin complet). `read("…")` → `(|__a0| gpx::read(std::io::Cursor::new(__a0)))(&*"…")` ;
+    // `keyed_hash(k, d)` → `(|__a0, __a1| blake3::keyed_hash((&__a0[..]).try_into().unwrap(), __a1))`.
+    if !sig.wraps.is_empty() && path.contains("::") {
+        let n = sig.params.len();
+        let kind = |j: usize| sig.wraps.iter().find(|(idx, _)| *idx == j).map(|(_, k)| *k);
+        // params de la closure : on **type** un param `array` en `&[u8]` (sinon `try_into`/`[..]` ne s'infèrent
+        // pas sur un param non typé) ; les autres restent inférés par rustc à l'appel.
+        let decl: Vec<String> = (0..n)
+            .map(|j| if kind(j) == Some("array") { format!("__a{j}: &[u8]") } else { format!("__a{j}") })
+            .collect();
+        let call: Vec<String> = (0..n)
+            .map(|j| match kind(j) {
+                Some("cursor") => format!("std::io::Cursor::new(__a{j})"),
+                Some("array") => format!("__a{j}.try_into().unwrap()"),
+                _ => format!("__a{j}"),
+            })
+            .collect();
+        path = format!("(|{}| {}({}))", decl.join(", "), path, call.join(", "));
     }
     let idioms = if sig.idioms.is_empty() {
         String::new()
@@ -1061,6 +1072,13 @@ fn map_type(t: &Json, gen: &Generics) -> Option<String> {
     }
     if let Some(s) = t.get("slice") {
         return map_type(s, gen).map(|x| format!("list[{x}]"));
+    }
+    // tableau de taille fixe `[u8; N]` (V12 [24200]) → sentinelle `@arr` : projeté en `list[u8]` + un
+    // chemin-closure qui matérialise via `(&arg[..]).try_into()` (taille inférée par rustc à l'appel).
+    if let Some(a) = t.get("array") {
+        if a["type"]["primitive"].as_str() == Some("u8") {
+            return Some("@arr".to_string());
+        }
     }
     if let Some(items) = t["tuple"].as_array() {
         let parts: Option<Vec<String>> = items.iter().map(|x| map_type(x, gen)).collect();
