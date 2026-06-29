@@ -52,7 +52,10 @@ pub fn resolve(ast: &Ast, types: &TypeMap) -> OwnershipPlan {
             ItemKind::Fn { name, params, body, .. } => {
                 fns.push(FnDef { key: name.clone(), params, body });
             }
-            ItemKind::Impl { type_name: tn, methods, .. } => {
+            // Méthodes **inhérentes** seulement (trait_name vide) : une méthode de **trait** doit garder la
+            // signature du trait (non analysée) → reste **by-value**. On ne met QUE les inhérentes dans
+            // l'analyse de modes → le site d'appel d'une méthode de trait ne trouve pas de clé → by-value (cohérent).
+            ItemKind::Impl { type_name: tn, trait_name, methods } if trait_name.is_empty() => {
                 for m in methods {
                     if let Some(body) = &m.body {
                         fns.push(FnDef { key: format!("{tn}::{}", m.name), params: &m.params, body });

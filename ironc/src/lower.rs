@@ -520,7 +520,7 @@ impl Cx<'_> {
             }
             ItemKind::Trait { name, methods } => {
                 let tid = format_ident!("{}", name);
-                let ms: Vec<TokenStream> = methods.iter().map(|m| self.lower_method(m)).collect();
+                let ms: Vec<TokenStream> = methods.iter().map(|m| self.lower_method(name, m, false)).collect();
                 // `pub` : un trait privé borné sur une `pub fn` déclenche `private_bounds` (cohérent avec
                 // struct/fn publics).
                 quote! { pub trait #tid { #(#ms)* } }
@@ -540,14 +540,14 @@ impl Cx<'_> {
                             }
                             dunders.push(trait_impl);
                         } else {
-                            normal.push(self.lower_method(m));
+                            normal.push(self.lower_method(type_name, m, true));
                         }
                     }
                     let inherent =
                         if normal.is_empty() { quote! {} } else { quote! { impl #ty { #(#normal)* } } };
                     quote! { #inherent #(#dunders)* }
                 } else {
-                    let ms: Vec<TokenStream> = methods.iter().map(|m| self.lower_method(m)).collect();
+                    let ms: Vec<TokenStream> = methods.iter().map(|m| self.lower_method(type_name, m, false)).collect();
                     // V12 [24300] : trait EXTERNE → chemin Rust complet (`eframe::App`) ; trait Iron → ident nu.
                     let tid = match self.bindings.traits.get(trait_name) {
                         Some(path) => TokenStream::from_str(path).unwrap_or_else(|_| quote! { () }),
@@ -585,17 +585,39 @@ impl Cx<'_> {
         }
     }
 
-    fn lower_method(&mut self, m: &Method) -> TokenStream {
+    fn lower_method(&mut self, type_name: &str, m: &Method, use_modes: bool) -> TokenStream {
+        // [30800] V17 : les méthodes **inhérentes** consomment leurs **modes** (clé `Type::m`) comme les fns
+        // libres — un param seulement lu → `&T` ; le double-`&` au site d'appel est absorbé par la déréf-coercition.
+        // Les méthodes de **trait** (et dunders) restent **par valeur** (`use_modes=false`) : sinon la signature
+        // de l'impl ne matcherait plus celle du trait (non analysée). Conservateur et sûr.
+        let key = format!("{type_name}::{}", m.name);
+        let body_slice: &[Stmt] = m.body.as_deref().unwrap_or(&[]);
         let mid = format_ident!("{}", m.name);
         let ps: Vec<TokenStream> = m
             .params
             .iter()
-            .map(|(n, t)| {
+            .enumerate()
+            .map(|(i, (n, t))| {
                 let pid = format_ident!("{}", n);
                 let ty = lower_type(t);
-                quote! { #pid: #ty }
+                let mut_kw = if param_reassigned(n, body_slice) { quote! { mut } } else { quote! {} };
+                let mode = if use_modes { mode_of(self.param_modes, &key, i) } else { ParamMode::ByValue };
+                match mode {
+                    ParamMode::ByRef => quote! { #pid: &#ty },
+                    ParamMode::ByValue | ParamMode::InOut => quote! { #mut_kw #pid: #ty },
+                }
             })
             .collect();
+        // `byref_params` des params de méthode (le cas étroit `return p.champ` = move-hors-struct).
+        self.byref_params = if use_modes {
+            m.params
+                .iter()
+                .enumerate()
+                .filter_map(|(i, (n, _))| matches!(mode_of(self.param_modes, &key, i), ParamMode::ByRef).then(|| n.clone()))
+                .collect()
+        } else {
+            HashSet::new()
+        };
         // `&mut self` si la méthode mute `self` (ex. `self.value += by`), sinon `&self` (surface Python).
         let self_ts = if m.self_param {
             let mutates = m.body.as_ref().map_or(false, |b| stmts_mutate_self(b));
@@ -733,7 +755,7 @@ impl Cx<'_> {
                 (Some(helper), trait_impl)
             }
             // tout autre dunder béni non encore désucré → méthode inhérente normale (filet : pas d'opérateur).
-            _ => (Some(self.lower_method(m)), quote! {}),
+            _ => (Some(self.lower_method(type_name, m, false)), quote! {}),
         }
     }
 
@@ -1896,6 +1918,10 @@ impl Cx<'_> {
         // appel utilisateur : `&x` ByRef, `&mut x` InOut, valeur sinon ; + args par défaut (surface Python).
         let modes = match &callee.kind {
             ExprKind::Var(name) => self.param_modes.get(name).cloned(),
+            // [30800] V17 : appel de méthode `x.m(...)` → modes via la clé `Type::m` (type du récepteur).
+            ExprKind::Field { base, name } => {
+                type_name_of(&self.type_of(base)).and_then(|tn| self.param_modes.get(&format!("{tn}::{name}")).cloned())
+            }
             _ => None,
         };
         let pad = self.call_padding(callee, args.len());
@@ -2643,6 +2669,16 @@ fn lower_binop(op: BinOp) -> TokenStream {
 /// (sur-approxime la consommation : doute → `false`, on clone) — strictement sûr.
 fn for_var_borrowable(var: &str, body: &[Stmt]) -> bool {
     !body.iter().any(|s| stmt_consumes(var, s))
+}
+
+/// [30800] Nom de type pour la clé de méthode (`obj: Sphere` → `"Sphere"`), comme dans `resolve`.
+fn type_name_of(t: &Type) -> Option<String> {
+    match t {
+        Type::Struct(n) | Type::Enum(n) | Type::Extern(n) | Type::ExternApp(n, _) | Type::App(n, _) => {
+            Some(n.rsplit("::").next().unwrap_or(n).to_string())
+        }
+        _ => None,
+    }
 }
 
 fn stmt_consumes(var: &str, s: &Stmt) -> bool {
