@@ -9,13 +9,17 @@
 > ce sont les frontières cadrées (V12) et les murs durs déclarés. Tout le **durcissement possible** est fait
 > (B5–B26, gate VERT). Soit **~31 projets utilisables** (✅ + 🟡 dont la brique marche) sur 80.
 >
-> **▶ Mise à jour V15 (slice VÉRIFIÉ par run réel, pas une revalidation des 80) :** la fondation à portée
-> connue + C1 (alias→nominal + héritage) + curation deux-couches convertissent, **testés** :
-> **51 nalgebra 🔵→✅** (similarité cosinus 0.707), **61 aes-gcm 🔵→✅** (round-trip via curation),
-> **52 ndarray 🔵→🟡** (binde mais E0308 storage). Nouveau bilan partiel : **26 ✅ · 18 🔵 · 8 🟡 · 28 🟥**
-> → **~33-34 utilisables**. Les autres 🔵 (rustfft, chacha20, geo, smartcore…) sont **probablement
-> améliorés** par les mêmes mécanismes mais **NON re-testés ici** — la revalidation complète des 80 est une
-> passe mécanique restante. Honnêteté : je ne compte que le **mesuré**.
+> **▶ REFONTE + PASSE DE MESURE V15 (corpus remanié, batterie re-jouée — MESURÉ).** Le corpus a été
+> **remanié** : 16 projets **HW-bound supprimés** (GUI/audio/GPU/device/embarqué, non testables headless) et
+> remplacés par 16 crates **exotiques durs** choisis pour **stresser le moteur** (type-level, const-gén.,
+> parseurs). Puis batterie objective : `ironc add` sur les **73 crates uniques** → **72 bindent** (seul
+> `bincode` échoue : rustdoc « could not document », bug outillage). Détail : **PASSE-MESURE-V15** plus bas.
+>
+> **Vérifiés par RUN réel cette session (la vraie métrique d'usage)** : nalgebra (cosinus 0.707), aes-gcm
+> (round-trip, curation), **num-rational** (3/6→1/2), **rust_decimal** (0.1+0.2=0.3), **arrayvec**
+> (`ArrayVec[i64,8]`, const-cap C3 e2e). + les ~24 ✅ historiques (durcissement seulement → conservés).
+> ⚠️ **Couverture ≠ usage** : nalgebra binde 40.8 % de son API mais **marche** (les items utiles sont liés).
+> La couverture mesure la **bindabilité brute**, le run mesure l'**usabilité**.
 
 ## ⚠️ PASSE DE VALIDATION (essais réels, pas inférence) — corrections importantes
 
@@ -269,3 +273,40 @@ Une seule liste, peu importe la « couleur » que je leur avais collée :
 > bute sur des capacités **déjà listées en V12**. Écrire les programmes entiers a fait sortir **4 bugs de
 > binder** (B30 itérateur, B31 collision façade, B32 fs std, B33 alias de type) — **tous corrigés直接**. Aucune
 > capacité de langage non prévue n'a émergé : le cadrage V12 est **complet** pour ce qu'on a essayé.
+
+---
+
+## PASSE-MESURE-V15 (batterie `ironc add` objective sur le corpus remanié)
+
+> **Méthode.** `ironc add <crate>` sur les **73 crates uniques** du corpus (×3 parallèle). Métrique =
+> **couverture** = `items liés / items candidats` (objectif, calculé par la fondation [50500]). **72/73
+> bindent** ; seul **bincode** échoue (`rustdoc` « could not document » — outillage, pas langage).
+> **Rappel : couverture = bindabilité brute, pas usabilité** (nalgebra binde 41 % mais *marche*).
+
+### Couverture par palier (mesurée)
+**🟢 Haute (≥ 75 %) — 26 crates** : sysinfo 92, whatlang 91, walkdir 91, num-bigint 89, chrono 89, csv 87,
+statrs 86, tungstenite 86, indicatif 84, printpdf 84, qrcode 83, tiny-skia 83, **num-rational 83**, rustfft 82,
+**euclid 82**, **rust_decimal 81**, sha2 79, hound 78, **time 78**, quick-xml 78, ureq 77, blake3 77,
+tiny_http 76, jsonwebtoken 76, **fixed 76**, pest 75.
+
+**🟡 Moyenne (50–75 %) — 29 crates** : axum 75, colored 74, dialoguer 73, hickory 72, **arrayvec 72**,
+zstd 72, chrono-tz 71, **roaring 71**, **pulldown-cmark 71**, scraper 71, gpx 71, linfa 70, rapier2d 62,
+serde_json 62, regex 59, **palette 58**, polars 57, image 56, flate2 56, rumqttc 55, candle-core 55, clap 54,
+ndarray 54, **bitvec 54**, rss 52, **indexmap 52**, smartcore 52, **petgraph 51**, chacha20poly1305 50.
+
+**🔴 Basse (< 50 %) — 17 crates** : plotters 48, serde_yaml 46, **smallvec 44**, toml 44, midly 41,
+nalgebra 41, crossterm 41, aes-gcm 41, tract-onnx 41, sled 40, geo 39, teloxide 37, redis 36, rusqlite 32,
+**itertools 32**, **uom 26**, **nom 16**. (En gras = nouveaux exotiques.)
+
+**❌ Échec outillage — 1** : bincode (rustdoc).
+
+### Lecture honnête
+- **Le corpus stresse maintenant le moteur** (objectif de la refonte) : les nouveaux exotiques s'étalent de
+  **82 % (euclid/num-rational)** à **16 % (nom)** — ils **exposent la frontière** du binder (type-level
+  `uom`/`nom`/`itertools` = bas ; génériques scalaires/const = haut).
+- **Vérifiés par RUN (usables, pas juste bindés)** : nalgebra, aes-gcm (curation), num-rational, rust_decimal,
+  arrayvec (const-cap C3) + les ~24 ✅ historiques ≈ **~29 confirmés usables**.
+- **Couverture moyenne (72 OK) ≈ 62 %** — le moteur lie la **majorité** de la surface API même sur des crates
+  durs. Le passage couverture→usable se fait crate par crate (items utiles + parfois curation/ascription).
+- **Reste à faire (mesuré, pas inféré)** : confirmer par run les crates haute-couverture non encore exécutés
+  (euclid, time, fixed, roaring, pulldown-cmark…) — probables ✅ ; curer les bas exotiques si on les veut.
