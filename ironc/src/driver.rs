@@ -102,6 +102,16 @@ pub fn compile_with(src: &str, file: FileId, base_dir: &Path, clean: bool) -> CR
     if has_async && !bindings.crates.iter().any(|(n, _, _)| n == "tokio") {
         bindings.crates.push(("tokio".to_string(), "1".to_string(), vec!["full".to_string()]));
     }
+    // serde typé (V12 [52900]) : si un `@derive(serde::Serialize/Deserialize)` est présent, le crate `serde`
+    // doit être en dep AVEC la feature `derive` (qui fournit la macro de dérivation). Comme tokio pour async.
+    let uses_serde_derive = ast
+        .item_attrs
+        .values()
+        .flatten()
+        .any(|a| a.contains("Serialize") || a.contains("Deserialize"));
+    if uses_serde_derive && !bindings.crates.iter().any(|(n, _, _)| n == "serde") {
+        bindings.crates.push(("serde".to_string(), "1".to_string(), vec!["derive".to_string()]));
+    }
     // V10 (21700+) : moteur d'inférence — résout les types de params/retours non annotés (par contraintes,
     // lit les bindings). Réécrit l'AST avant inférence locale (subsume l'ancienne pré-passe `params`).
     infer::engine::resolve_params(&mut ast, &bindings)?;

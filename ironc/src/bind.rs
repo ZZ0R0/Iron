@@ -335,7 +335,7 @@ fn emit(v: &Json, crate_name: &str, crate_real: &str, versions: &HashMap<String,
                 if ty.is_object() {
                     blanket_self
                         .entry(name.to_string())
-                        .or_insert_with(|| bound_to_iron(&ty["bounds"]).or_else(|| Some(name.to_string())));
+                        .or_insert_with(|| bound_to_iron(&ty["bounds"]).filter(|s| s != "@read").or_else(|| Some(name.to_string())));
                 }
             }
         }
@@ -344,7 +344,9 @@ fn emit(v: &Json, crate_name: &str, crate_real: &str, versions: &HashMap<String,
         for w in imp["generics"]["where_predicates"].as_array().into_iter().flatten() {
             let bp = &w["bound_predicate"];
             if let Some(name) = bp["type"]["generic"].as_str() {
-                if let Some(t) = bound_to_iron(&bp["bounds"]) {
+                // `@read` (sentinelle de param io) ne doit PAS devenir un **paramètre de type** (sinon il fuit
+                // en `StreamDeserializer[@read, T]`) → on garde un type param `Read` comme générique.
+                if let Some(t) = bound_to_iron(&bp["bounds"]).filter(|s| s != "@read") {
                     blanket_self.insert(name.to_string(), Some(t));
                 }
             }
@@ -485,7 +487,7 @@ fn emit(v: &Json, crate_name: &str, crate_real: &str, versions: &HashMap<String,
                 if let Some(name) = p["name"].as_str() {
                     let ty = &p["kind"]["type"];
                     if ty.is_object() {
-                        sgen.insert(name.to_string(), bound_to_iron(&ty["bounds"]).or_else(|| Some(name.to_string())));
+                        sgen.insert(name.to_string(), bound_to_iron(&ty["bounds"]).filter(|s| s != "@read").or_else(|| Some(name.to_string())));
                         sparams.push(name.to_string());
                     }
                 }
@@ -710,10 +712,10 @@ fn project(f: &Json, owner: &str, extra_gen: &Generics) -> Option<Sig> {
         if let Some(name) = p["name"].as_str() {
             let ty = &p["kind"]["type"];
             if ty.is_object() {
-                // Générique **propre à la fonction** (`to_string<T: Serialize>`) : on NE garde PAS (drop si
-                // utilisé), car il n'est pas matérialisable et pollue le `.iri`. Le **suivi** des génériques
-                // concerne les params de **type** (impl/struct → `Point[T]`), gérés via `extra_gen`/blanket_self.
-                gen.insert(name.to_string(), bound_to_iron(&ty["bounds"]));
+                // Générique **propre à la fonction** : drop si non matérialisable, SAUF borne **serde**
+                // (`T: Serialize`/`Deserialize`, V12 [52900]) → gardé générique pour que `to_string`/`from_str`
+                // bindent ; `T` est instancié par l'argument (serialize) ou l'ascription (deserialize).
+                gen.insert(name.to_string(), map_fn_generic(name, &ty["bounds"]));
             }
         }
     }
@@ -723,7 +725,7 @@ fn project(f: &Json, owner: &str, extra_gen: &Generics) -> Option<Sig> {
         let bp = &w["bound_predicate"];
         if let Some(name) = bp["type"]["generic"].as_str() {
             if !matches!(gen.get(name), Some(Some(_))) {
-                gen.insert(name.to_string(), bound_to_iron(&bp["bounds"]));
+                gen.insert(name.to_string(), map_fn_generic(name, &bp["bounds"]));
             }
         }
     }
@@ -761,6 +763,8 @@ fn project(f: &Json, owner: &str, extra_gen: &Generics) -> Option<Sig> {
                 read_param = Some(params.len());
                 params.push(format!("{pn}: str"));
             }
+            // `@read` **imbriqué** (`list[@read]`, `(@read, …)`) : non représentable → on saute la fn (honnête).
+            Some(t) if t.contains("@read") => return None,
             Some(t) => {
                 // param **par valeur** (pas d'emprunt Rust) d'un *handle* (type externe/struct, PascalCase) →
                 // marqué `own` pour que le lowering **ne mette pas** de `&` (ex. `create(spec: WavSpec)`).
@@ -791,6 +795,11 @@ fn project(f: &Json, owner: &str, extra_gen: &Generics) -> Option<Sig> {
     } else {
         map_type(out, &gen)?
     };
+    // `@read` est une sentinelle de **param** (source io) ; en position de retour/imbriquée elle n'a pas de
+    // sens → saute la fn plutôt que d'émettre un `.iri` illisible.
+    if ret.contains("@read") {
+        return None;
+    }
     Some(Sig { recv, params, ret, idioms, read_param })
 }
 
@@ -812,6 +821,24 @@ fn is_self_or_owner(t: &Json, owner: &str) -> bool {
                 .as_str()
                 .map_or(false, |p| p.rsplit("::").next() == Some(owner))
     })
+}
+
+/// Borne **serde** sur un générique (`T: Serialize`/`Deserialize`/`DeserializeOwned`) → V12 [52900].
+fn has_serde_bound(bounds: &Json) -> bool {
+    bounds.as_array().into_iter().flatten().any(|b| {
+        let t = b["trait_bound"]["trait"]["path"].as_str().unwrap_or("");
+        matches!(t.rsplit("::").next().unwrap_or(""), "Serialize" | "Deserialize" | "DeserializeOwned")
+    })
+}
+
+/// Générique **propre à une fonction** → type Iron. Drop (`None`) si non matérialisable, SAUF borne serde →
+/// gardé générique (`Some(name)`) : `to_string`/`from_str` bindent, `T` instancié à l'appel/par ascription.
+fn map_fn_generic(name: &str, bounds: &Json) -> Option<String> {
+    if has_serde_bound(bounds) {
+        Some(name.to_string())
+    } else {
+        bound_to_iron(bounds)
+    }
 }
 
 /// Si `t` est `&T`/`&[T]`, renvoie l'intérieur emprunté.
