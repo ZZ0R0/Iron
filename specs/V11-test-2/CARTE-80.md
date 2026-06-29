@@ -8,6 +8,14 @@
 > **Bilan exact (compté ligne à ligne) : 24 ✅ · 21 🔵 · 7 🟡 · 28 🟥.** Les 🔵/🟥 ne sont **pas** des bugs :
 > ce sont les frontières cadrées (V12) et les murs durs déclarés. Tout le **durcissement possible** est fait
 > (B5–B26, gate VERT). Soit **~31 projets utilisables** (✅ + 🟡 dont la brique marche) sur 80.
+>
+> **▶ Mise à jour V15 (slice VÉRIFIÉ par run réel, pas une revalidation des 80) :** la fondation à portée
+> connue + C1 (alias→nominal + héritage) + curation deux-couches convertissent, **testés** :
+> **51 nalgebra 🔵→✅** (similarité cosinus 0.707), **61 aes-gcm 🔵→✅** (round-trip via curation),
+> **52 ndarray 🔵→🟡** (binde mais E0308 storage). Nouveau bilan partiel : **26 ✅ · 18 🔵 · 8 🟡 · 28 🟥**
+> → **~33-34 utilisables**. Les autres 🔵 (rustfft, chacha20, geo, smartcore…) sont **probablement
+> améliorés** par les mêmes mécanismes mais **NON re-testés ici** — la revalidation complète des 80 est une
+> passe mécanique restante. Honnêteté : je ne compte que le **mesuré**.
 
 ## ⚠️ PASSE DE VALIDATION (essais réels, pas inférence) — corrections importantes
 
@@ -127,8 +135,8 @@
 ## 11. Maths & vectoriel
 | # | Crate | Statut | Base | Note |
 |---|---|:--:|:--:|---|
-| 51 | nalgebra | 🔵 | T | `Vector3<T>` scalaire générique [24100]. |
-| 52 | ndarray | 🔵 | T | `Array2<T>` scalaire générique [24100]. |
+| 51 | nalgebra | ✅ | T | **V15 C1+héritage** : `Vector3.new` (alias→nominal) + `norm`/`dot` (héritées de Matrix). **Programme réel** : similarité cosinus 3D = `0.7071…`. Le mur des dimensions (V13) est brisé. |
+| 52 | ndarray | 🟡 | T | **V15** : `from_vec`/`sum`/`len`/`dot` bindés, MAIS construction en E0308 (storage générique `S` non résolu — pattern `Ix` ≠ `Const<N>` de nalgebra, C1 ne s'applique pas) → **curation requise**. Testé, pas inféré. |
 | 53 | num-bigint | ✅ | T | `30!` exact. |
 | 54 | statrs | ✅ | T | `Beta.new(2,5).mean()`. |
 | 55 | rapier2d | 🔵 | A | physique scalaire-générique + boucle de sim. |
@@ -145,7 +153,7 @@
 ## 13. Crypto & compression
 | # | Crate | Statut | Base | Note |
 |---|---|:--:|:--:|---|
-| 61 | aes-gcm | 🔵 | T | clés `GenericArray<u8, N>` (taille fixe). |
+| 61 | aes-gcm | ✅ | T | **V15 C2 (curation deux-couches)** : `Aes256Gcm.new/encrypt/decrypt` curés (`specs/V15/examples/aes_gcm.iri`). **Round-trip réel** : chiffre 3 o → 19 (3 + tag GCM 16), déchiffre → 3. (Auto-AEAD non généralisable sans casser ndarray → curation, le filet I7-2.) |
 | 62 | chacha20poly1305 | 🔵 | T | clés/nonces taille fixe. |
 | 63 | flate2 | 🔵 | T | modèle io `Write`/`Read` [52800]. |
 | 64 | zstd | ✅ | T | round-trip compress/decompress. |

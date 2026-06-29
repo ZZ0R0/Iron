@@ -1,0 +1,8 @@
+import nalgebra
+
+# Similarité cosinus entre deux vecteurs 3D : dot(a,b) / (|a| * |b|).
+def main():
+    a = Vector3.new(1.0, 0.0, 0.0)
+    b = Vector3.new(1.0, 1.0, 0.0)
+    sim = a.dot(b) / (a.norm() * b.norm())
+    print(sim)

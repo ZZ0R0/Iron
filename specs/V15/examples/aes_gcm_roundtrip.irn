@@ -1,0 +1,18 @@
+import aes_gcm
+
+def run() -> Result[i64]:
+    key = [0 for _ in range(32)]
+    nonce = [0 for _ in range(12)]
+    msg = [104, 105, 33]
+    cipher = Aes256Gcm.new(key)
+    ct = cipher.encrypt(nonce, msg)?
+    pt = cipher.decrypt(nonce, ct)?
+    print(len(ct))
+    return len(pt)
+
+def main():
+    try:
+        n = run()?
+        print(n)
+    except:
+        print("error")
