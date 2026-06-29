@@ -309,8 +309,11 @@ impl P {
                         if f.recv.is_some() {
                             et.methods.push((fname, f));
                         } else {
-                            // constructeur : aussi exposé en fn libre (appel `nom(...)`).
-                            b.fns.insert(fname.clone(), f.clone());
+                            // constructeur : aussi exposé en fn libre (appel `nom(...)`). **or_insert** (B34) :
+                            // ne pas écraser une **vraie fn libre** de même nom (`extern fn`, insert) — un
+                            // `from_str` serde de `toml` doit primer sur le ctor `Datetime::from_str`. Entre
+                            // ctors homonymes, le 1ᵉʳ gagne (dédup stable) ; un `extern fn` ultérieur prime.
+                            b.fns.entry(fname.clone()).or_insert_with(|| f.clone());
                             et.ctors.push((fname, f));
                         }
                     }
