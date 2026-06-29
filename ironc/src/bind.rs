@@ -863,6 +863,13 @@ fn project(f: &Json, owner: &str, extra_gen: &Generics) -> Option<Sig> {
     if ret.contains("@read") || ret.contains("@arr") {
         return None;
     }
+    // V13 [30200] niveau 1 : retour **formateur** emprunté (`DelayedFormat<…>` de chrono `.format()`) — type
+    // `Display`-borné, non-clonable, lié à l'entrée. Idiome `display` → `.to_string()` au lowering, type `str`.
+    // Heuristique bornée par le nom (`…Format…`, cadrage §2) à défaut d'introspecter les impls `Display`.
+    if ret.contains("Format") && ret.chars().next().is_some_and(|c| c.is_ascii_uppercase()) {
+        idioms.push("display");
+        return Some(Sig { recv, params, ret: "str".to_string(), idioms, wraps });
+    }
     Some(Sig { recv, params, ret, idioms, wraps })
 }
 

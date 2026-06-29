@@ -251,7 +251,8 @@ impl P {
                 "clone" => Idiom::Clone,
                 "collect" => Idiom::Collect,
                 "closure" => Idiom::Closure(0),
-                other => return Err(self.err(format!("idiome inconnu `{other}` (builder/clone/collect/closure)"))),
+                "display" => Idiom::Display,
+                other => return Err(self.err(format!("idiome inconnu `{other}` (builder/clone/collect/closure/display)"))),
             });
             if !self.eat(&TokenKind::Comma) {
                 break;

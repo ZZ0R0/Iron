@@ -2096,6 +2096,8 @@ impl Cx<'_> {
                 Idiom::Collect => call = quote! { #call.collect::<Vec<_>>() },
                 Idiom::Builder => {} // `&mut Self` jeté ; la mutation en place a eu lieu
                 Idiom::Closure(_) => {}
+                // V13 [30200] : retour formateur `Display`-borné → chaîne possédée (plus de durée de vie).
+                Idiom::Display => call = quote! { (#call).to_string() },
             }
         }
         // méthode renvoyant un Result du crate → `IronError` unifié (I13).

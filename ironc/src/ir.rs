@@ -488,12 +488,15 @@ pub enum Recv {
 /// - `Clone`   : retour emprunté `&T` → `.clone()`/`.cloned()` (getter, D4 ; warning perf I4).
 /// - `Collect` : retour itérateur → `.collect::<Vec<_>>()` → `list[T]`.
 /// - `Closure(idx)` : le paramètre `idx` est une closure (`Fn`-borné) → lambda Iron.
+/// - `Display` : retour externe `Display`-borné, emprunté/non-clonable (`DelayedFormat<'a>` de chrono) →
+///   `.to_string()` (chaîne possédée, plus de lien de durée de vie). V13 [30200] niveau 1.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Idiom {
     Builder,
     Clone,
     Collect,
     Closure(usize),
+    Display,
 }
 
 /// Fonction Rust externe importée via `.iri` (50200, étendu V8 50900) : signature Iron + chemin Rust.
