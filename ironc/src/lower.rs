@@ -804,7 +804,8 @@ impl Cx<'_> {
                         let i = self.value(idx);
                         match self.type_of(base) {
                             Type::Dict(..) => quote! { #b.insert(#i, #v); },
-                            _ => quote! { #b[(#i) as usize] = #v; },
+                            // index négatif normalisé côté écriture aussi (`xs[-1] = v`).
+                            _ => quote! { #b[{ let __i = (#i) as i64; let __n = #b.len() as i64; (if __i < 0 { __n + __i } else { __i }) as usize }] = #v; },
                         }
                     }
                     // écriture de champ à travers un shared[Struct] (30300) → borrow_mut().
@@ -1124,7 +1125,9 @@ impl Cx<'_> {
                         let __k = (if __i < 0 { __n + __i } else { __i }) as usize;
                         __s.chars().nth(__k).unwrap().to_string()
                     }},
-                    _ => quote! { #b[(#i) as usize] },
+                    // index de liste : normalise l'index **négatif** (Python `xs[-1]`) — sinon `(-1) as usize`
+                    // déborde et panique. Reste une **place** (sémantique copy/ref/lvalue préservée).
+                    _ => quote! { #b[{ let __i = (#i) as i64; let __n = #b.len() as i64; (if __i < 0 { __n + __i } else { __i }) as usize }] },
                 }
             }
             _ => self.value(e),
@@ -1210,6 +1213,15 @@ impl Cx<'_> {
                     BinOp::FloorDiv => {
                         let r = self.value(rhs);
                         quote! { (#l).div_euclid(#r) }
+                    }
+                    // `%` (modulo) : convention **Python = plancher** (signe du diviseur), cohérente avec
+                    // `//`=div_euclid. Le `%` Rust est le reste tronqué (signe du dividende), qui violerait
+                    // `(a//b)*b + (a%b) == a` sur négatifs. On émet la forme **par opérateurs** `((a%b)+b)%b`
+                    // (et non `rem_euclid`, une MÉTHODE qui exigerait un type de récepteur connu → casse
+                    // l'inférence des params de lambda `x % 2`). Vaut pour i64 ET f64 ; opérandes liés une fois.
+                    BinOp::Rem => {
+                        let r = self.value(rhs);
+                        quote! { { let __a = #l; let __b = #r; ((__a % __b) + __b) % __b } }
                     }
                     // `+` sur chaînes/char (Python) : concaténation. Couvre `s + c`/`c + s`/`c + c` (char
                     // d'une boucle `for c in s`) → `format!` (Rust `String + String`/`char + char` échouent).
@@ -1881,13 +1893,24 @@ impl Cx<'_> {
                     let sep = self.value(&args[1]);
                     return quote! { #xs.join((#sep).as_str()) };
                 }
+                // `int(x)` (Python) : depuis une **chaîne** → parse ; depuis un **numérique** (f64/i64/num) →
+                // **troncature** `as i64` (pas un parse de chaîne — sinon E0599 `.trim()` sur f64).
                 "int" if args.len() == 1 => {
-                    let s = self.value(&args[0]);
-                    return quote! { (#s).trim().parse::<i64>().unwrap_or(0) };
+                    let v = self.value(&args[0]);
+                    return if matches!(self.type_of(&args[0]), Type::Str) {
+                        quote! { (#v).trim().parse::<i64>().unwrap_or(0) }
+                    } else {
+                        quote! { ((#v) as i64) }
+                    };
                 }
+                // `float(x)` : depuis une chaîne → parse ; depuis un numérique → promotion `as f64`.
                 "float" if args.len() == 1 => {
-                    let s = self.value(&args[0]);
-                    return quote! { (#s).trim().parse::<f64>().unwrap_or(0.0) };
+                    let v = self.value(&args[0]);
+                    return if matches!(self.type_of(&args[0]), Type::Str) {
+                        quote! { (#v).trim().parse::<f64>().unwrap_or(0.0) }
+                    } else {
+                        quote! { ((#v) as f64) }
+                    };
                 }
                 "round" if args.len() == 1 => {
                     let x = self.value(&args[0]);
