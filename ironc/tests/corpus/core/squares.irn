@@ -1,0 +1,6 @@
+# sortie déterministe pour le tier .sha (empreinte stable du stdout).
+fn main():
+    i = 0
+    while i < 6:
+        print(i * i)
+        i = i + 1

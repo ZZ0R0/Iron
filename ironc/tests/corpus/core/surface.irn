@@ -1,0 +1,25 @@
+# noyau : fn imbriquées · for-else · affectation chaînée · const globale.
+MAX = 100
+GREETING = "salut"
+
+def outer(x):
+    def dbl(y):
+        return y + y
+    return dbl(x) + 1
+
+def scan(xs):
+    for v in xs:
+        if v < 0:
+            print("un negatif")
+            break
+    else:
+        print("tous positifs")
+
+def main():
+    a = b = 5
+    print(a + b)
+    print(outer(10))
+    print(MAX)
+    print(GREETING)
+    scan([1, 2, 3])
+    scan([1, -2, 3])

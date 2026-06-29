@@ -1,0 +1,1 @@
+Tier compile : preuve que le lowering struct + accès/mutation de champ produit du Rust valide (I2, source-map). Sans exécution.

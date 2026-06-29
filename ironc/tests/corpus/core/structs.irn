@@ -1,0 +1,12 @@
+struct Point:
+    x: i64
+    y: i64
+
+fn norm2(p: Point) -> i64:
+    return p.x * p.x + p.y * p.y
+
+fn main():
+    p = Point(x=3, y=4)
+    print(norm2(p))
+    p.x = 5
+    print(p.x)

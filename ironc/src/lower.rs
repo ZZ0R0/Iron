@@ -1031,8 +1031,14 @@ impl Cx<'_> {
             // via le blanket `IntoIterator for I: Iterator`). Un externe non itérable échouera proprement.
             // type externe (opaque OU générique appliqué, V12) → itération par valeur (`into_iter`).
             Type::Extern(_) | Type::ExternApp(_, _) => quote! { #it },
-            // [30500 §1 corollaire] corps read-only de la variable de boucle → **élément emprunté**
-            // (`for x in xs.iter()`, `x: &T`) au lieu de cloner chaque élément. Sinon clone-fallback (sûr).
+            // élément **Copy scalaire** (i64/f64/bool/char/num élargi) → itération **par valeur**
+            // (`.iter().copied()`) : copier un scalaire est gratuit (pas d'alloc, aucun warning I4) et la
+            // variable s'utilise en position-valeur (`v < 0`, `v + 1`) **sans** déréférencement. Emprunter
+            // (`&i64`) ne gagnerait rien et casserait l'arithmétique/comparaison (`&i64 < i64` → E0308).
+            // Prime donc sur le drapeau `borrow`.
+            Type::List(e) | Type::Set(e) if is_copy_scalar(&e) => quote! { #it.iter().copied() },
+            // [30500 §1 corollaire] corps read-only de la variable de boucle (type **non-Copy**) →
+            // **élément emprunté** (`for x in xs.iter()`, `x: &T`) au lieu de cloner. Sinon clone-fallback.
             _ if borrow => quote! { #it.iter() },
             _ => quote! { #it.iter().cloned() },
         }
@@ -2669,6 +2675,14 @@ fn lower_binop(op: BinOp) -> TokenStream {
 /// (sur-approxime la consommation : doute → `false`, on clone) — strictement sûr.
 fn for_var_borrowable(var: &str, body: &[Stmt]) -> bool {
     !body.iter().any(|s| stmt_consumes(var, s))
+}
+
+/// Type **Copy** scalaire : la copie est gratuite (pas d'allocation). L'itération par valeur d'une
+/// collection de tels éléments est donc libre (I4 — aucun warning) et la variable de boucle s'utilise
+/// en position-valeur (arithmétique, comparaison) sans déréférencement. Les `struct`/`enum` Iron ne
+/// dérivent pas `Copy` : ils restent sur le chemin emprunt/clone.
+fn is_copy_scalar(t: &Type) -> bool {
+    matches!(t, Type::I64 | Type::F64 | Type::Bool | Type::Char | Type::Num(_))
 }
 
 /// [30800] Nom de type pour la clé de méthode (`obj: Sphere` → `"Sphere"`), comme dans `resolve`.
