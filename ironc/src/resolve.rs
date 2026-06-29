@@ -8,16 +8,80 @@
 use crate::ir::*;
 use std::collections::HashSet;
 
-pub fn resolve(ast: &Ast, _types: &TypeMap) -> (OwnershipMap, ParamModes) {
-    let mut modes = ParamModes::new();
-    let mut own = OwnershipMap::new();
+/// [30500] Une fonction analysable (fn libre OU méthode d'impl) pour l'analyse interprocédurale.
+struct FnDef<'a> {
+    key: String, // nom (fn libre) ou `"Type::méthode"`
+    params: &'a [(String, Type)],
+    body: &'a [Stmt],
+}
+
+/// [30500] Contexte de l'escape analysis **interprocédurale** : les modes **courants** (état du point fixe)
+/// + la `TypeMap` (pour résoudre un appel de méthode `x.m()` → `Type::m`). Le cœur de V16 : un argument passé
+/// à une position **`ByRef` du callee** n'échappe PAS (alors qu'avant tout argument échappait, hors `print`/`len`).
+struct EscapeCtx<'a> {
+    modes: &'a ParamModes,
+    types: &'a TypeMap,
+}
+
+/// Mode **initial optimiste** (I2) : non-`Copy` et non-`Ref` → `ByRef` (sera rétrogradé sur échappement réel).
+fn init_mode(t: &Type) -> ParamMode {
+    if matches!(t, Type::Ref(_)) {
+        ParamMode::InOut
+    } else if is_copy(t) {
+        ParamMode::ByValue
+    } else {
+        ParamMode::ByRef
+    }
+}
+
+/// Nom de type pour la clé de méthode (`obj.m()` où `obj: Sphere` → `"Sphere::m"`).
+fn type_name(t: &Type) -> Option<String> {
+    match t {
+        Type::Struct(n) | Type::Enum(n) | Type::Extern(n) | Type::ExternApp(n, _) | Type::App(n, _) => {
+            Some(n.rsplit("::").next().unwrap_or(n).to_string())
+        }
+        _ => None,
+    }
+}
+
+pub fn resolve(ast: &Ast, types: &TypeMap) -> (OwnershipMap, ParamModes) {
+    // 1. Recenser toutes les fonctions analysables : fns libres (clé = nom) + méthodes d'impl (clé = `Type::m`).
+    let mut fns: Vec<FnDef> = Vec::new();
     for it in &ast.items {
-        if let ItemKind::Fn { name, params, body, .. } = &it.kind {
-            let mut escaped: HashSet<String> = HashSet::new();
-            for s in body {
-                visit_stmt(s, &mut escaped);
+        match &it.kind {
+            ItemKind::Fn { name, params, body, .. } => {
+                fns.push(FnDef { key: name.clone(), params, body });
             }
-            let pm = params
+            ItemKind::Impl { type_name: tn, methods, .. } => {
+                for m in methods {
+                    if let Some(body) = &m.body {
+                        fns.push(FnDef { key: format!("{tn}::{}", m.name), params: &m.params, body });
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // 2. Init optimiste : tout param non-`Copy`/non-`Ref` démarre `ByRef`.
+    let mut modes: ParamModes = ParamModes::new();
+    for f in &fns {
+        modes.insert(f.key.clone(), f.params.iter().map(|(_, t)| init_mode(t)).collect());
+    }
+
+    // 3. Point fixe — **rétrogradation monotone** `ByRef → ByValue` (uniquement), donc **terminaison garantie**
+    //    (même en récursion mutuelle `ray_color`↔`shade`). À chaque tour, on recalcule l'ensemble `escaped` de
+    //    chaque fonction *avec les modes courants* : un argument à une position `ByRef` du callee n'échappe pas.
+    loop {
+        let mut changed = false;
+        for f in &fns {
+            let mut escaped: HashSet<String> = HashSet::new();
+            let ctx = EscapeCtx { modes: &modes, types };
+            for s in f.body {
+                walk_stmt(s, &ctx, &mut escaped);
+            }
+            let pm: Vec<ParamMode> = f
+                .params
                 .iter()
                 .map(|(n, t)| {
                     if matches!(t, Type::Ref(_)) {
@@ -29,15 +93,29 @@ pub fn resolve(ast: &Ast, _types: &TypeMap) -> (OwnershipMap, ParamModes) {
                     }
                 })
                 .collect();
-            modes.insert(name.clone(), pm);
-            compute_moves(body, &mut own);
+            if modes.get(&f.key) != Some(&pm) {
+                modes.insert(f.key.clone(), pm);
+                changed = true;
+            }
         }
-        if let ItemKind::Impl { methods, .. } = &it.kind {
-            for m in methods {
-                if let Some(body) = &m.body {
-                    compute_moves(body, &mut own);
+        if !changed {
+            break;
+        }
+    }
+
+    // 4. Dispositions de move (OwnershipMap) — heuristique single-use **inchangée en vague 1** (améliorée en 2.1).
+    let mut own = OwnershipMap::new();
+    for it in &ast.items {
+        match &it.kind {
+            ItemKind::Fn { body, .. } => compute_moves(body, &mut own),
+            ItemKind::Impl { methods, .. } => {
+                for m in methods {
+                    if let Some(body) = &m.body {
+                        compute_moves(body, &mut own);
+                    }
                 }
             }
+            _ => {}
         }
     }
     (own, modes)
@@ -203,135 +281,154 @@ enum Pos {
     Borrow,
 }
 
-fn visit_stmt(s: &Stmt, esc: &mut HashSet<String>) {
+fn walk_stmt(s: &Stmt, ctx: &EscapeCtx, esc: &mut HashSet<String>) {
     match &s.kind {
-        StmtKind::Let { value, .. } | StmtKind::Yield(value) => visit(value, Pos::Value, esc),
+        StmtKind::Let { value, .. } | StmtKind::Yield(value) => walk(value, Pos::Value, ctx, esc),
         StmtKind::Assign { target, value } => {
-            visit(target, Pos::Borrow, esc);
-            visit(value, Pos::Value, esc);
+            walk(target, Pos::Borrow, ctx, esc);
+            walk(value, Pos::Value, ctx, esc);
         }
         StmtKind::If { cond, then, elifs, els } => {
-            visit(cond, Pos::Borrow, esc);
-            then.iter().for_each(|s| visit_stmt(s, esc));
+            walk(cond, Pos::Borrow, ctx, esc);
+            then.iter().for_each(|s| walk_stmt(s, ctx, esc));
             for (c, b) in elifs {
-                visit(c, Pos::Borrow, esc);
-                b.iter().for_each(|s| visit_stmt(s, esc));
+                walk(c, Pos::Borrow, ctx, esc);
+                b.iter().for_each(|s| walk_stmt(s, ctx, esc));
             }
-            els.iter().for_each(|s| visit_stmt(s, esc));
+            els.iter().for_each(|s| walk_stmt(s, ctx, esc));
         }
         StmtKind::While { cond, body, els } => {
-            visit(cond, Pos::Borrow, esc);
-            body.iter().chain(els).for_each(|s| visit_stmt(s, esc));
+            walk(cond, Pos::Borrow, ctx, esc);
+            body.iter().chain(els).for_each(|s| walk_stmt(s, ctx, esc));
         }
         StmtKind::For { iter, body, els, .. } => {
-            visit(iter, Pos::Borrow, esc); // `for x in p` → p.iter() emprunte
-            body.iter().chain(els).for_each(|s| visit_stmt(s, esc));
+            walk(iter, Pos::Borrow, ctx, esc); // `for x in p` → p.iter() emprunte
+            body.iter().chain(els).for_each(|s| walk_stmt(s, ctx, esc));
         }
         StmtKind::Return { value } => {
             if let Some(e) = value {
-                // DX2 (30400) : `return p.a` → `p` doit être **possédé** (ByValue) pour permettre le
-                // move-hors-struct (sinon clone + borne Clone). On marque sa base comme échappante.
+                // DX2 (30400) : `return p.a` → `p` doit être **possédé** (ByValue) pour le move-hors-struct.
                 if let ExprKind::Field { base, .. } = &e.kind {
                     if let ExprKind::Var(n) = &base.kind {
                         esc.insert(n.clone());
                     }
                 }
-                visit(e, Pos::Value, esc);
+                walk(e, Pos::Value, ctx, esc);
             }
         }
-        StmtKind::ExprStmt(e) => visit(e, Pos::Value, esc),
+        StmtKind::ExprStmt(e) => walk(e, Pos::Value, ctx, esc),
         StmtKind::Match { scrutinee, arms } => {
-            visit(scrutinee, Pos::Value, esc);
+            walk(scrutinee, Pos::Value, ctx, esc);
             for arm in arms {
                 if let Some(g) = &arm.guard {
-                    visit(g, Pos::Value, esc);
+                    walk(g, Pos::Value, ctx, esc);
                 }
                 for s in &arm.body {
-                    visit_stmt(s, esc);
+                    walk_stmt(s, ctx, esc);
                 }
             }
         }
         StmtKind::Assert { cond, msg } => {
-            visit(cond, Pos::Borrow, esc);
+            walk(cond, Pos::Borrow, ctx, esc);
             if let Some(m) = msg {
-                visit(m, Pos::Borrow, esc);
+                walk(m, Pos::Borrow, ctx, esc);
             }
         }
-        StmtKind::Destructure { value, .. } => visit(value, Pos::Value, esc),
+        StmtKind::Destructure { value, .. } => walk(value, Pos::Value, ctx, esc),
         StmtKind::TryExcept { body, handler, .. } => {
-            body.iter().for_each(|s| visit_stmt(s, esc));
-            handler.iter().for_each(|s| visit_stmt(s, esc));
+            body.iter().for_each(|s| walk_stmt(s, ctx, esc));
+            handler.iter().for_each(|s| walk_stmt(s, ctx, esc));
         }
-        StmtKind::Raise { value } => visit(value, Pos::Value, esc),
-        StmtKind::Seq(ss) => ss.iter().for_each(|s| visit_stmt(s, esc)),
+        StmtKind::Raise { value } => walk(value, Pos::Value, ctx, esc),
+        StmtKind::Seq(ss) => ss.iter().for_each(|s| walk_stmt(s, ctx, esc)),
         StmtKind::Break | StmtKind::Continue | StmtKind::Pass | StmtKind::RustBlock(_) => {}
     }
 }
 
-fn visit(e: &Expr, pos: Pos, esc: &mut HashSet<String>) {
+fn walk(e: &Expr, pos: Pos, ctx: &EscapeCtx, esc: &mut HashSet<String>) {
     match &e.kind {
         ExprKind::Var(n) => {
             if pos == Pos::Value {
                 esc.insert(n.clone()); // consommé entier → s'échappe
             }
         }
-        ExprKind::Field { base, .. } => visit(base, Pos::Borrow, esc),
+        ExprKind::Field { base, .. } => walk(base, Pos::Borrow, ctx, esc),
         ExprKind::Index { base, idx } => {
-            visit(base, Pos::Borrow, esc);
-            visit(idx, Pos::Value, esc);
+            walk(base, Pos::Borrow, ctx, esc);
+            walk(idx, Pos::Value, ctx, esc);
         }
-        ExprKind::Unary { expr, .. } => visit(expr, Pos::Value, esc),
+        ExprKind::Unary { expr, .. } => walk(expr, Pos::Value, ctx, esc),
         ExprKind::Binary { op, lhs, rhs } => {
             let p = match op {
                 BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => Pos::Borrow,
                 _ => Pos::Value,
             };
-            visit(lhs, p, esc);
-            visit(rhs, p, esc);
+            walk(lhs, p, ctx, esc);
+            walk(rhs, p, ctx, esc);
         }
+        // [30500] LE cœur interprocédural : un argument à une position **`ByRef` du callee** n'échappe PAS
+        // (avant : tout argument échappait sauf `print`/`len`). On consulte les modes **courants** du callee.
         ExprKind::Call { callee, args } => {
-            let borrow_arg = matches!(&callee.kind, ExprKind::Var(n) if n == "print" || n == "len");
-            let ap = if borrow_arg { Pos::Borrow } else { Pos::Value };
-            for a in args {
-                visit(a, ap, esc);
+            let callee_modes: Option<Vec<ParamMode>> = match &callee.kind {
+                ExprKind::Var(g) => ctx.modes.get(g).cloned(),
+                ExprKind::Field { base, name } => ctx
+                    .types
+                    .get(&base.id)
+                    .and_then(type_name)
+                    .and_then(|tn| ctx.modes.get(&format!("{tn}::{name}")).cloned()),
+                _ => None,
+            };
+            let borrow_builtin = matches!(&callee.kind, ExprKind::Var(g) if g == "print" || g == "len");
+            for (j, a) in args.iter().enumerate() {
+                let borrowed = borrow_builtin
+                    || callee_modes
+                        .as_ref()
+                        .and_then(|m| m.get(j))
+                        .map(|md| *md == ParamMode::ByRef)
+                        .unwrap_or(false);
+                walk(a, if borrowed { Pos::Borrow } else { Pos::Value }, ctx, esc);
+            }
+            // Receveur de méthode : emprunté (`scene.world.hit(r)` → `scene` ne s'échappe pas).
+            if let ExprKind::Field { base, .. } = &callee.kind {
+                walk(base, Pos::Borrow, ctx, esc);
             }
         }
-        ExprKind::StructLit { fields, .. } => fields.iter().for_each(|(_, v)| visit(v, Pos::Value, esc)),
-        ExprKind::ListLit { items } => items.iter().for_each(|x| visit(x, Pos::Value, esc)),
+        ExprKind::StructLit { fields, .. } => fields.iter().for_each(|(_, v)| walk(v, Pos::Value, ctx, esc)),
+        ExprKind::ListLit { items } => items.iter().for_each(|x| walk(x, Pos::Value, ctx, esc)),
         ExprKind::DictLit { pairs } => pairs.iter().for_each(|(k, v)| {
-            visit(k, Pos::Value, esc);
-            visit(v, Pos::Value, esc);
+            walk(k, Pos::Value, ctx, esc);
+            walk(v, Pos::Value, ctx, esc);
         }),
-        ExprKind::Try { inner } => visit(inner, Pos::Value, esc),
-        ExprKind::Await(inner) => visit(inner, Pos::Value, esc),
+        ExprKind::Try { inner } => walk(inner, Pos::Value, ctx, esc),
+        ExprKind::Await(inner) => walk(inner, Pos::Value, ctx, esc),
         // Closure (20700) : un param capturé peut s'échapper → position Value (conservateur, sûr).
-        ExprKind::Lambda { body, .. } => visit(body, Pos::Value, esc),
-        ExprKind::Closure { body, .. } => body.iter().for_each(|s| visit_stmt(s, esc)),
-        ExprKind::Tuple(items) => items.iter().for_each(|e| visit(e, Pos::Value, esc)),
+        ExprKind::Lambda { body, .. } => walk(body, Pos::Value, ctx, esc),
+        ExprKind::Closure { body, .. } => body.iter().for_each(|s| walk_stmt(s, ctx, esc)),
+        ExprKind::Tuple(items) => items.iter().for_each(|e| walk(e, Pos::Value, ctx, esc)),
         ExprKind::FString(parts) => parts.iter().for_each(|p| {
             if let FStringPart::Expr(e) = p {
-                visit(e, Pos::Borrow, esc);
+                walk(e, Pos::Borrow, ctx, esc);
             }
         }),
         ExprKind::Comp { body, iter, cond, .. } => {
-            visit(iter, Pos::Value, esc);
-            visit(body, Pos::Value, esc);
+            walk(iter, Pos::Value, ctx, esc);
+            walk(body, Pos::Value, ctx, esc);
             if let Some(c) = cond {
-                visit(c, Pos::Borrow, esc);
+                walk(c, Pos::Borrow, ctx, esc);
             }
         }
         ExprKind::Ternary { cond, then, els } => {
-            visit(cond, Pos::Borrow, esc);
-            visit(then, Pos::Value, esc);
-            visit(els, Pos::Value, esc);
+            walk(cond, Pos::Borrow, ctx, esc);
+            walk(then, Pos::Value, ctx, esc);
+            walk(els, Pos::Value, ctx, esc);
         }
         ExprKind::Slice { base, lo, hi } => {
-            visit(base, Pos::Borrow, esc);
+            walk(base, Pos::Borrow, ctx, esc);
             if let Some(l) = lo {
-                visit(l, Pos::Borrow, esc);
+                walk(l, Pos::Borrow, ctx, esc);
             }
             if let Some(h) = hi {
-                visit(h, Pos::Borrow, esc);
+                walk(h, Pos::Borrow, ctx, esc);
             }
         }
         ExprKind::Lit(_) => {}
