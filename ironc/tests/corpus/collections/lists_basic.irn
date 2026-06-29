@@ -1,0 +1,9 @@
+# Listes : append, index, slice, len, affichage ordonné.
+fn main():
+    xs = [10, 20, 30, 40]
+    xs.append(50)
+    print(len(xs))
+    print(xs[0])
+    print(xs[3])
+    print(xs[1:3])
+    print(xs)

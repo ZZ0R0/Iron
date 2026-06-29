@@ -1,0 +1,17 @@
+# Result + division qui peut échouer : `ok`/`err`, consommés par `match Ok/Err`.
+fn safe_div(a: i64, b: i64) -> Result[i64]:
+    if b == 0:
+        return err("division par zero")
+    return ok(a / b)
+
+fn show(a: i64, b: i64) -> str:
+    match safe_div(a, b):
+        Ok(q):
+            return f"{a}/{b}={q}"
+        Err(_):
+            return f"{a}/{b}: indefini"
+
+fn main():
+    print(show(10, 2))
+    print(show(7, 0))
+    print(show(9, 3))

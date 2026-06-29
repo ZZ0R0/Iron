@@ -1,0 +1,10 @@
+# Set-compréhension (déduplication) + filtrage liste et accumulation.
+fn main():
+    nums = [1, 2, 2, 3, 3, 3, 4, 4, 4, 4]
+    uniq = {n for n in nums}
+    print(len(uniq))
+    print(2 in uniq)
+    print(5 in uniq)
+    evens = [n for n in nums if n % 2 == 0]
+    print(len(evens))
+    print(sum(evens))

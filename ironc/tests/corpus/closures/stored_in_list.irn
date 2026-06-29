@@ -1,0 +1,6 @@
+# Closures stockées dans une liste puis rappelées par index.
+fn main():
+    fs = [lambda x: x + 1, lambda x: x * 2, lambda x: x - 3]
+    print(fs[0](10))
+    print(fs[1](10))
+    print(fs[2](10))

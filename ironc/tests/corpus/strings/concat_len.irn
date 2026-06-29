@@ -1,0 +1,8 @@
+# Concaténation (+ et concat()) et len() en nombre de caractères.
+def main():
+    a = "foo"
+    b = "bar"
+    c = a + b
+    print(c)
+    print(len(c))
+    print(concat("hello ", "world"))

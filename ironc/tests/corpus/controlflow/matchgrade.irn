@@ -1,0 +1,15 @@
+# match/case : or-pattern, range inclusif, joker.
+def grade(n):
+    match n:
+        0 | 1 | 2:
+            return "bas"
+        3..=5:
+            return "moyen"
+        _:
+            return "haut"
+
+def main():
+    print(grade(0))
+    print(grade(2))
+    print(grade(4))
+    print(grade(9))

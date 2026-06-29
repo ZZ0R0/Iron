@@ -1,0 +1,17 @@
+# DÉFAUT (compile-fail) : tuple-destructuring dans une COMPRÉHENSION ne parse pas.
+# Pourtant language.md (l.96) documente `{k: v for k, v in items}` comme du Iron valide,
+# et le `for` au niveau INSTRUCTION supporte bien `for k, v in ...`.
+#
+# ironc: erreur: attendu `in`, trouvé Comma
+#
+# Cause : parse.rs parse_comp() appelle parse_pattern() (UN seul motif) puis exige `in`,
+# alors que for_stmt() collecte des cibles séparées par virgule. Asymétrie for-stmt / for-compréhension.
+#
+# Sortie attendue si corrigé :
+#   two
+#   3
+fn main():
+    pairs = [(1, "one"), (2, "two"), (3, "three")]
+    names = {k: v for k, v in pairs}
+    print(names[2])
+    print(len(names))

@@ -1,0 +1,12 @@
+# for/else : clause else exécutée seulement si pas de break.
+def scan(xs):
+    for v in xs:
+        if v < 0:
+            print("negatif trouve")
+            break
+    else:
+        print("tous positifs")
+
+def main():
+    scan([1, 2, 3])
+    scan([1, -2, 3])

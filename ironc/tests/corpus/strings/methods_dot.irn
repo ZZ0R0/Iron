@@ -1,0 +1,11 @@
+# Méthodes style point : .strip, .lower, .replace, .startswith, .endswith.
+def main():
+    s = "  Hello World  "
+    print(s.strip())
+    print(s.lower())
+    msg = "hello world"
+    print(msg.replace("world", "Iron"))
+    if msg.startswith("hello"):
+        print("starts ok")
+    if msg.endswith("world"):
+        print("ends ok")

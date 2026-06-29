@@ -1,0 +1,11 @@
+# Test de sous-chaîne (in / not in) et comparaison lexicographique.
+def main():
+    s = "hello world"
+    if "world" in s:
+        print("found")
+    if "xyz" not in s:
+        print("absent")
+    a = "apple"
+    b = "banana"
+    if a < b:
+        print("apple first")

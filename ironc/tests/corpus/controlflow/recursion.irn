@@ -1,0 +1,23 @@
+# récursion : fibonacci, pgcd (Euclide), Ackermann (petit).
+def fib(n):
+    if n < 2:
+        return n
+    return fib(n - 1) + fib(n - 2)
+
+def gcd(a, b):
+    if b == 0:
+        return a
+    return gcd(b, a % b)
+
+def ack(m, n):
+    if m == 0:
+        return n + 1
+    if n == 0:
+        return ack(m - 1, 1)
+    return ack(m - 1, ack(m, n - 1))
+
+def main():
+    print(fib(10))
+    print(gcd(48, 36))
+    print(ack(2, 3))
+    print(ack(3, 3))

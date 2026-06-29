@@ -1,0 +1,6 @@
+# Closure qui capture une variable locale de l'environnement.
+fn main():
+    base = 10
+    add_base = lambda x: x + base
+    print(add_base(5))
+    print(add_base(32))

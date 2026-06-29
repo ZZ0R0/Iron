@@ -1,0 +1,29 @@
+# Erreurs typées `Result[T, E]` : E = enum Iron. `raise` lève E, `?` propage E, `try/except e` + match récupère.
+enum ParseError:
+    Empty
+    TooBig
+
+fn parse_small(s: str) -> Result[i64, ParseError]:
+    if s == "":
+        raise ParseError.Empty
+    if s == "999":
+        raise ParseError.TooBig
+    if s == "5":
+        return ok(5)
+    return ok(1)
+
+fn classify(s: str) -> str:
+    try:
+        v = parse_small(s)?
+        return f"ok:{v}"
+    except e:
+        match e:
+            ParseError.Empty:
+                return "vide"
+            ParseError.TooBig:
+                return "trop grand"
+
+fn main():
+    print(classify("5"))
+    print(classify(""))
+    print(classify("999"))

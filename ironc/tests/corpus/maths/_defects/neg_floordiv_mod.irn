@@ -1,0 +1,10 @@
+# DÉFAUT : incohérence // vs % sur opérandes négatifs.
+# // lower en div_euclid (-7 // 2 = -4) mais % lower en reste Rust tronqué (-7 % 2 = -1).
+# Invariant de l'algorithme de division : (a // b) * b + (a % b) DOIT valoir a = -7.
+# ironc imprime -9 (incohérent). Conventions d'arrondi mélangées entre // et %.
+fn main():
+    a = -7
+    b = 2
+    print(a // b)
+    print(a % b)
+    print((a // b) * b + (a % b))

@@ -1,0 +1,3 @@
+# Lambda inline immédiatement appelée (IIFE).
+fn main():
+    print((lambda x: x * 2)(21))

@@ -1,0 +1,12 @@
+# Listes : tri en place (.sort), appartenance (.contains), sorted/reversed, min/max 2-arg.
+fn main():
+    xs = [5, 3, 8, 1, 9, 2]
+    xs.sort()
+    print(xs)
+    print(xs.contains(8))
+    print(xs.contains(7))
+    ys = sorted([4, 2, 7, 1])
+    print(ys)
+    print(reversed(ys))
+    print(max(3, 8))
+    print(min(3, 8))

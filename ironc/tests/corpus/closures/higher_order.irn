@@ -1,0 +1,8 @@
+# Ordre supérieur : passage d'une lambda à une fonction utilisateur apply(f, x).
+fn apply(f, x):
+    return f(x)
+
+fn main():
+    print(apply(lambda n: n + 100, 5))
+    g = lambda n: n * 3
+    print(apply(g, 7))

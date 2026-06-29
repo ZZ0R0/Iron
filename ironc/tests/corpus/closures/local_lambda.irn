@@ -1,0 +1,6 @@
+# Lambda assignée à une variable locale puis appelée.
+fn main():
+    inc = lambda x: x + 1
+    print(inc(41))
+    sq = lambda n: n * n
+    print(sq(7))

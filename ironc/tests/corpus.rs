@@ -59,6 +59,11 @@ fn collect_irn(dir: &Path, out: &mut Vec<PathBuf>) {
     for e in rd.flatten() {
         let p = e.path();
         if p.is_dir() {
+            // Dossiers `_*` (ex. `_defects/`) = **hors garde** : cas en attente de correction,
+            // parqués sur disque pour les vagues de fix, jamais joués (ne cassent pas le vert).
+            if p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with('_')) {
+                continue;
+            }
             collect_irn(&p, out);
         } else if p.extension().is_some_and(|x| x == "irn") {
             out.push(p);

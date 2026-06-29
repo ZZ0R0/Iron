@@ -1,0 +1,9 @@
+# Conversions str(x) et int("..."), réutilisées dans + et len.
+def main():
+    n = 42
+    s = str(n)
+    print(s + "!")
+    print(len(s))
+    x = int("100")
+    y = int("23")
+    print(x + y)

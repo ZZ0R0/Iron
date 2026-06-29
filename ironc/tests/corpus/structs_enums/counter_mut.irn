@@ -1,0 +1,13 @@
+class Counter:
+    value: i64
+    def increment(self):
+        self.value = self.value + 1
+    def add(self, n):
+        self.value = self.value + n
+
+def main():
+    c = Counter(value=0)
+    c.increment()
+    c.increment()
+    c.add(5)
+    print(c.value)

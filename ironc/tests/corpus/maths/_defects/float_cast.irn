@@ -1,0 +1,4 @@
+# DÉFAUT : float(int) attendu = promotion (Python float(5) == 5.0).
+# ironc lower float() en (x).trim().parse::<f64>() -> E0599 no method `trim` on i64.
+fn main():
+    print(float(5))

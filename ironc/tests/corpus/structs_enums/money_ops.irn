@@ -1,0 +1,18 @@
+class Money:
+    cents: i64
+    def __add__(self, o) -> Money:
+        return Money(cents=self.cents + o.cents)
+    def __eq__(self, o) -> bool:
+        return self.cents == o.cents
+    def __lt__(self, o) -> bool:
+        return self.cents < o.cents
+    def __str__(self) -> str:
+        return "money"
+
+def main():
+    total = Money(cents=150) + Money(cents=250)
+    print(total.cents)
+    print(Money(cents=10) == Money(cents=10))
+    print(Money(cents=10) == Money(cents=20))
+    print(Money(cents=10) < Money(cents=20))
+    print(str(Money(cents=99)))

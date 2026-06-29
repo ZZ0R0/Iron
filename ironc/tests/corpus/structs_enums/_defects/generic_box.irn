@@ -1,0 +1,10 @@
+class Box[T]:
+    value: T
+    def get(self) -> T:
+        return self.value
+
+def main():
+    b = Box(value=42)
+    print(b.get())
+    s = Box(value="hi")
+    print(s.value)

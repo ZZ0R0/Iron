@@ -1,0 +1,8 @@
+# Closure retournée par une fonction : appel chaîné adder(10)(5) et forme liée.
+fn adder(n: i64) -> fn(i64) -> i64:
+    return lambda x: x + n
+
+fn main():
+    print(adder(10)(5))
+    add5 = adder(5)
+    print(add5(37))

@@ -1,0 +1,9 @@
+# Closure stockée dans un champ de struct puis rappelée.
+struct Op:
+    f: fn(i64) -> i64
+    label: str
+
+fn main():
+    op = Op(f=lambda x: x * x, label="square")
+    print(op.label)
+    print(op.f(6))

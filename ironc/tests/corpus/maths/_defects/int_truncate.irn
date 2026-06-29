@@ -1,0 +1,4 @@
+# DÉFAUT : int(float) attendu = troncature (Python int(3.7) == 3).
+# ironc lower int() en (x).trim().parse::<i64>() -> E0599 no method `trim` on f64.
+fn main():
+    print(int(3.7))

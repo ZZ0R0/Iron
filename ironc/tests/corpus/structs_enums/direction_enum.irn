@@ -1,0 +1,32 @@
+enum Direction:
+    North
+    South
+    East
+    West
+
+def opposite(d):
+    match d:
+        Direction.North:
+            return Direction.South
+        Direction.South:
+            return Direction.North
+        Direction.East:
+            return Direction.West
+        Direction.West:
+            return Direction.East
+
+def name(d):
+    match d:
+        Direction.North:
+            return "N"
+        Direction.South:
+            return "S"
+        Direction.East:
+            return "E"
+        Direction.West:
+            return "W"
+
+def main():
+    print(name(Direction.North))
+    print(name(opposite(Direction.North)))
+    print(name(opposite(Direction.East)))

@@ -1,0 +1,18 @@
+enum Shape:
+    Circle(i64)
+    Square(i64)
+    Rect(i64, i64)
+
+def area(s):
+    match s:
+        Shape.Circle(r):
+            return r * r * 3
+        Shape.Square(side):
+            return side * side
+        Shape.Rect(w, h):
+            return w * h
+
+def main():
+    print(area(Shape.Circle(2)))
+    print(area(Shape.Square(3)))
+    print(area(Shape.Rect(4, 5)))

@@ -1,0 +1,7 @@
+# f-strings : interpolation de variable, d'expression, accolades littérales.
+def main():
+    name = "Iron"
+    count = 3
+    print(f"{name} has {count} items")
+    print(f"sum = {2 + 3}")
+    print(f"{{braces}}")

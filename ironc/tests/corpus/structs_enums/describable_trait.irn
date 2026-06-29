@@ -1,0 +1,21 @@
+trait Describable:
+    fn name(self) -> str
+    fn describe(self) -> str:
+        return "I am " + self.name()
+
+class Robot(Describable):
+    id: i64
+    def name(self) -> str:
+        return "robot"
+
+class Human(Describable):
+    nick: str
+    def name(self) -> str:
+        return self.nick
+
+def introduce[T: Describable](x: T):
+    print(x.describe())
+
+def main():
+    introduce(Robot(id=1))
+    introduce(Human(nick="Ada"))

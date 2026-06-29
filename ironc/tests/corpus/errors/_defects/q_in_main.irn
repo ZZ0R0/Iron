@@ -1,0 +1,12 @@
+# DÉFAUT (ergonomie connue) : `?` utilisé DIRECTEMENT dans `main`, sans annotation de retour.
+# Attendu côté utilisateur naïf : propage/affiche 42. Réel : `main` n'est PAS auto-promu en Result,
+# le `?` est abaissé en `(expr?)` Rust brut dans `fn main() -> ()` → rustc E0277 remonté depuis le
+# Rust généré (main.rs), au lieu d'un diagnostic Iron-natif renvoyant vers le pattern helper+try/except.
+fn to_int(s: str) -> Result[i64]:
+    if s == "42":
+        return ok(42)
+    return err("pas un entier")
+
+fn main():
+    n = to_int("42")?
+    print(n)

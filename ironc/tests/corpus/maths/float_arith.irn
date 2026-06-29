@@ -1,0 +1,10 @@
+# Arithmétique flottante avec fractions binaires exactes (sortie déterministe).
+fn main():
+    x = 2.5
+    y = 0.5
+    print(x + y)
+    print(x - y)
+    print(x * y)
+    print(x / y)
+    print(x / 4.0)
+    print(x * x)

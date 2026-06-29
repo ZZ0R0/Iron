@@ -1,0 +1,10 @@
+# Option inférée par le FLUX (I11) : `-> i64` qui chute (boucle sans return total) → Option[i64].
+# Consommée deux façons : `print` brut (Debug) et `.unwrap_or` (valeur par défaut).
+fn first_negative(xs: list[i64]) -> i64:
+    for x in xs:
+        if x < 0:
+            return x
+
+fn main():
+    print(first_negative([3, -2, 5]))
+    print(first_negative([1, 2, 3]).unwrap_or(0))

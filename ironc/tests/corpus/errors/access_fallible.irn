@@ -1,0 +1,11 @@
+# Accès indexé qui peut échouer : borne vérifiée par le flux → valeur sentinelle déterministe (pas de panique).
+fn nth_or(xs: list[i64], i: i64, dflt: i64) -> i64:
+    if i >= 0 and i < len(xs):
+        return xs[i]
+    return dflt
+
+fn main():
+    data = [10, 20, 30]
+    print(nth_or(data, 0, -1))
+    print(nth_or(data, 5, -1))
+    print(nth_or(data, 2, -1))

@@ -1,0 +1,11 @@
+# fonctions imbriquées (closures locales).
+def outer(x):
+    def dbl(y):
+        return y + y
+    def inc(z):
+        return z + 1
+    return dbl(x) + inc(x)
+
+def main():
+    print(outer(10))
+    print(outer(0))

@@ -1,0 +1,10 @@
+# Sets : union / intersection / différence (par len) + appartenance (bool).
+fn main():
+    a = {1, 2, 3, 4}
+    b = {3, 4, 5, 6}
+    print(len(union(a, b)))
+    print(len(inter(a, b)))
+    print(len(diff(a, b)))
+    print(3 in a)
+    print(7 in a)
+    print(len(a))

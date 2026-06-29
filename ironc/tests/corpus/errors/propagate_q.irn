@@ -1,0 +1,22 @@
+# Propagation `?` : `sum_two` enchaîne deux `?` ; `main` consomme via le pattern try/except (correct).
+fn to_int(s: str) -> Result[i64]:
+    if s == "42":
+        return ok(42)
+    if s == "7":
+        return ok(7)
+    return err("pas un entier")
+
+fn sum_two(a: str, b: str) -> Result[i64]:
+    x = to_int(a)?
+    y = to_int(b)?
+    return ok(x + y)
+
+fn main():
+    try:
+        print(sum_two("42", "7")?)
+    except:
+        print("invalide")
+    try:
+        print(sum_two("42", "zz")?)
+    except:
+        print("invalide")

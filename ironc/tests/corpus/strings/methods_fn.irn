@@ -1,0 +1,8 @@
+# Builtins fonction : upper, lower, split, join, index_of.
+def main():
+    print(upper("hello"))
+    print(lower("WORLD"))
+    parts = split("a,b,c", ",")
+    print(parts)
+    print(join(parts, "-"))
+    print(index_of("abcdef", "cd"))

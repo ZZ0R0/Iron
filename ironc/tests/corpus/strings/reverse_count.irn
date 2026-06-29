@@ -1,0 +1,12 @@
+# Itération `for c in s` : reconstruction inversée + comptage par comparaison de char.
+def main():
+    s = "hello"
+    rev = ""
+    for c in s:
+        rev = c + rev
+    print(rev)
+    count = 0
+    for c in s:
+        if c == "l":
+            count = count + 1
+    print(count)

@@ -1,0 +1,13 @@
+# boucle while : accumulation puis compte à rebours.
+def main():
+    i = 1
+    total = 0
+    while i <= 5:
+        total = total + i
+        i = i + 1
+    print(total)
+    n = 3
+    while n > 0:
+        print(n)
+        n = n - 1
+    print("liftoff")

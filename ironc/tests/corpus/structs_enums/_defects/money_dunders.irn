@@ -1,0 +1,21 @@
+class Money:
+    cents: i64
+    def __add__(self, o) -> Money:
+        return Money(cents=self.cents + o.cents)
+    def __eq__(self, o) -> bool:
+        return self.cents == o.cents
+    def __lt__(self, o) -> bool:
+        return self.cents < o.cents
+    def __str__(self) -> str:
+        return "money"
+
+def main():
+    a = Money(cents=150)
+    b = Money(cents=250)
+    c = a + b
+    print(c.cents)
+    print(a == b)
+    print(a == a)
+    print(a < b)
+    print(b < a)
+    print(str(a))

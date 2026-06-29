@@ -1,0 +1,7 @@
+# map/filter sur une liste, enchaînés.
+fn main():
+    nums = [1, 2, 3, 4, 5, 6]
+    evens = filter(lambda x: x % 2 == 0, nums)
+    print(evens)
+    doubled = map(lambda x: x * 2, evens)
+    print(doubled)

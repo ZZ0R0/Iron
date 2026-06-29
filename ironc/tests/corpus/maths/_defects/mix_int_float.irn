@@ -1,0 +1,4 @@
+# DÉFAUT : addition int littéral + float littéral. Mathématiquement 2 + 3.5 = 5.5.
+# ironc refuse (type-check) : pas de promotion implicite i64 -> f64 dans une op binaire.
+fn main():
+    print(2 + 3.5)

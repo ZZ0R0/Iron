@@ -1,0 +1,9 @@
+# Dict : accès par clé, len, values (somme), keys (triées), appartenance.
+fn main():
+    scores = {"alice": 90, "bob": 85, "carol": 95}
+    print(scores["bob"])
+    print(len(scores))
+    print(sum(scores.values()))
+    print(sorted(scores.keys()))
+    print("alice" in scores)
+    print("dave" in scores)

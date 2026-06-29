@@ -1,0 +1,19 @@
+# Option présence/absence via flux de contrôle : `some`/`none` construits, `match Some/None` consomme.
+fn lookup(key: str) -> Option[i64]:
+    if key == "a":
+        return some(1)
+    if key == "b":
+        return some(2)
+    return none
+
+fn describe(key: str) -> str:
+    match lookup(key):
+        Some(v):
+            return f"{key}={v}"
+        None:
+            return f"{key} absent"
+
+fn main():
+    print(describe("a"))
+    print(describe("b"))
+    print(describe("z"))

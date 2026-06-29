@@ -1,0 +1,10 @@
+# Mélange int/float via cast explicite to_f64 / to_i64 (pas de promotion implicite).
+fn main():
+    n = 3
+    f = 2.5
+    print(to_f64(n) + f)
+    print(to_f64(n) * f)
+    print(to_f64(n) - f)
+    print(to_i64(f) + n)
+    print(to_f64(n) + 1.5)
+    print(f * to_f64(n) + 0.5)

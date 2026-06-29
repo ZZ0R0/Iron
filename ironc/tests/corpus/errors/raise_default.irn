@@ -1,0 +1,19 @@
+# `raise` d'une exception par défaut (IronError texte) : recouvrée par try/except dans un helper.
+fn checked_age(n: i64) -> Result[i64]:
+    if n < 0:
+        raise "age negatif"
+    if n > 150:
+        raise "age irreel"
+    return ok(n)
+
+fn label(n: i64) -> str:
+    try:
+        v = checked_age(n)?
+        return f"valide:{v}"
+    except:
+        return "invalide"
+
+fn main():
+    print(label(30))
+    print(label(-5))
+    print(label(200))
