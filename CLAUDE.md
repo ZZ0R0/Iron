@@ -151,6 +151,10 @@ du projet — jamais de big-bang d'intégration à la fin.
 > reste agnostique. **Conflit de contenu** (gabarits, invariants, nommage) → `specs/generator.md` prime ;
 > **conflit de méthodologie / pipeline** → ce `CLAUDE.md` prime.
 
+- **📖 Doc usage (agents + humains).** [`docs/README.md`](docs/README.md) = guide d'onboarding **dense** :
+  langage, sémantique, **interop/binding**, **pièges** (`docs/gotchas.md`), curation, CLI, état mesuré.
+  **Au démarrage, si tu dois écrire/lire/binder du Iron, lis ce guide** (surtout `gotchas.md`) plutôt que de
+  re-déduire les subtilités depuis le source. C'est la doc de référence du langage pour l'utilisateur.
 - **Quoi.** Iron = un **langage** (indentation-sensitive, sémantique par valeur) qui **transpile vers
   Rust** et compile via `cargo`. Pas d'OS, pas de runtime lourd, pas de GC.
 - **Contrat de contenu.** `specs/generator.md` possède les **gabarits** de specs/planif, les **invariants
