@@ -1,0 +1,9 @@
+# Fixture [24100] : type externe générique (param T suivi, instancié par l'argument).
+crate num-complex = "0.4"
+
+extern type Complex[T] = "num_complex::Complex":
+    field re: T
+    field im: T
+    fn new(re: own T, im: own T) -> Complex[T] = "num_complex::Complex::new"
+    fn norm(own self) -> T = "norm"
+    fn norm_sqr(self) -> T = "norm_sqr"

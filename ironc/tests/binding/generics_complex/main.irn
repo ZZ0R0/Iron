@@ -1,0 +1,8 @@
+import num_complex
+
+
+def main():
+    c = Complex.new(3.0, 4.0)
+    print(c.norm())
+    print(c.norm_sqr())
+    print(c.re)
