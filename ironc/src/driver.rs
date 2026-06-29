@@ -604,7 +604,7 @@ pub fn manifest_entry() -> Option<String> {
 /// fignoler le Rust à la main, puis `cargo run` dessus. C'est l'esprit `nimcache` : le `.rs` intermédiaire
 /// devient un artefact de premier ordre. Mode via `[iron] emit` (défaut `clean`), emplacement via
 /// `[iron] rust-out`. `--instrumented` force la version avec marqueurs (source-maps).
-pub fn emit(input: &Path, instrumented_flag: bool) -> CResult<()> {
+pub fn emit(input: &Path, instrumented_flag: bool, no_std: bool) -> CResult<()> {
     let src = std::fs::read_to_string(input)
         .map_err(|e| CompileError::msg(format!("lecture {} : {e}", input.display())))?;
     let base_dir = input.parent().unwrap_or(Path::new("."));
@@ -616,6 +616,26 @@ pub fn emit(input: &Path, instrumented_flag: bool) -> CResult<()> {
         Some(d) => base_dir.join(d),
         None => base_dir.join(format!("{stem}-rust")),
     };
+    // V12 [43000] : mode `no_std` (embarqué). On préfixe l'attribut crate `#![no_std]` + `alloc` (qui fournit
+    // `String`/`Vec`/`format!` sans `std`) et on émet une **lib** (pas de `main`/panic-handler à fournir ici —
+    // le binaire final / le HAL les apporte). Iron continue d'émettre **0 `unsafe`** (I2) : l'`unsafe` éventuel
+    // vit dans la crate-HAL. NB : `print` (→ `println!`) est std-only → un programme no_std passe par un HAL.
+    if no_std {
+        // Les attributs internes `#![…]` doivent précéder tout `use`/item. On insère `#![no_std]` en tête, on
+        // conserve les `#![…]` existants, PUIS on ajoute `extern crate alloc` + les imports alloc, PUIS le corps.
+        let lines: Vec<&str> = compiled.rust_src.lines().collect();
+        let split = lines.iter().position(|l| !l.trim_start().starts_with("#![")).unwrap_or(0);
+        let (attrs, body) = lines.split_at(split);
+        let imports = "extern crate alloc;\nuse alloc::string::{String, ToString};\nuse alloc::vec::Vec;\nuse alloc::{vec, format, boxed::Box};";
+        let lib_src = format!("#![no_std]\n{}\n{}\n\n{}", attrs.join("\n"), imports, body.join("\n"));
+        emit_lib(&out_dir, &lib_src, &compiled.crates)
+            .map_err(|e| CompileError::msg(format!("émission lib no_std : {e}")))?;
+        println!(
+            "Rust no_std (lib) : {0}/src/lib.rs\n  → cible embarquée : cd {0} && cargo build [--target <thumb…/xtensa…>]",
+            out_dir.display()
+        );
+        return Ok(());
+    }
     emit_project(&out_dir, &compiled.rust_src, &compiled.crates)
         .map_err(|e| CompileError::msg(format!("émission projet : {e}")))?;
     let mode = if clean { "propre" } else { "instrumenté" };
