@@ -559,6 +559,26 @@ fn emit(v: &Json, crate_name: &str, crate_real: &str, versions: &HashMap<String,
     consts.sort();
     consts.dedup_by(|a, b| a.0 == b.0); // dédup par nom (collisions de re-export)
 
+    // --- traits publics implémentables (V12 [24300]) : `pub trait T` → `extern trait T = "chemin"` ---
+    let mut traits: Vec<(String, String)> = Vec::new();
+    for (id, item) in index {
+        let Some(idn) = id.parse::<u64>().ok() else { continue };
+        if !is_local(paths, idn) || item["visibility"].as_str() != Some("public") {
+            continue;
+        }
+        if !item["inner"]["trait"].is_object() {
+            continue;
+        }
+        let Some(name) = item["name"].as_str() else { continue };
+        if is_iron_keyword(name) || !name.chars().next().is_some_and(|ch| ch.is_ascii_alphabetic()) {
+            continue;
+        }
+        let path = resolve_type_path(Some(idn), name, &public_paths, paths, crate_name);
+        traits.push((name.to_string(), path));
+    }
+    traits.sort();
+    traits.dedup_by(|a, b| a.0 == b.0);
+
     // --- fermeture du graphe (51200) : déclarer en opaque tout type référencé non déjà typé ---
     let mut referenced: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     for (ctors, methods) in types.values() {
@@ -628,6 +648,13 @@ fn emit(v: &Json, crate_name: &str, crate_real: &str, versions: &HashMap<String,
         iri.push('\n');
         for (name, ty, path) in &consts {
             iri.push_str(&format!("extern const {name}: {ty} = \"{path}\"\n"));
+        }
+    }
+    // traits implémentables (V12 [24300]) : `extern trait T = "chemin"`.
+    if !traits.is_empty() {
+        iri.push('\n');
+        for (name, path) in &traits {
+            iri.push_str(&format!("extern trait {name} = \"{path}\"\n"));
         }
     }
     iri.push_str(&format!("\n# {bound} item(s) bindé(s), {skipped} non mappable(s) sauté(s)\n"));

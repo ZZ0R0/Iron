@@ -67,6 +67,7 @@ pub fn compile_with(src: &str, file: FileId, base_dir: &Path, clean: bool) -> CR
             curated.mods.extend(bb.mods);
             curated.crates.extend(bb.crates);
             curated.consts.extend(bb.consts);
+            curated.traits.extend(bb.traits);
             continue;
         }
         if base_dir.join(format!("{m}.irn")).exists() {
@@ -99,6 +100,7 @@ pub fn compile_with(src: &str, file: FileId, base_dir: &Path, clean: bool) -> CR
     bindings.mods.extend(curated.mods);
     bindings.crates.extend(curated.crates);
     bindings.consts.extend(curated.consts);
+    bindings.traits.extend(curated.traits);
     // async (V9, 21200) : si un `async def` est présent, injecter le runtime tokio (D4 : défaut tokio).
     let has_async = ast.items.iter().any(|it| matches!(&it.kind, ItemKind::Fn { is_async: true, .. }));
     if has_async && !bindings.crates.iter().any(|(n, _, _)| n == "tokio") {
@@ -195,6 +197,7 @@ fn load_bindings(imports: &[String], base_dir: &Path) -> CResult<Bindings> {
         b.mods.extend(bb.mods);
         b.crates.extend(bb.crates);
         b.consts.extend(bb.consts);
+        b.traits.extend(bb.traits);
     }
     Ok(b)
 }

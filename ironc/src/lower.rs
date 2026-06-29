@@ -548,7 +548,14 @@ impl Cx<'_> {
                     quote! { #inherent #(#dunders)* }
                 } else {
                     let ms: Vec<TokenStream> = methods.iter().map(|m| self.lower_method(m)).collect();
-                    let tid = format_ident!("{}", trait_name);
+                    // V12 [24300] : trait EXTERNE → chemin Rust complet (`eframe::App`) ; trait Iron → ident nu.
+                    let tid = match self.bindings.traits.get(trait_name) {
+                        Some(path) => TokenStream::from_str(path).unwrap_or_else(|_| quote! { () }),
+                        None => {
+                            let id = format_ident!("{}", trait_name);
+                            quote! { #id }
+                        }
+                    };
                     quote! { impl #tid for #ty { #(#ms)* } }
                 }
             }

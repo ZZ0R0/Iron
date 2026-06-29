@@ -542,6 +542,9 @@ pub struct Bindings {
     /// Constantes publiques d'un crate (V12 [50500]) : `NOM` → (type, chemin Rust). `BASE64_STANDARD` →
     /// (`Extern("…GeneralPurpose")`, `"base64::engine::general_purpose::STANDARD"`). Référencé en `Var`.
     pub consts: HashMap<String, (Type, String)>,
+    /// Traits externes **implémentables** par l'utilisateur (V12 [24300]) : nom court → chemin Rust complet.
+    /// `impl App for MyApp` émet `impl eframe::App for MyApp { … }` (chemin résolu ici).
+    pub traits: HashMap<String, String>,
 }
 
 // ---------------------------------------------------------------- SourceMap (§4.6)

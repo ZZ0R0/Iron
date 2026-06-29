@@ -118,8 +118,16 @@ impl P {
                     self.expect(&TokenKind::Assign, "`=`")?;
                     let path = self.string()?;
                     b.consts.entry(name).or_insert((ty, path));
+                } else if self.is(&TokenKind::Trait) {
+                    // trait implémentable (V12 [24300]) : `extern trait T = "chemin"`. `trait` est un
+                    // mot-clé Iron → token dédié (pas un `Ident`), d'où `is(Trait)` et non `kw("trait")`.
+                    self.adv();
+                    let name = self.ident()?;
+                    self.expect(&TokenKind::Assign, "`=`")?;
+                    let path = self.string()?;
+                    b.traits.entry(name).or_insert(path);
                 } else {
-                    return Err(self.err("`extern fn`, `extern type`, `extern const` ou `extern mod` attendu"));
+                    return Err(self.err("`extern fn`, `extern type`, `extern const`, `extern trait` ou `extern mod` attendu"));
                 }
             } else if self.kw("crate") {
                 self.adv();
