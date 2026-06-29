@@ -75,7 +75,8 @@ Statuts : ✅ corrigé · 🔧 à corriger · ❓ décision de fond · 🔶 prop
 | C codegen | C1·C2·C3 | 3 [21800] | ✅ index nég · **clone dunder (last-use)** · impl générique |
 | D parseur | D1 | 3 [21800] | ✅ destructuring en compréhension |
 | E ergonomie | E1 | 3 [21800] | ✅ `?`-main auto-promu Result |
-| F fidélité Python | F1·F2·F3 | — | ❓ **décision de fond** (documenté gotchas #13, défaut « projection Rust ») |
+| F fidélité Python | F1·F2·F3 | — | ✅ **décidé (utilisateur) : garder la projection Rust (I6)** — documenté gotchas #13 |
 
-**12/12 défauts durs corrigés**, project-global, sans régresser V17 (raytracer 7 clones, ~0,09 s). Seul **F**
-reste ouvert = un choix de fond (projection Rust vs fidélité Python sur l'affichage/parse). Détail : [`ETAT-IMPLEMENTATION.md`](ETAT-IMPLEMENTATION.md).
+**12/12 défauts durs corrigés**, project-global, sans régresser V17 (raytracer 7 clones, ~0,09 s). **F tranché**
+par l'utilisateur : l'affichage/parse reste **projection Rust** (I6), pas `repr` Python — choix d'identité assumé
+et documenté. **V18 entièrement close.** Détail : [`ETAT-IMPLEMENTATION.md`](ETAT-IMPLEMENTATION.md).

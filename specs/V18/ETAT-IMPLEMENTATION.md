@@ -32,8 +32,8 @@
 - **§2.4/§2.5 (planify-3.1 d/e)** : propagation inter-appels / annotation de retour prioritaire — **non**
   remontés comme défauts par l'audit ; le raytracer garde ses annotations de params (il compile + tourne).
   Refinement d'inférence laissé ouvert (mesuré non nécessaire à la correction).
-- **F — fidélité Python (❓ décision)** : `print(True)`→`true`, `print(1.0)`→`1`, `int("abc")`→`0`. Choix
-  « projection Rust » (I6) documentés dans `gotchas.md` #13. À trancher : garder, ou Display custom Python.
+- **F — fidélité Python (✅ tranché : garder)** : `print(True)`→`true`, `print(1.0)`→`1`, `int("abc")`→`0`.
+  Décision **utilisateur** = garder la **projection Rust** (I6), pas le `repr` Python. Documenté `gotchas.md` #13.
 
 ## Mesure (métrique de vérité)
 - **Corpus : 70/70** cas verts (`cargo test --test corpus`), couvrant les 4 axes V18 + le noyau.
