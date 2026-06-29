@@ -76,6 +76,10 @@ fn builtin_method_ret(bt: &Type, name: &str) -> Option<Type> {
         // `s.encode()` → octets UTF-8 (`list[u8]`) ; `b.decode()` → `str` (Python). Ergonomie d'octets.
         (Type::Str, "encode") => Type::List(Box::new(Type::Num(NumKind::U8))),
         (Type::List(_), "decode") => Type::Str,
+        // V12 [82000] ergonomie des octets : `bytes.hex()` → str hexa ; `str.from_hex()` → octets.
+        // `Extern` accepté : un tableau d'octets foreign (`GenericArray<u8>` d'un digest sha2) déréfère vers `[u8]`.
+        (Type::List(_) | Type::Extern(_), "hex") => Type::Str,
+        (Type::Str, "from_hex") => Type::List(Box::new(Type::Num(NumKind::U8))),
         (Type::Str, "split" | "splitlines") => Type::List(Box::new(Type::Str)),
         (Type::Str, "count") => Type::I64,
         (Type::Str, "startswith" | "endswith" | "contains") => Type::Bool,

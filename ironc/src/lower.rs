@@ -2096,6 +2096,15 @@ impl Cx<'_> {
             // d'octets : permet `digest.update(s.encode())`, clés binaires, etc.
             (Type::Str, "encode") => { let b = self.place(base); quote! { #b.as_bytes().to_vec() } }
             (Type::List(_), "decode") => { let b = self.place(base); quote! { String::from_utf8_lossy(&#b).to_string() } }
+            // V12 [82000] : `bytes.hex()` → chaîne hexa minuscule ; `str.from_hex()` → octets. Sans crate tierce.
+            (Type::List(_) | Type::Extern(_), "hex") => {
+                let b = self.place(base);
+                quote! { #b.iter().map(|__x| format!("{:02x}", __x)).collect::<String>() }
+            }
+            (Type::Str, "from_hex") => {
+                let b = self.place(base);
+                quote! { (0..#b.len()/2).map(|__i| u8::from_str_radix(&#b[__i*2..__i*2+2], 16).unwrap_or(0)).collect::<Vec<u8>>() }
+            }
             (Type::Str, "upper") => { let b = self.place(base); quote! { #b.to_uppercase() } }
             (Type::Str, "lower") => { let b = self.place(base); quote! { #b.to_lowercase() } }
             (Type::Str, "strip") => { let b = self.place(base); quote! { #b.trim().to_string() } }
