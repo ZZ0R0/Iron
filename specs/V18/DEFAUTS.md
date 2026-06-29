@@ -9,17 +9,20 @@ Statuts : ✅ corrigé · 🔧 à corriger · ❓ décision de fond · 🔶 prop
 
 ---
 
-## A. Closures — capacité (→ vague 2 · [21000])
-- **A1** 🔧 `inline_lambda` — IIFE `(lambda x: x*2)(21)` mal abaissé : l'argument est absorbé **dans** le
-  corps → `move |x| (x*2)(21)` au lieu de `(|x| x*2)(21)`. E0282. *Bug structurel de lowering/précédence.*
-  Repro : `closures/_defects/inline_lambda.irn`.
-- **A2** 🔧 `stored_in_field` — `obj.f(6)` où `f: fn(i64)->i64` est un **champ** → pris pour un **dispatch de
-  méthode** sur le type → « pas de méthode `f` ». Rejet frontend avant codegen. Repro : `closures/_defects/stored_in_field.irn`.
-- **A3** 🔧 Stockage de closures **capturantes/hétérogènes** (`Vec`/champ) : Iron émet des types-closure
-  distincts non boîtés → E0308. Manque **`Box<dyn Fn>`** (cf. `lower_type` `Type::Fn → impl Fn`, valide en
-  arg/retour seulement). `stored_in_list` n'est vert **que** car ses lambdas sont **non-capturantes** (coercion
-  `fn`-pointer). Repro : variante capturante (scratchpad de l'agent).
-- **Déjà VERT** (pas à toucher) : lambda locale, capture d'env, ordre-supérieur `apply(f,x)` (monomorphisé),
+## A. Closures — capacité (vague 2 · [21000]) — ✅ CORRIGÉ
+- **A1** ✅ IIFE `(lambda x: x*2)(21)` : callee lambda/closure désormais **parenthésé** au lowering →
+  `(|x| x*2)(21)`. Cas vert : `closures/inline_lambda.irn`.
+- **A2** ✅ `obj.f(6)` (champ-closure) : (1) infer accepte un **champ** appelé (pas que les méthodes) ;
+  (2) lower détecte le champ-closure (`closure_fields`) ou un callee de type `Fn` → émet `(obj.f)(6)`.
+  Cas vert : `closures/stored_in_field.irn`.
+- **A3** ✅ (champ) — `lower_storage_type` : un champ `fn(...)` devient **`Box<dyn Fn>`** (impl Fn interdit
+  en stockage) ; la valeur lambda est **boîtée** (`Box::new(...)`) ; la struct porteuse perd `Debug`/`Clone`
+  auto (Box<dyn Fn> ne les dérive pas). Cas vert : `closures/stored_in_field.irn`.
+  - **A3 écart (0.1%)** 🔧 Littéral de **liste** de closures **capturantes** (`[lambda x: x+base, …]`) :
+    besoin de `Vec<Box<dyn Fn>>` + boxing/coercion par élément dans le littéral. Non fait (capture non triviale,
+    flaggée 0.1% par planify-2.1). **Contournement** : champ de struct (A3) ou lambdas non-capturantes
+    (`stored_in_list`, vert). Repro parqué : `closures/_defects/captured_list.irn`.
+- **Déjà VERT avant V18** : lambda locale, capture d'env, ordre-supérieur `apply(f,x)` (monomorphisé),
   `map`/`filter`, **closure retournée chaînée `adder(10)(5)`**.
 
 ## B. Numérique — ergonomie + correction (→ vague 3 · [21800])

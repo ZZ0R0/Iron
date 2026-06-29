@@ -1,0 +1,8 @@
+# ÉCART V18 (0.1% closures) : liste de closures CAPTURANTES → besoin de Vec<Box<dyn Fn>> + boxing
+# par élément dans le littéral de liste. Contournement : champ de struct (stored_in_field) ou
+# lambdas non-capturantes (stored_in_list). Closures retournées/ordre-supérieur/champ : OK.
+fn main():
+    base = 10
+    fs = [lambda x: x + base, lambda x: x * base]
+    for f in fs:
+        print(f(5))

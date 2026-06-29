@@ -339,9 +339,12 @@ impl ShapeCx<'_> {
                 if let ExprKind::Field { base, name } = &callee.kind {
                     self.expr(base)?;
                     if let Some(Type::Struct(s)) = self.types.get(&base.id) {
-                        if self.structs.contains_key(s)
-                            && !self.struct_methods.get(s).is_some_and(|ms| ms.contains(name))
-                        {
+                        // `obj.f(args)` est légitime si `f` est une **méthode** OU un **champ** (closure-valué :
+                        // `f: fn(...)->...`) — dans ce dernier cas c'est l'appel de la valeur du champ, pas un
+                        // dispatch de méthode. On n'erre que si `name` n'est NI méthode NI champ.
+                        let is_method = self.struct_methods.get(s).is_some_and(|ms| ms.contains(name));
+                        let is_field = self.structs.get(s).is_some_and(|fs| fs.iter().any(|(fname, _)| fname == name));
+                        if self.structs.contains_key(s) && !is_method && !is_field {
                             return Err(CompileError {
                                 span: Some(e.span),
                                 msg: format!("type : `{s}` n'a pas de méthode `{name}`"),

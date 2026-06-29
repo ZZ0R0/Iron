@@ -35,6 +35,18 @@ pub fn lower(
             _ => None,
         })
         .collect();
+    // (struct, champ) dont le type est `fn(...)` : pour distinguer au lowering `obj.f(x)` (appel d'un
+    // **champ-closure**) d'un dispatch de méthode.
+    let mut closure_fields: HashSet<(String, String)> = HashSet::new();
+    for it in &ast.items {
+        if let ItemKind::Struct { name, fields, .. } = &it.kind {
+            for (fname, fty) in fields {
+                if matches!(fty, Type::Fn(..)) {
+                    closure_fields.insert((name.clone(), fname.clone()));
+                }
+            }
+        }
+    }
     let user_fns: HashSet<String> = ast
         .items
         .iter()
@@ -74,6 +86,7 @@ pub fn lower(
         clean,
         enums,
         structs,
+        closure_fields,
         user_fns,
         fn_params,
         fn_defaults,
@@ -147,6 +160,8 @@ struct Cx<'a> {
     clean: bool,
     enums: HashSet<String>,
     structs: HashSet<String>,
+    /// (struct, champ) de type `fn(...)` : `obj.f(x)` = appel du champ-closure, pas un dispatch de méthode.
+    closure_fields: HashSet<(String, String)>,
     /// Fns définies par l'utilisateur — priment sur les built-ins homonymes (ex. un `fn add` perso).
     user_fns: HashSet<String>,
     /// Noms des params par fn (surface Python) : pour réordonner les arguments nommés `f(x=1, y=2)`.
@@ -487,11 +502,15 @@ impl Cx<'_> {
                     .iter()
                     .map(|(n, t)| {
                         let fid = format_ident!("{}", n);
-                        let ty = lower_type(t);
+                        // position de stockage : un champ `fn(...)` devient `Box<dyn Fn>` (impl Fn interdit ici).
+                        let ty = lower_storage_type(t);
                         quote! { #fid: #ty }
                     })
                     .collect();
-                let attrs = self.item_attrs_ts(it.id, &["Debug", "Clone"]);
+                // Un champ closure (`Box<dyn Fn>`) n'est NI `Debug` NI `Clone` → on retire ces dérivations
+                // auto pour une struct porteuse de closure (sinon le `#[derive]` ne compile pas).
+                let auto: &[&str] = if fields.iter().any(|(_, t)| ty_has_fn(t)) { &[] } else { &["Debug", "Clone"] };
+                let attrs = self.item_attrs_ts(it.id, auto);
                 quote! {
                     #attrs
                     pub struct #sid #gens { #(pub #fs),* }
@@ -1414,8 +1433,15 @@ impl Cx<'_> {
                     .iter()
                     .map(|(n, v)| {
                         let fid = format_ident!("{}", n);
-                        let v = self.value(v);
-                        quote! { #fid: #v }
+                        let vv = self.value(v);
+                        // Une closure stockée dans un champ doit être **boîtée** (`Box<dyn Fn>`), car le champ
+                        // est lowering-é en `Box<dyn Fn>` (cf. lower_storage_type) et non `impl Fn`.
+                        let vv = if matches!(v.kind, ExprKind::Lambda { .. } | ExprKind::Closure { .. }) {
+                            quote! { Box::new(#vv) }
+                        } else {
+                            vv
+                        };
+                        quote! { #fid: #vv }
                     })
                     .collect();
                 quote! { #sid { #(#fs),* } }
@@ -1921,6 +1947,19 @@ impl Cx<'_> {
                 };
             }
         }
+        // Appel d'une **valeur-closure** : `obj.f(x)` où `f` est un champ `fn(...)` d'une struct (détecté
+        // structurellement via `closure_fields`), OU un callee dont le type est `Fn` (variable-closure,
+        // closure retournée chaînée `(adder(10))(5)`). Ce n'est PAS un dispatch de méthode → `(callee)(args)`.
+        let is_field_closure = if let ExprKind::Field { base, name } = &callee.kind {
+            matches!(self.type_of(base), Type::Struct(s) if self.closure_fields.contains(&(s.clone(), name.clone())))
+        } else {
+            false
+        };
+        if is_field_closure || matches!(self.type_of(callee), Type::Fn(..)) {
+            let c = self.place(callee);
+            let a: Vec<TokenStream> = args.iter().map(|x| self.value(x)).collect();
+            return quote! { (#c)( #(#a),* ) };
+        }
         // appel utilisateur : `&x` ByRef, `&mut x` InOut, valeur sinon ; + args par défaut (surface Python).
         let modes = match &callee.kind {
             ExprKind::Var(name) => self.param_modes.get(name).cloned(),
@@ -1931,7 +1970,15 @@ impl Cx<'_> {
             _ => None,
         };
         let pad = self.call_padding(callee, args.len());
+        // Un callee lambda/closure inline (IIFE `(lambda x: …)(arg)`) doit être **parenthésé** : sinon
+        // `move |x| corps (arg)` se relit en Rust comme « appeler `corps` avec `arg` » → l'argument est
+        // absorbé dans le corps (E0282). Les autres callees (Var, Field, Call, Index) groupent déjà bien.
         let c = self.place(callee);
+        let c = if matches!(callee.kind, ExprKind::Lambda { .. } | ExprKind::Closure { .. }) {
+            quote! { (#c) }
+        } else {
+            c
+        };
         let mut a: Vec<TokenStream> = Vec::new();
         for (i, x) in args.iter().chain(pad.iter()).enumerate() {
             let mode = modes.as_ref().and_then(|m| m.get(i)).copied().unwrap_or(ParamMode::ByValue);
@@ -2620,6 +2667,40 @@ fn lower_type(t: &Type) -> TokenStream {
             let inner = lower_type(t);
             quote! { std::sync::Arc<std::sync::Mutex<#inner>> }
         }
+    }
+}
+
+/// Lowering en position de **stockage** (champ de struct, élément de collection) : un type fonction
+/// `Type::Fn` y devient `Box<dyn Fn(...)>` — l'`impl Fn` n'est légal qu'en position paramètre/retour,
+/// jamais dans un champ ou un `Vec`. Récursif dans les conteneurs ; délègue à `lower_type` sinon.
+fn lower_storage_type(t: &Type) -> TokenStream {
+    match t {
+        Type::Fn(ps, r) => {
+            let pa: Vec<TokenStream> = ps.iter().map(lower_type).collect();
+            let rt = lower_type(r);
+            quote! { Box<dyn Fn( #(#pa),* ) -> #rt> }
+        }
+        Type::List(e) => {
+            let i = lower_storage_type(e);
+            quote! { Vec<#i> }
+        }
+        Type::Option(e) => {
+            let i = lower_storage_type(e);
+            quote! { Option<#i> }
+        }
+        _ => lower_type(t),
+    }
+}
+
+/// Le type contient-il un type fonction (directement ou via un conteneur) ? Sert à décider l'absence de
+/// `Debug`/`Clone` auto sur une struct porteuse de closure (`Box<dyn Fn>` ne dérive ni l'un ni l'autre).
+fn ty_has_fn(t: &Type) -> bool {
+    match t {
+        Type::Fn(..) => true,
+        Type::List(e) | Type::Option(e) | Type::Set(e) => ty_has_fn(e),
+        Type::Dict(k, v) => ty_has_fn(k) || ty_has_fn(v),
+        Type::Tuple(ts) => ts.iter().any(ty_has_fn),
+        _ => false,
     }
 }
 
