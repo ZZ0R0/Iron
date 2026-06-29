@@ -710,12 +710,10 @@ fn project(f: &Json, owner: &str, extra_gen: &Generics) -> Option<Sig> {
         if let Some(name) = p["name"].as_str() {
             let ty = &p["kind"]["type"];
             if ty.is_object() {
-                // V12 [24000] : borne reconnue → type Iron ; sinon **garder générique** (`Some("T")`) au lieu
-                // de dropper la fn — l'argument l'instanciera (infer). Couvre `new(x: T)` borné par un trait de crate.
-                gen.insert(
-                    name.to_string(),
-                    bound_to_iron(&ty["bounds"]).or_else(|| Some(name.to_string())),
-                );
+                // Générique **propre à la fonction** (`to_string<T: Serialize>`) : on NE garde PAS (drop si
+                // utilisé), car il n'est pas matérialisable et pollue le `.iri`. Le **suivi** des génériques
+                // concerne les params de **type** (impl/struct → `Point[T]`), gérés via `extra_gen`/blanket_self.
+                gen.insert(name.to_string(), bound_to_iron(&ty["bounds"]));
             }
         }
     }
@@ -725,10 +723,7 @@ fn project(f: &Json, owner: &str, extra_gen: &Generics) -> Option<Sig> {
         let bp = &w["bound_predicate"];
         if let Some(name) = bp["type"]["generic"].as_str() {
             if !matches!(gen.get(name), Some(Some(_))) {
-                gen.insert(
-                    name.to_string(),
-                    bound_to_iron(&bp["bounds"]).or_else(|| Some(name.to_string())),
-                );
+                gen.insert(name.to_string(), bound_to_iron(&bp["bounds"]));
             }
         }
     }
@@ -1071,7 +1066,9 @@ fn collect_type_refs(line: &str, out: &mut std::collections::BTreeSet<String>) {
                 i += 1;
             }
             let word = &sig[start..i];
-            if word != "Option" && word != "Result" {
+            // V12 : un nom d'**un seul caractère** majuscule (`T`, `R`, `K`, `W`…) est un **paramètre de type**,
+            // pas un vrai type → ne pas l'émettre en `extern type T = …` (pollution + .iri illisible).
+            if word.len() > 1 && word != "Option" && word != "Result" {
                 out.insert(word.to_string());
             }
         } else {
