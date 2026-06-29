@@ -1,0 +1,7 @@
+# §2.6 : N workers lisent le MÊME `data` (pré-emprunté `&data`, zéro clone par worker) et accumulent
+# dans un total partagé thread-safe. Somme = ordre-indépendant → sortie déterministe.
+def main():
+    data = [10, 20, 30, 40, 50]
+    total = ref_sync(0)
+    thread.scope(lambda s: [s.spawn(lambda: lock_add(total, data[i])) for i in range(5)])
+    print(lock_get(total))

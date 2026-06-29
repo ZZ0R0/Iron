@@ -2422,6 +2422,41 @@ impl Cx<'_> {
                 };
                 quote! { std::thread::spawn(move || #body) }
             }
+            // `thread.scope(lambda s: …)` → `std::thread::scope(|s| …)` (V18, 21300). Les threads créés via
+            // `s.spawn(…)` à l'intérieur **empruntent** les données du scope englobant (lecture partagée `&data`
+            // **sans clone par worker** — bénéfice direct de l'ownership) et **rejoignent** à la fin du scope.
+            "scope" if args.len() == 1 => match &args[0].kind {
+                ExprKind::Lambda { params, body } if params.len() == 1 => {
+                    // Pré-emprunt des **données partagées** (variables libres non-Copy) : `let data = &data;`
+                    // au début du scope → chaque `s.spawn(move || …)` capture une **copie de la référence**
+                    // (les `&T` sont Copy) au lieu de **déplacer** la donnée (impossible pour N workers).
+                    // C'est le bénéfice §2.6 : lecture partagée `&scene` SANS clone par worker. Le scope
+                    // garantit la jointure avant la fin de l'emprunt (sûr, I2). Les Copy/fns restent move.
+                    let mut bound = vec![params[0].clone()];
+                    let mut frees: Vec<(String, NodeId)> = Vec::new();
+                    collect_free_vars(body, &mut bound, &mut frees);
+                    let mut seen: HashSet<String> = HashSet::new();
+                    let pre: Vec<TokenStream> = frees
+                        .iter()
+                        .filter_map(|(n, id)| {
+                            if !seen.insert(n.clone()) {
+                                return None;
+                            }
+                            let t = self.types.get(id).cloned().unwrap_or(Type::Unit);
+                            needs_scope_borrow(&t).then(|| {
+                                let v = format_ident!("{}", n);
+                                quote! { let #v = & #v; }
+                            })
+                        })
+                        .collect();
+                    let s = format_ident!("{}", params[0]);
+                    let b = self.value(body);
+                    // `let _ = …` : un corps `[s.spawn(…) for …]` collecte un `Vec<ScopedJoinHandle>` ignoré
+                    // (jointure auto en fin de scope) → on consomme le résultat sans warning `must_use`.
+                    quote! { std::thread::scope(|#s| { #(#pre)* let _ = #b; }) }
+                }
+                _ => quote! { compile_error!("thread.scope attend `lambda s: …` (1 paramètre = le scope)") },
+            },
             other => {
                 let msg = format!("thread.{other} non supporté (spawn uniquement au v0)");
                 quote! { compile_error!(#msg) }
@@ -2766,6 +2801,114 @@ fn lower_storage_type(t: &Type) -> TokenStream {
             quote! { Option<#i> }
         }
         _ => lower_type(t),
+    }
+}
+
+/// Type **possédé non-Copy** qui gagne à être **emprunté** (`&T`) plutôt que cloné/déplacé quand il est
+/// partagé en lecture par plusieurs workers d'un `thread.scope`. Les scalaires Copy et les noms de fns
+/// (type `Unit`/`Fn`) sont exclus → jamais pré-empruntés (ils restent move/copy).
+fn needs_scope_borrow(t: &Type) -> bool {
+    matches!(
+        t,
+        Type::List(_)
+            | Type::Dict(..)
+            | Type::Set(_)
+            | Type::Str
+            | Type::Struct(_)
+            | Type::Tuple(_)
+            | Type::Extern(_)
+            | Type::ExternApp(..)
+            | Type::App(..)
+            // `shared_sync[T]` (Arc<Mutex>) partagé en mutation entre workers : emprunter l'Arc (`&Arc`,
+            // Copy) plutôt que le déplacer → chaque worker `.lock()` le même état. (`shared`/Rc reste !Send
+            // → rejeté par rustc dans un scope, filet I2 : on ne le pré-emprunte pas.)
+            | Type::SharedSync(_)
+    )
+}
+
+/// Noms liés par un motif (cible de compréhension `for k, v in …`) — exclus des variables libres.
+fn pattern_binds(p: &Pattern, out: &mut Vec<String>) {
+    match p {
+        Pattern::Var(n) => out.push(n.clone()),
+        Pattern::Tuple(ps) | Pattern::Or(ps) => ps.iter().for_each(|x| pattern_binds(x, out)),
+        Pattern::Variant { sub, .. } => sub.iter().for_each(|x| pattern_binds(x, out)),
+        _ => {}
+    }
+}
+
+/// Variables **libres** d'une expression (référencées mais non liées par un `lambda`/compréhension
+/// englobant ni présentes dans `bound`). Collecte `(nom, NodeId)` → le NodeId permet de retrouver le type.
+/// Sert au `thread.scope` : pré-emprunter les données partagées non-Copy (cf. `needs_scope_borrow`).
+fn collect_free_vars(e: &Expr, bound: &mut Vec<String>, out: &mut Vec<(String, NodeId)>) {
+    match &e.kind {
+        ExprKind::Var(n) => {
+            if !bound.contains(n) {
+                out.push((n.clone(), e.id));
+            }
+        }
+        ExprKind::Lit(_) => {}
+        ExprKind::Unary { expr, .. } => collect_free_vars(expr, bound, out),
+        ExprKind::Binary { lhs, rhs, .. } => {
+            collect_free_vars(lhs, bound, out);
+            collect_free_vars(rhs, bound, out);
+        }
+        ExprKind::Call { callee, args } => {
+            collect_free_vars(callee, bound, out);
+            args.iter().for_each(|a| collect_free_vars(a, bound, out));
+        }
+        ExprKind::StructLit { fields, .. } => fields.iter().for_each(|(_, v)| collect_free_vars(v, bound, out)),
+        ExprKind::Field { base, .. } => collect_free_vars(base, bound, out),
+        ExprKind::Index { base, idx } => {
+            collect_free_vars(base, bound, out);
+            collect_free_vars(idx, bound, out);
+        }
+        ExprKind::ListLit { items } => items.iter().for_each(|x| collect_free_vars(x, bound, out)),
+        ExprKind::DictLit { pairs } => pairs.iter().for_each(|(k, v)| {
+            collect_free_vars(k, bound, out);
+            collect_free_vars(v, bound, out);
+        }),
+        ExprKind::Try { inner } | ExprKind::Await(inner) => collect_free_vars(inner, bound, out),
+        ExprKind::Lambda { params, body } => {
+            let k = bound.len();
+            bound.extend(params.iter().cloned());
+            collect_free_vars(body, bound, out);
+            bound.truncate(k);
+        }
+        // corps de bloc (fn imbriquée) dans un scope : rare ; on lie les params sans descendre (best-effort —
+        // une donnée partagée libre dans un tel bloc ⇒ erreur compile claire, contournable en `rust{}`).
+        ExprKind::Closure { params, .. } => {
+            let _ = params;
+        }
+        ExprKind::Tuple(items) => items.iter().for_each(|x| collect_free_vars(x, bound, out)),
+        ExprKind::FString(parts) => parts.iter().for_each(|p| {
+            if let FStringPart::Expr(ex) = p {
+                collect_free_vars(ex, bound, out);
+            }
+        }),
+        ExprKind::Comp { body, var, iter, cond, .. } => {
+            collect_free_vars(iter, bound, out); // l'itérable est évalué dans le scope englobant
+            let k = bound.len();
+            pattern_binds(var, bound);
+            collect_free_vars(body, bound, out);
+            if let Some(c) = cond {
+                collect_free_vars(c, bound, out);
+            }
+            bound.truncate(k);
+        }
+        ExprKind::Ternary { cond, then, els } => {
+            collect_free_vars(cond, bound, out);
+            collect_free_vars(then, bound, out);
+            collect_free_vars(els, bound, out);
+        }
+        ExprKind::Slice { base, lo, hi } => {
+            collect_free_vars(base, bound, out);
+            if let Some(l) = lo {
+                collect_free_vars(l, bound, out);
+            }
+            if let Some(h) = hi {
+                collect_free_vars(h, bound, out);
+            }
+        }
     }
 }
 

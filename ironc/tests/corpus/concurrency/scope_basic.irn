@@ -1,0 +1,4 @@
+# thread.scope : le scope JOINT tous les workers avant de rendre → "worker" avant "done".
+def main():
+    thread.scope(lambda s: s.spawn(lambda: print("worker")))
+    print("done")
