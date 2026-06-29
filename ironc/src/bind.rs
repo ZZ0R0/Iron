@@ -478,6 +478,43 @@ fn emit(
             .or_insert(path);
     }
 
+    // [50600 C1] alias monomorphisé → type nominal : pour chaque `type_alias` dont le sous-jacent est un
+    // `resolved_path` **local** à **dimensions concrètes** (au moins une const littérale), on retient le
+    // **plus court** nom d'alias par signature structurelle (tie-break canonique : `Vector3` plutôt qu'un
+    // alias de vue homonyme de forme). Un `impl` sur cette même monomorphisation sera alors rattaché à
+    // l'alias (`Vector3.new(x,y,z)`) au lieu de la base générique `Matrix` (collision de tous les `new`).
+    let mut alias_shapes: HashMap<String, (String, String, Vec<String>)> = HashMap::new();
+    for (id, item) in index {
+        let Some(idn) = id.parse::<u64>().ok() else { continue };
+        let Some(ta) = item["inner"].get("type_alias") else { continue };
+        let under = &ta["type"];
+        let Some(rp) = under.get("resolved_path") else { continue };
+        if !rp["id"].as_u64().map_or(false, |bid| is_local(paths, bid)) {
+            continue; // base étrangère → on ne réécrit pas vers cet alias
+        }
+        let s = sig_of(under, index, 0);
+        if !s.chars().any(|c| c.is_ascii_digit()) {
+            continue; // pas de dimension concrète → alias générique (`SVector<T, D>`), ignoré
+        }
+        let Some(name) = item["name"].as_str() else { continue };
+        if is_iron_keyword(name) || !name.chars().next().is_some_and(|c| c.is_ascii_alphabetic()) {
+            continue;
+        }
+        let params: Vec<String> = ta["generics"]["params"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|p| p["name"].as_str().map(String::from)).collect())
+            .unwrap_or_default();
+        let path = resolve_type_path(Some(idn), name, &public_paths, paths, crate_name);
+        alias_shapes
+            .entry(s)
+            .and_modify(|e| {
+                if name.len() < e.0.len() {
+                    *e = (name.to_string(), path.clone(), params.clone());
+                }
+            })
+            .or_insert((name.to_string(), path, params));
+    }
+
     for item in index.values() {
         let imp = &item["inner"]["impl"];
         if !imp.is_object() {
@@ -500,17 +537,30 @@ fn emit(
         let for_id = imp["for"]["resolved_path"]["id"].as_u64();
         // Récepteur : type **nommé** (resolved_path) OU **primitif** (`impl Trait for &str` → extension d'un
         // primitif, ex. colored). Sinon (slice/tuple/dyn…) → sauté.
-        let (tyname, is_prim) = match imp["for"]["resolved_path"]["path"].as_str() {
+        let (mut tyname, is_prim) = match imp["for"]["resolved_path"]["path"].as_str() {
             Some(n) => (n.rsplit("::").next().unwrap_or(n).to_string(), false),
             None => match prim_for_type(&imp["for"]) {
                 Some(p) => (p, true),
                 None => continue,
             },
         };
+        // [50600 C1] reroute : `for` = monomorphisation à dims concrètes nommée par un alias
+        // (`Matrix<…Const<3>,Const<1>…>` = `Vector3`) → rattacher l'impl au **type nominal de l'alias**.
+        let alias_override = if is_prim {
+            None
+        } else {
+            alias_shapes.get(&sig_of(&imp["for"], index, 0)).cloned()
+        };
+        if let Some((aname, _, _)) = &alias_override {
+            tyname = aname.clone();
+        }
         if is_prim {
             // pas de `is_local`, pas de dédup de variante, pas de chemin résolu : les méthodes seront des
             // **traits** appelées en UFCS (`Colorize::red(&x)`) ; le pseudo-type pointe vers le primitif Rust.
             type_paths.entry(tyname.clone()).or_insert_with(|| "str".to_string());
+        } else if let Some((_, apath, _)) = &alias_override {
+            // chemin = celui de l'**alias** (`nalgebra::Vector3`), pas de la base `Matrix`.
+            type_paths.entry(tyname.clone()).or_insert_with(|| apath.clone());
         } else {
             let tyfull = imp["for"]["resolved_path"]["path"].as_str().unwrap_or(&tyname).to_string();
             // type local à la crate (crate_id 0) — sinon on n'a pas son chemin public.
@@ -1328,6 +1378,47 @@ fn try_expand_alias(id: u64, targs: &[&Json], gen: &Generics) -> Option<String> 
     let out = map_type(&under, &alias_gen);
     ALIAS_DEPTH.with(|d| d.set(d.get() - 1));
     out
+}
+
+/// [50600 C1] Signature **structurelle** d'un type rustdoc : alias `resolved_path` **expansés** (donc
+/// `U3` → `Const<3>`), génériques → `_`, consts littérales conservées. Deux types ayant la même signature
+/// dénotent la **même monomorphisation** — ce qui permet de rattacher un `impl Matrix<…Const<3>,Const<1>…>`
+/// au **type nominal de l'alias** qui la nomme (`Vector3`), au lieu de la base générique `Matrix` (où tous
+/// les `new` par-dimension collisionneraient). Règle 100 % générale (lit alias + impl depuis rustdoc).
+fn sig_of(t: &Json, index: &serde_json::Map<String, Json>, depth: u32) -> String {
+    if depth > 24 {
+        return "_".to_string();
+    }
+    if let Some(c) = t.get("const") {
+        return c["expr"].as_str().unwrap_or("?").to_string();
+    }
+    let inner = t.get("type").unwrap_or(t);
+    if inner.get("generic").is_some() {
+        return "_".to_string(); // générique normalisé (l'impl utilise `T`, l'alias aussi)
+    }
+    if let Some(p) = inner["primitive"].as_str() {
+        return p.to_string();
+    }
+    if let Some(rp) = inner.get("resolved_path") {
+        if let Some(id) = rp["id"].as_u64() {
+            if let Some(ta) = index.get(&id.to_string()).and_then(|it| it["inner"].get("type_alias")) {
+                return sig_of(&ta["type"], index, depth + 1); // expansion d'alias (U3 → Const<3>)
+            }
+        }
+        let base = rp["path"].as_str().unwrap_or("").rsplit("::").next().unwrap_or("");
+        let args: Vec<String> = rp["args"]["angle_bracketed"]["args"]
+            .as_array()
+            .map(|a| a.iter().map(|x| sig_of(x, index, depth + 1)).collect())
+            .unwrap_or_default();
+        if args.is_empty() {
+            return base.to_string();
+        }
+        return format!("{base}<{}>", args.join(","));
+    }
+    if inner.get("array").is_some() {
+        return "[arr]".to_string();
+    }
+    "_".to_string()
 }
 
 fn map_type(t: &Json, gen: &Generics) -> Option<String> {
