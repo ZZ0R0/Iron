@@ -46,6 +46,11 @@
 > ~4 « compile mais env »). Les vrais murs de **langage** restent : génériques de type, impl-trait-externe,
 > closures→trait-objets, event-loop, async, no_std, consts, derive-macros.
 
+> ⚠️ **Les tables par-domaine ci-dessous sont PRÉ-refonte V15** (état historique). Pour les 16 slots remaniés
+> (`26-30, 41, 44, 46-47, 49, 71-75, 77` — désormais petgraph/nom/arrayvec/euclid/uom/bitvec/smallvec/
+> itertools/num-rational/rust_decimal/time/indexmap/roaring/pulldown-cmark/fixed/palette), la vérité courante
+> est la section **PASSE-MESURE-V15** (couverture mesurée + runs vérifiés). Les autres lignes restent valides.
+
 ## 1. CLI & fichiers
 | # | Crate | Statut | Base | Note |
 |---|---|:--:|:--:|---|
@@ -305,7 +310,9 @@ nalgebra 41, crossterm 41, aes-gcm 41, tract-onnx 41, sled 40, geo 39, teloxide 
   **82 % (euclid/num-rational)** à **16 % (nom)** — ils **exposent la frontière** du binder (type-level
   `uom`/`nom`/`itertools` = bas ; génériques scalaires/const = haut).
 - **Vérifiés par RUN (usables, pas juste bindés)** : nalgebra, aes-gcm (curation), num-rational, rust_decimal,
-  arrayvec (const-cap C3) + les ~24 ✅ historiques ≈ **~29 confirmés usables**.
+  arrayvec (const-cap C3), **roaring** (insert/len→2) + les ~24 ✅ historiques ≈ **~30 confirmés usables**.
+  **🟡 euclid** : binde 82 % mais l'**unité fantôme** `Point2D<T, U>` non inférable (E0282) — frontière
+  type-marqueur honnête (construction bloquée sans unité explicite). **🟡 ndarray** : E0308 storage générique.
 - **Couverture moyenne (72 OK) ≈ 62 %** — le moteur lie la **majorité** de la surface API même sur des crates
   durs. Le passage couverture→usable se fait crate par crate (items utiles + parfois curation/ascription).
 - **Reste à faire (mesuré, pas inféré)** : confirmer par run les crates haute-couverture non encore exécutés

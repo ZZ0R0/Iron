@@ -1,0 +1,6 @@
+import num_rational
+
+def main():
+    r = Ratio.new(3, 6)
+    print(r.numer())
+    print(r.denom())

@@ -1,0 +1,8 @@
+import roaring
+
+def main():
+    b = RoaringBitmap.new()
+    b.insert(10)
+    b.insert(20)
+    b.insert(10)
+    print(b.len())

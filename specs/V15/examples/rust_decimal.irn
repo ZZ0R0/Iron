@@ -1,0 +1,12 @@
+import rust_decimal
+
+def run() -> Result[str]:
+    a = Decimal.from_str("0.1")?
+    b = Decimal.from_str("0.2")?
+    return (a + b).to_string()
+
+def main():
+    try:
+        print(run()?)
+    except:
+        print("err")

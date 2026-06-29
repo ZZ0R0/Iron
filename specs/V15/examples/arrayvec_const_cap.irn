@@ -1,0 +1,8 @@
+import arrayvec
+
+def main():
+    v: ArrayVec[i64, 8] = ArrayVec.new()
+    v.push(10)
+    v.push(20)
+    v.push(12)
+    print(len(v))
