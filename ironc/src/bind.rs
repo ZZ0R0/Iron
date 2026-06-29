@@ -826,8 +826,13 @@ fn project(f: &Json, owner: &str, extra_gen: &Generics) -> Option<Sig> {
                 wraps.push((params.len(), "array"));
                 params.push(format!("{pn}: list[u8]"));
             }
-            // `@read`/`@arr` **imbriqué** (`list[@read]`…) : non représentable → on saute la fn (honnête).
-            Some(t) if t.contains("@read") || t.contains("@arr") => return None,
+            // V13 [52800]w : puits `Write` → param `str` (chemin), matérialisé en `BufWriter::new(File::create)`.
+            Some(t) if t == "@write" => {
+                wraps.push((params.len(), "write"));
+                params.push(format!("{pn}: str"));
+            }
+            // sentinelle **imbriquée** (`list[@read]`…) : non représentable → on saute la fn (honnête).
+            Some(t) if t.contains("@read") || t.contains("@arr") || t.contains("@write") => return None,
             Some(t) => {
                 // param **par valeur** (pas d'emprunt Rust) d'un *handle* (type externe/struct, PascalCase) →
                 // marqué `own` pour que le lowering **ne mette pas** de `&` (ex. `create(spec: WavSpec)`).
@@ -860,7 +865,7 @@ fn project(f: &Json, owner: &str, extra_gen: &Generics) -> Option<Sig> {
     };
     // `@read`/`@arr` sont des sentinelles de **param** ; en position de retour elles n'ont pas de sens →
     // saute la fn plutôt que d'émettre un `.iri` illisible.
-    if ret.contains("@read") || ret.contains("@arr") {
+    if ret.contains("@read") || ret.contains("@arr") || ret.contains("@write") {
         return None;
     }
     // V13 [30200] niveau 1 : retour **formateur** emprunté (`DelayedFormat<…>` de chrono `.format()`) — type
@@ -940,6 +945,8 @@ fn render(name: &str, sig: &Sig, free_path: Option<&str>) -> String {
             .map(|j| match kind(j) {
                 Some("cursor") => format!("std::io::Cursor::new(__a{j})"),
                 Some("array") => format!("__a{j}.try_into().unwrap()"),
+                // V13 [52800]w : puits → écrivain fichier (le chemin str est `__a{j}`).
+                Some("write") => format!("std::io::BufWriter::new(std::fs::File::create(__a{j}).unwrap())"),
                 _ => format!("__a{j}"),
             })
             .collect();
@@ -971,6 +978,11 @@ fn bound_to_iron(bounds: &Json) -> Option<String> {
         // qui enveloppe dans un `Cursor` au binding). `Write` (puits) reste à part (out-param, plus dur).
         if matches!(tname, "Read" | "BufRead") {
             return Some("@read".to_string());
+        }
+        // V13 [52800]w : puits `Write`/`BufWrite` → sentinelle `@write` (param = chemin str ; chemin-closure
+        // crée `BufWriter::new(File::create(path))`). Symétrique de `@read`.
+        if matches!(tname, "Write" | "BufWrite") {
+            return Some("@write".to_string());
         }
         if matches!(tname, "Fn" | "FnMut" | "FnOnce") {
             let par = &tr["args"]["parenthesized"];

@@ -3,3 +3,4 @@ target/
 
 # Projets cargo générés par ironc (hors arbo source de toute façon)
 .ironc-out/
+RayTracer/
