@@ -50,14 +50,18 @@ déclenche pas ; nonce = `Array<u8,N>` (hybrid_array) dont la reconnaissance `@a
 16), déchiffrer → **3**. **Zéro nom de crate dans le compilateur**, zéro régression. Démontre le système
 deux couches sur un crate dur, exactement comme prévu en [50400].
 
-### C3 (const-génériques portés hors-alias)
-**Valeur marginale faible** depuis C1 : le cas dimensions (le seul du corpus) est déjà couvert par les
-alias (C1). Les const-génériques **sans alias dédié** sont rares dans les 80. ABI `ExternArg` non implémentée
-(touche ir.rs/lower/lsp/iri pour un gain marginal). **Différé** — à activer si un crate du corpus l'exige.
+### C3 (const-génériques portés) — **LIVRÉ** (ABI + parse + test)
+Valeur de **langage** (pas de déblocage de crate du corpus : C1 couvre les dimensions, `@arr` les octets).
+Implémenté **additivement, sans nouvelle variante de type** (donc zéro churn des matchs exhaustifs) : un
+entier en position d'argument de type (`ArrayVec[u8, 16]`) est porté en `Type::Extern("16")` et **émis
+littéralement** au lowering → `arrayvec::ArrayVec::<u8, 16>`. Parse ajouté aux **deux** parseurs (`.irn` et
+`.iri`). **Vérifié** : test `extern_app_const_arg_lowers` vert (13 tests au total). Aucun crate du corpus ne
+l'exerce aujourd'hui (capacité présente, prête à servir via curation pour les crates à cap const).
 
-### C4 (builder/flux : flate2) — structurel, non investigué en profondeur
-API à état porté entre appels (`Encoder::new(w).write_all().finish()`). Hors d'une fn one-shot ;
-le rapport le classera `StreamBuilderApi`. **Le plus dur** ; curation probable.
+### C4 (builder/flux : flate2) — **différé** (hors de la demande « C2 C3 puis corpus »)
+API à état porté entre appels (`Encoder::new(w).write_all().finish()`) — structurel, classé
+`StreamBuilderApi`. Comme C2, c'est un cas de **curation**, pas une généralité auto. Non demandé dans la
+dernière directive utilisateur (« C2 C3 puis corpus ») → différé, à curer au besoin.
 
 ## Plafond honnête après V15 (partiel)
 - **Mécanisme décisif livré** : le moteur **connaît et dit** sa portée (exigence #1) + **C1 brise le mur des

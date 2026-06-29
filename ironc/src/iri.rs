@@ -381,6 +381,13 @@ impl P {
             let ret = if self.eat(&TokenKind::Arrow) { self.parse_type()? } else { Type::Unit };
             return Ok(Type::Fn(ps, Box::new(ret)));
         }
+        // [50600 C3] entier en position d'**argument de type** (`GenericArray[u8, 32]`) → const-générique,
+        // émis littéralement au lowering. Réutilise `Extern` (token brut), pas de nouvelle variante de type.
+        if let TokenKind::Int(n) = self.cur() {
+            let s = n.to_string();
+            self.adv();
+            return Ok(Type::Extern(s));
+        }
         let name = self.ident()?;
         if let Some(t) = numeric_type_by_name(&name) {
             return Ok(t);

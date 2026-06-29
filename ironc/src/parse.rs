@@ -537,6 +537,13 @@ impl Parser {
             self.expect(&TokenKind::RParen, "`)`")?;
             return Ok(Type::Tuple(ts));
         }
+        // [50600 C3] entier en position d'**argument de type** (`ArrayVec[u8, 16]`) → const-générique, porté
+        // tel quel et émis **littéralement** au lowering (`::<u8, 16>`). Réutilise `Extern` (token brut).
+        if let TokenKind::Int(n) = self.cur() {
+            let s = n.to_string();
+            self.adv();
+            return Ok(Type::Extern(s));
+        }
         let name = self.ident()?;
         match name.as_str() {
             "i64" => Ok(Type::I64),

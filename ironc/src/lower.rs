@@ -2639,4 +2639,15 @@ mod bridge_abi_tests {
         let empty = Type::ExternApp("scraper::Selector".into(), vec![]);
         assert_eq!(lower_type(&empty).to_string(), quote! { scraper::Selector }.to_string());
     }
+
+    // [50600 C3] const-générique porté en argument de type : un `Extern("16")` (entier, parsé depuis
+    // `ArrayVec[u8, 16]`) s'abaisse en **littéral** dans le turbofish — `ArrayVec::<u8, 16>`.
+    #[test]
+    fn extern_app_const_arg_lowers() {
+        let t = Type::ExternApp(
+            "arrayvec::ArrayVec".into(),
+            vec![Type::Num(NumKind::U8), Type::Extern("16".into())],
+        );
+        assert_eq!(lower_type(&t).to_string(), quote! { arrayvec::ArrayVec::<u8, 16> }.to_string());
+    }
 }
