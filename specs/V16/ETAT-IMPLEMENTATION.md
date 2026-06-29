@@ -40,6 +40,15 @@
 | **Inférence whole-program** ([21800]) | piste indépendante (infer/) non démarrée | retire des annotations forcées |
 | **Désucrage opérateurs** ([30500 §2.1]) | parse/lower | `a+b` sur valeurs empruntées |
 
+## ▶ CLÔTURE V16 (décision utilisateur)
+**V16 est close à ce jalon.** Son apport — l'**escape analysis interprocédurale à point fixe** — est le **1ᵉʳ
+pilier du socle d'ownership** (livré + mesuré, 1.7×). Son **reste** (modes de méthode, last-use, imports,
+inférence, opérateurs, gate) **n'est PAS réalisé en patches** : il est **absorbé par V17 — le moteur d'ownership
+unifié** — parce que ces pièces seraient autrement codées en mécanismes séparés que le socle V17 **reconstruit
+unifié**. Coder pour jeter serait absurde. Donc : V16 = la fondation interprocédurale ; V17 = le moteur qui la
+généralise à tous les sites d'usage et subsume les règles ad-hoc dispersées (`ParamModes`/`OwnershipMap`/
+`byref_params`/for-élément/opérateurs/`extern_arg`).
+
 ## Verdict honnête
 **Le « problème de fond » du rapport (clonage par défaut, plafond de perf) est CORRIGÉ pour les fonctions** :
 la scène et les objets — les deux clones **proportionnels à `objects.len()`** que le rapport jugeait
