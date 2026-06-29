@@ -21,14 +21,15 @@
 rustfft/num-complex/ML) est **débloquée** ; closures, io-lecture, octets/hex livrés. ~6 crates passés de
 **bloqués → verts** cette passe, gate VERT en continu, 0 `unsafe`.
 
-## RACINE 2 — Émission : **NON LIVRÉE** (murs secondaires réels)
+## RACINE 2 — Émission : **PARTIELLEMENT LIVRÉE**
 
-| Capacité | Bloqueur secondaire honnête |
-|---|---|
-| [52900] serde **typé** | `from_str::<T>` (désérialisation) exige une **ascription de type** (`x: T = …`) — **fonctionnalité de langage absente d'Iron**. La sérialisation seule exigerait une stratégie `Serialize` ciblée (garder `T` struct-matérialisable) + dep `serde derive`. |
-| [40400] derive | mécanisme `@derive` présent, mais sans cas d'usage complet (serde-typé ci-dessus). |
-| [24300] impl-trait-externe | l'`impl` peut être émis, mais **l'usage** (GUI) exige RACINE 3 (event-loop) + un écran. |
-| [43000] no_std | mode d'émission faisable, mais **non démontrable** ici (cross-toolchain + **matériel** au run). |
+| Capacité | Statut | Preuve / bloqueur |
+|---|---|---|
+| **[40400] derive** | ✅ | `@derive(serde::Serialize)` → `#[derive(serde::Serialize)]` + dep `serde derive` auto-injectée |
+| **[52900] serde TYPÉ** | ✅ | **ascription de type ajoutée au langage** (`x: T = …`) → `p: Point = from_str("{…}").unwrap()` (x=7 y=9) + `to_string(p)` ({"x":7,"y":9}). De/sérialisation typées. |
+| **ascription de type** (langage) | ✅ | `x: T = value` → `let x: T = …` → `rustc` infère les génériques de l'appel. Nouvelle feature de langage, gate VERT. |
+| [24300] impl-trait-externe | 🔴 mécanisme à écrire | l'`impl` peut être émis, mais **l'usage** (GUI) exige RACINE 3 (event-loop) + un écran. |
+| [43000] no_std | 🔴 mode d'émission à écrire | **non démontrable** ici (cross-toolchain + **matériel** au run). |
 
 ## RACINE 3 — Runtime : **NON LIVRÉE** (prototype requis)
 
@@ -37,10 +38,18 @@ rustfft/num-complex/ML) est **débloquée** ; closures, io-lecture, octets/hex l
 | [53000] async | prototype non fait ; exige exécuteur + (réseau au run = environnement). |
 | [35000] event-loop | prototype non fait ; exige un écran au run (environnement). |
 
-## Verdict honnête
-**RACINE 1 (la cause dominante) est faite et testée** — le plus gros débloquage des 40. **RACINE 2 et 3 ne
-sont PAS faites** : elles butent sur des **besoins secondaires réels** — une **ascription de type** (langage,
-pour serde-typé), la **boucle d'événements** (pour GUI), et l'**environnement** (écran/matériel/réseau/runtime
-async). Ce ne sont pas des oublis : ce sont les frontières que le cadrage avait marquées « à prototyper » et
-« hors-langage (environnement) ». Les livrer proprement = d'autres cycles (dont un **ajout de langage** :
-l'ascription de type), pas une simple passe de binder.
+## Verdict honnête (mis à jour)
+**RACINE 1 (cause dominante) : faite.** **RACINE 2 : derive + serde-typé faits** (+ **ascription de type**
+ajoutée au langage). Reste de RACINE 2/3 = **environnement / matériel**, pas du langage démontrable ici :
+
+| Reste | Pourquoi pas démontrable dans ce bac |
+|---|---|
+| [24300] impl-trait (GUI) | mécanisme d'émission à écrire ; **run** = écran |
+| [43000] no_std (embarqué) | mode d'émission à écrire ; **run** = matériel + toolchain croisée |
+| [53000] async (web) | runtime présent ; **run** = réseau |
+| [35000] event-loop (GUI/jeux) | = callback+impl+shared ; **run** = écran |
+| [24200] arrays (aes-gcm) | le plus dur : `AesGcm[Aes,NonceSize,TagSize]` + typenum |
+| [50500] consts | différé (base64 marche sans) |
+
+Ces restes exigent un **écran / du matériel / du réseau** au *run* (ou le crate le plus dur) — ce sont les
+frontières « environnement ≠ langage » du cadrage. Le **travail de langage** démontrable de V12 est fait.
