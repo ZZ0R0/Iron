@@ -28,12 +28,12 @@
 - `ExternType.base: Option<String>` ; bind émet `base Matrix` dans le bloc de l'alias ; infer (`extern_method_ret`)
   et lower (`try_extern_method`) **retombent sur les méthodes du type de base** quand l'alias ne les a pas.
   Un `Vector3` EST un `Matrix` en Rust → la méthode compile. **Zéro nom de crate** (lien lu de l'alias).
-- **Run réel** : `Vector3.new(3.0,4.0,0.0).norm()` → **5**. Les méthodes **unaires/scalaires** de Matrix
-  (norm, magnitude, …) sont héritées et marchent.
-- **Limite honnête mesurée** : les méthodes **binaires** prenant le **type de base en argument**
-  (`dot(rhs: Matrix)`, `+`, `cross`) **échouent** (E0308) — le Rust généré n'unifie pas `Vector3` avec le
-  paramètre `Matrix`. Donc nalgebra est **opérable en unaire** (construction + norm/magnitude…), **pas encore
-  en binaire**. Fixer = traiter un arg de type-base comme « accepte tout alias de cette base » (non fait).
+- **Run réel** : `Vector3.new(3.0,4.0,0.0).norm()` → **5** (unaire), `a.dot(b)` → **32** (binaire). nalgebra
+  est **pleinement opérable** : construction + méthodes héritées unaires ET binaires.
+- **Fix associé** : `extern_arg` passait un `ExternApp` (type générique appliqué, ex. `Vector3[f64]`) **par
+  valeur** au lieu de `&` (il couvrait `Extern` mais pas `ExternApp`) → les méthodes binaires héritées
+  (`a.dot(b)` veut `&Matrix`) échouaient en E0308. Ajout d'`ExternApp` à l'arm `&` : cohérent avec `Extern`,
+  les params `own` restent interceptés en amont. **Zéro régression** (semver/12 tests verts).
 
 ## 🔬 Investigué avec preuves — pas des gains nets comme C1
 

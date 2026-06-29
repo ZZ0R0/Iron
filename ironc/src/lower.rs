@@ -1929,7 +1929,10 @@ impl Cx<'_> {
             // `Into<clap::Str>`. Strictement plus compatible que `&String`.
             Type::Str => quote! { &*#v },
             // collections/struct/extern → `&` (les API Rust prennent surtout des emprunts ; coerce par Deref).
-            Type::List(_) | Type::Dict(_, _) | Type::Set(_) | Type::Struct(_) | Type::Extern(_) => {
+            // `ExternApp` (type externe **générique appliqué**, ex. `Vector3[f64]`) = handle, comme `Extern` :
+            // passé par `&` (un arg `own` est déjà intercepté en amont par `extern_arg_to`). Corrige les
+            // méthodes binaires héritées (`a.dot(b)` veut `&Matrix`) [50600 C1+].
+            Type::List(_) | Type::Dict(_, _) | Type::Set(_) | Type::Struct(_) | Type::Extern(_) | Type::ExternApp(_, _) => {
                 quote! { &#v }
             }
             _ => v,
