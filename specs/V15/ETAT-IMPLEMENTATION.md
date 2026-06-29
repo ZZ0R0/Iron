@@ -37,15 +37,18 @@
 
 ## 🔬 Investigué avec preuves — pas des gains nets comme C1
 
-### C2 (AEAD : aes-gcm/chacha20) — **rabbit-hole, pas une généralité propre**
-`ironc add aes-gcm` → 40.6 %. Le rapport pointe le gap **exact** : `AesGcm::encrypt/decrypt
-[UnmappedType: impl Into]`. Preuves de la dureté :
-- plaintext = `impl Into<Payload>` ; **`From<&[u8]> for Payload` : 0 détecté** (lifetimes `'msg,'aad`) → la
-  règle générale **propre** « `Into<T>` où `T: From<&[u8]>` » **ne se déclenche pas**. La seule alternative
-  (`impl Into<X>` → octets pour tout X) est l'**heuristique ambiguë** str-vs-bytes déjà rejetée (V12).
-- nonce = `Array<u8, NonceSize>` (typenum) : handle **opaque**, non-constructible côté Iron sans règle dédiée.
-- **Verdict honnête** : AEAD = soit heuristiques crate-flavored (interdit), soit **curation** `<crate>.iri`
-  (le rapport donne le hint). Ce n'est PAS le cas propre de C1.
+### C2 (AEAD : aes-gcm) — **LIVRÉ via curation** (auto non généralisable sans risque)
+**Pourquoi pas auto** : `ironc add aes-gcm` → 40.6 % ; le rapport pointe le gap exact (`encrypt/decrypt
+[UnmappedType: impl Into]`). Preuves que l'auto-propre échoue : plaintext = `impl Into<Payload>` et
+**`From<&[u8]> for Payload` = 0 détecté** (lifetimes) → la règle propre `Into<T> où T: From<&[u8]>` ne se
+déclenche pas ; nonce = `Array<u8,N>` (hybrid_array) dont la reconnaissance `@arr` **casserait ndarray**
+(`Array<u8,_>` ambigu crypto-vs-ndarray) — régression inacceptable sur un crate que C1 vient d'activer.
+**Donc : curation** (le filet I7-2, rendu facile par la fondation).
+
+**Livré (run réel)** : `specs/V15/examples/aes_gcm.iri` (couche curée) binde `Aes256Gcm.new/encrypt/decrypt`
+(clé/nonce via `try_into`, plaintext `&[u8]`). Round-trip vérifié : chiffrer 3 octets → **19** (3 + tag GCM
+16), déchiffrer → **3**. **Zéro nom de crate dans le compilateur**, zéro régression. Démontre le système
+deux couches sur un crate dur, exactement comme prévu en [50400].
 
 ### C3 (const-génériques portés hors-alias)
 **Valeur marginale faible** depuis C1 : le cas dimensions (le seul du corpus) est déjà couvert par les

@@ -1,0 +1,11 @@
+# Couche CURÉE (V15 [50400] niveau I7-2) — complète l'auto `aes_gcm.gen.iri`.
+# Le cipher concret Aes256Gcm (= AesGcm<Aes256, U12>) n'est pas relié par l'auto (ctor sur le générique
+# AesGcm) ; on le binde à la main. Clé/nonce = octets (try_into, comme le ctor auto) ; plaintext = &[u8]
+# (Payload: From<&[u8]>). Démontre le système deux couches sur un crate dur (AEAD).
+crate aes-gcm = "0.11.0"
+crate aead = "0.6.1"
+
+extern type Aes256Gcm = "aes_gcm::Aes256Gcm":
+    fn new(key: list[u8]) -> Aes256Gcm = "(|k: &[u8]| <aes_gcm::Aes256Gcm as aes_gcm::KeyInit>::new(k.try_into().unwrap()))"
+    fn encrypt(self, nonce: list[u8], plaintext: list[u8]) -> Result[list[u8]] = "(|c: &aes_gcm::Aes256Gcm, n: &[u8], p: &[u8]| aes_gcm::aead::Aead::encrypt(c, n.try_into().unwrap(), p))"
+    fn decrypt(self, nonce: list[u8], ciphertext: list[u8]) -> Result[list[u8]] = "(|c: &aes_gcm::Aes256Gcm, n: &[u8], ct: &[u8]| aes_gcm::aead::Aead::decrypt(c, n.try_into().unwrap(), ct))"
