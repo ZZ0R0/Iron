@@ -124,6 +124,9 @@ struct Sig {
     params: Vec<String>,
     ret: String,
     idioms: Vec<&'static str>,
+    /// V12 [52800] : index d'un paramètre `impl Read`/`BufRead` (source io) — la fn libre est alors émise
+    /// avec un **chemin-closure** qui enveloppe l'argument str dans un `std::io::Cursor`. `None` si aucun.
+    read_param: Option<usize>,
 }
 
 /// `id → chemin **public**` en parcourant l'arbre des modules **publics** + les re-exports `pub use`
@@ -733,6 +736,7 @@ fn project(f: &Json, owner: &str, extra_gen: &Generics) -> Option<Sig> {
     let mut recv = None;
     let mut params = Vec::new();
     let mut idioms = Vec::new();
+    let mut read_param: Option<usize> = None;
     for (i, inp) in inputs.iter().enumerate() {
         let pn = inp[0].as_str().unwrap_or("x");
         let ty = &inp[1];
@@ -754,6 +758,14 @@ fn project(f: &Json, owner: &str, extra_gen: &Generics) -> Option<Sig> {
             pn.to_string()
         };
         match map_type(ty, &gen) {
+            // V12 [52800] : source io → param `str`, mémoriser l'index pour le chemin-closure (un seul supporté).
+            Some(t) if t == "@read" => {
+                if read_param.is_some() {
+                    return None; // deux sources io dans une même fn : non géré → on saute (honnête)
+                }
+                read_param = Some(params.len());
+                params.push(format!("{pn}: str"));
+            }
             Some(t) => {
                 // param **par valeur** (pas d'emprunt Rust) d'un *handle* (type externe/struct, PascalCase) →
                 // marqué `own` pour que le lowering **ne mette pas** de `&` (ex. `create(spec: WavSpec)`).
@@ -784,7 +796,7 @@ fn project(f: &Json, owner: &str, extra_gen: &Generics) -> Option<Sig> {
     } else {
         map_type(out, &gen)?
     };
-    Some(Sig { recv, params, ret, idioms })
+    Some(Sig { recv, params, ret, idioms, read_param })
 }
 
 fn recv_kind(ty: &Json) -> &'static str {
@@ -820,7 +832,19 @@ fn render(name: &str, sig: &Sig, free_path: Option<&str>) -> String {
     parts.extend(sig.params.iter().cloned());
     let params = parts.join(", ");
     // chemin : fn libre → chemin complet fourni ; méthode → nom court (résolu par la lower) ; ctor → nom court.
-    let path = free_path.map(|p| p.to_string()).unwrap_or_else(|| name.to_string());
+    let mut path = free_path.map(|p| p.to_string()).unwrap_or_else(|| name.to_string());
+    // V12 [52800] : source io → chemin-closure qui enveloppe l'argument str dans un `Cursor` (fn libre/ctor à
+    // chemin complet). `read("…")` → `(|__a0| gpx::read(std::io::Cursor::new(__a0)))(&*"…")`.
+    if let Some(ri) = sig.read_param {
+        if path.contains("::") {
+            let n = sig.params.len();
+            let names: Vec<String> = (0..n).map(|j| format!("__a{j}")).collect();
+            let call: Vec<String> = (0..n)
+                .map(|j| if j == ri { format!("std::io::Cursor::new({})", names[j]) } else { names[j].clone() })
+                .collect();
+            path = format!("(|{}| {}({}))", names.join(", "), path, call.join(", "));
+        }
+    }
     let idioms = if sig.idioms.is_empty() {
         String::new()
     } else {
@@ -843,6 +867,11 @@ fn bound_to_iron(bounds: &Json) -> Option<String> {
         let tname = tr["path"].as_str().unwrap_or("").rsplit("::").next().unwrap_or("");
         // V12 [40300] : borne closure `Fn(A,…)->B`/`FnMut`/`FnOnce` → type fonction Iron `fn(A,…) -> B`
         // (l'argument sera une **lambda** Iron). Args concrets requis (mappés en Generics vide) ; sinon None.
+        // V12 [52800] : source io `Read`/`BufRead` → sentinelle `@read` (projetée en `str` + chemin-closure
+        // qui enveloppe dans un `Cursor` au binding). `Write` (puits) reste à part (out-param, plus dur).
+        if matches!(tname, "Read" | "BufRead") {
+            return Some("@read".to_string());
+        }
         if matches!(tname, "Fn" | "FnMut" | "FnOnce") {
             let par = &tr["args"]["parenthesized"];
             let inputs: Option<Vec<String>> = par["inputs"]
