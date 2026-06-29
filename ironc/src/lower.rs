@@ -840,8 +840,10 @@ impl Cx<'_> {
                         let i = self.value(idx);
                         match self.type_of(base) {
                             Type::Dict(..) => quote! { #b.insert(#i, #v); },
-                            // index négatif normalisé côté écriture aussi (`xs[-1] = v`).
-                            _ => quote! { #b[{ let __i = (#i) as i64; let __n = #b.len() as i64; (if __i < 0 { __n + __i } else { __i }) as usize }] = #v; },
+                            // index négatif normalisé côté écriture (`xs[-1] = v`, `xs[i] += v`). L'index est
+                            // **hoisté** dans un `let` AVANT l'écriture : sinon `#b.len()` (emprunt immuable) et
+                            // l'affectation `#b[..] =` (emprunt mutable) se chevaucheraient → E0502.
+                            _ => quote! { { let __k = { let __i = (#i) as i64; let __n = #b.len() as i64; (if __i < 0 { __n + __i } else { __i }) as usize }; #b[__k] = #v; } },
                         }
                     }
                     // écriture de champ à travers un shared[Struct] (30300) → borrow_mut().
@@ -2797,6 +2799,10 @@ fn coerce_sized_binop(l: TokenStream, r: TokenStream, lt: &Type, rt: &Type) -> (
             let id = format_ident!("{}", num_kind_str(*k));
             (quote! { (#l) as #id }, r)
         }
+        // Promotion numérique (Python) : un opérande **entier** face à un **f64** → cast `as f64`
+        // (Rust interdit `i64 + f64`). L'inférence a déjà typé le résultat `f64` (cf. `binary`).
+        (Type::F64, Type::I64) => (l, quote! { (#r) as f64 }),
+        (Type::I64, Type::F64) => (quote! { (#l) as f64 }, r),
         _ => (l, r),
     }
 }

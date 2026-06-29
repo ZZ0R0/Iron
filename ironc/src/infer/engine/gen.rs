@@ -451,6 +451,17 @@ impl<'a> Gen<'a> {
                 self.eq(tl.clone(), tr, sp);
                 tl
             }
+            // Promotion numérique (Python) : `i64 + f64` → `f64`, **sans** unifier les opérandes (le lowering
+            // caste l'entier en `f64`). Restreint à l'arithmétique vraie (Add/Sub/Mul/Div), où le lowering
+            // sait promouvoir ; Pow/FloorDiv/Rem/bit-ops mixtes restent un conflit (diagnostic natif).
+            Add | Sub | Mul | Div
+                if matches!(
+                    (self.subst.apply(&tl), self.subst.apply(&tr)),
+                    (Type::F64, Type::I64) | (Type::I64, Type::F64)
+                ) =>
+            {
+                Type::F64
+            }
             Add | Sub | Mul | Div | Rem | Pow | FloorDiv | BitAnd | BitOr | BitXor | Shl | Shr => {
                 self.eq(tl.clone(), tr, sp);
                 let b = match op {
