@@ -997,7 +997,8 @@ impl Cx<'_> {
             // type externe → itération **par valeur** : la boucle `for` Rust appelle `into_iter`, ce qui
             // couvre à la fois les `impl IntoIterator` (`WalkDir`) ET les `impl Iterator` (`StringRecordsIter`,
             // via le blanket `IntoIterator for I: Iterator`). Un externe non itérable échouera proprement.
-            Type::Extern(_) => quote! { #it },
+            // type externe (opaque OU générique appliqué, V12) → itération par valeur (`into_iter`).
+            Type::Extern(_) | Type::ExternApp(_, _) => quote! { #it },
             _ => quote! { #it.iter().cloned() },
         }
     }

@@ -336,6 +336,16 @@ fn emit(v: &Json, crate_name: &str, crate_real: &str, versions: &HashMap<String,
                 }
             }
         }
+        // Bornes en clause `where` de l'impl (`impl<P> … where P: FnMut(&DirEntry)->bool`) — fréquent pour les
+        // closures (V12 [40300]). Elles **améliorent** un param resté générique (`Some("P")`) en son type Iron.
+        for w in imp["generics"]["where_predicates"].as_array().into_iter().flatten() {
+            let bp = &w["bound_predicate"];
+            if let Some(name) = bp["type"]["generic"].as_str() {
+                if let Some(t) = bound_to_iron(&bp["bounds"]) {
+                    blanket_self.insert(name.to_string(), Some(t));
+                }
+            }
+        }
         let for_params: Vec<String> = imp["for"]["resolved_path"]["args"]["angle_bracketed"]["args"]
             .as_array()
             .into_iter()
@@ -831,6 +841,20 @@ fn bound_to_iron(bounds: &Json) -> Option<String> {
     for b in bounds.as_array().into_iter().flatten() {
         let tr = &b["trait_bound"]["trait"];
         let tname = tr["path"].as_str().unwrap_or("").rsplit("::").next().unwrap_or("");
+        // V12 [40300] : borne closure `Fn(A,…)->B`/`FnMut`/`FnOnce` → type fonction Iron `fn(A,…) -> B`
+        // (l'argument sera une **lambda** Iron). Args concrets requis (mappés en Generics vide) ; sinon None.
+        if matches!(tname, "Fn" | "FnMut" | "FnOnce") {
+            let par = &tr["args"]["parenthesized"];
+            let inputs: Option<Vec<String>> = par["inputs"]
+                .as_array()
+                .map(|a| a.iter().map(|t| map_type(t, &Generics::new())).collect())
+                .unwrap_or(Some(vec![]));
+            let out = match par.get("output") {
+                Some(o) if !o.is_null() => map_type(o, &Generics::new())?,
+                _ => "unit".to_string(),
+            };
+            return inputs.map(|i| format!("fn({}) -> {out}", i.join(", ")));
+        }
         let arg = tr["args"]["angle_bracketed"]["args"]
             .as_array()
             .and_then(|a| a.first())
