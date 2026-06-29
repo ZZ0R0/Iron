@@ -126,26 +126,29 @@ pub fn resolve(ast: &Ast, types: &TypeMap) -> OwnershipPlan {
     OwnershipPlan { sites: own, params: modes }
 }
 
-/// I1 — `move` à la dernière utilisation. Heuristique **single-use** saine : une variable lue **une seule
-/// fois** en position valeur, **hors boucle**, est `Move` (sa lecture est forcément la dernière) ; sinon
-/// clone-fallback. Conservateur (rate des moves multi-lectures), jamais incorrect.
+/// I1 — `move` à la **dernière utilisation**. On collecte TOUTES les lectures (valeur ET emprunt) en
+/// ordre de traversée ; une lecture en **valeur**, **hors boucle**, est `Move` ssi c'est la **dernière**
+/// utilisation de la variable (aucune lecture ultérieure, valeur ou emprunt). Sinon clone-fallback (sûr).
+/// Compter aussi les emprunts est essentiel : `c = a + b` (b consommé) puis `a == b` (b emprunté) — sans
+/// la lecture-emprunt ultérieure, b paraîtrait à usage unique et serait moved, invalidant l'emprunt (E0382).
+/// Préserve V17 : un Vec3 emprunté N fois puis lu en valeur au `return` final reste un Move (rien après).
 fn compute_moves(body: &[Stmt], own: &mut OwnershipMap) {
-    let mut reads: Vec<(String, NodeId, bool)> = Vec::new();
+    let mut reads: Vec<(String, NodeId, bool, bool)> = Vec::new(); // (nom, id, in_loop, is_value)
     for s in body {
         creads_stmt(s, false, &mut reads);
     }
-    let mut count: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
-    for (n, _, _) in &reads {
-        *count.entry(n.as_str()).or_insert(0) += 1;
-    }
-    for (n, id, in_loop) in &reads {
-        if !in_loop && count[n.as_str()] == 1 {
-            own.insert(*id, Disposition::Move);
+    for i in 0..reads.len() {
+        let (n, id, in_loop, is_value) = &reads[i];
+        if *is_value && !*in_loop {
+            let used_later = reads[i + 1..].iter().any(|(m, _, _, _)| m == n);
+            if !used_later {
+                own.insert(*id, Disposition::Move);
+            }
         }
     }
 }
 
-fn creads_stmt(s: &Stmt, in_loop: bool, out: &mut Vec<(String, NodeId, bool)>) {
+fn creads_stmt(s: &Stmt, in_loop: bool, out: &mut Vec<(String, NodeId, bool, bool)>) {
     match &s.kind {
         StmtKind::Let { value, .. } | StmtKind::Yield(value) => creads(value, Pos::Value, in_loop, out),
         StmtKind::Assign { target, value } => {
@@ -203,11 +206,14 @@ fn creads_stmt(s: &Stmt, in_loop: bool, out: &mut Vec<(String, NodeId, bool)>) {
     }
 }
 
-fn creads(e: &Expr, pos: Pos, in_loop: bool, out: &mut Vec<(String, NodeId, bool)>) {
+fn creads(e: &Expr, pos: Pos, in_loop: bool, out: &mut Vec<(String, NodeId, bool, bool)>) {
     match &e.kind {
         ExprKind::Var(n) => {
-            if pos == Pos::Value && n != "self" && n != "none" {
-                out.push((n.clone(), e.id, in_loop));
+            // On collecte TOUTES les lectures (valeur ET emprunt) — l'emprunt ne devient jamais un `Move`
+            // (gardé par `is_value` dans `compute_moves`), mais sert à voir qu'une variable est **réutilisée
+            // plus tard** (donc pas movable à une lecture-valeur antérieure).
+            if n != "self" && n != "none" {
+                out.push((n.clone(), e.id, in_loop, pos == Pos::Value));
             }
         }
         ExprKind::Field { base, .. } => creads(base, Pos::Borrow, in_loop, out),
