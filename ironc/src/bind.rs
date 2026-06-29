@@ -1090,6 +1090,15 @@ fn map_type(t: &Json, gen: &Generics) -> Option<String> {
             .as_array()
             .map(|a| a.iter().filter_map(|x| x.get("type")).collect())
             .unwrap_or_default();
+        // V13 [24500]A : tableau d'**octets** de taille fixe porté par un type — `GenericArray<u8, N>` ou
+        // les alias crypto `Key`/`Nonce`/`Tag` (= `GenericArray<u8, …>`) → sentinelle `@arr`. Matérialisé par
+        // `(&v[..]).try_into()`/`from_slice` (taille **inférée** par rustc), comme `[u8; N]` en V12 [24200].
+        if name == "GenericArray" && targs.first().and_then(|t| t["primitive"].as_str()) == Some("u8") {
+            return Some("@arr".to_string());
+        }
+        if matches!(name, "Key" | "Nonce" | "Tag") {
+            return Some("@arr".to_string());
+        }
         // B33 : si le chemin pointe sur un alias de type, l'expanser (`ImageResult<DynamicImage>` →
         // `Result[DynamicImage]`). On ne le fait que si l'expansion **mappe** ; sinon on retombe sur le
         // handle (`map_named`) — strictement non régressif.
