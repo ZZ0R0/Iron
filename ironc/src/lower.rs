@@ -805,7 +805,7 @@ impl Cx<'_> {
             }
             StmtKind::For { var, iter, body, els } => {
                 let vid = format_ident!("{}", var);
-                let it = self.for_iter(iter);
+                let it = self.for_iter(iter, for_var_borrowable(var, body));
                 let (b, els_ts, flag) = self.lower_loop_body(body, els);
                 match flag {
                     Some(fl) => quote! { let mut #fl = false; for #vid in #it { #(#b)* } if !#fl { #(#els_ts)* } },
@@ -989,7 +989,7 @@ impl Cx<'_> {
         (b, els_ts, flag)
     }
 
-    fn for_iter(&mut self, iter: &Expr) -> TokenStream {
+    fn for_iter(&mut self, iter: &Expr, borrow: bool) -> TokenStream {
         if let ExprKind::Call { callee, args } = &iter.kind {
             if let ExprKind::Var(n) = &callee.kind {
                 if n == "range" {
@@ -1009,6 +1009,9 @@ impl Cx<'_> {
             // via le blanket `IntoIterator for I: Iterator`). Un externe non itérable échouera proprement.
             // type externe (opaque OU générique appliqué, V12) → itération par valeur (`into_iter`).
             Type::Extern(_) | Type::ExternApp(_, _) => quote! { #it },
+            // [30500 §1 corollaire] corps read-only de la variable de boucle → **élément emprunté**
+            // (`for x in xs.iter()`, `x: &T`) au lieu de cloner chaque élément. Sinon clone-fallback (sûr).
+            _ if borrow => quote! { #it.iter() },
             _ => quote! { #it.iter().cloned() },
         }
     }
@@ -2632,6 +2635,96 @@ fn lower_binop(op: BinOp) -> TokenStream {
         BinOp::Shr => quote! { >> },
         // Pow/FloorDiv/In/NotIn ne passent jamais par lower_binop (value(Binary) les spécial-case, 2.4/2.5).
         BinOp::Pow | BinOp::FloorDiv | BinOp::In | BinOp::NotIn => quote! { + },
+    }
+}
+
+/// [30500 §1 corollaire] La variable de boucle `var` est-elle **seulement lue** (jamais consommée par valeur)
+/// dans `body` ? Si oui, on peut emprunter l'élément (`for x in xs.iter()`) au lieu de le cloner. **Conservateur**
+/// (sur-approxime la consommation : doute → `false`, on clone) — strictement sûr.
+fn for_var_borrowable(var: &str, body: &[Stmt]) -> bool {
+    !body.iter().any(|s| stmt_consumes(var, s))
+}
+
+fn stmt_consumes(var: &str, s: &Stmt) -> bool {
+    match &s.kind {
+        StmtKind::Let { value, .. }
+        | StmtKind::Yield(value)
+        | StmtKind::ExprStmt(value)
+        | StmtKind::Destructure { value, .. }
+        | StmtKind::Raise { value } => expr_consumes(var, value, true),
+        StmtKind::Assign { target, value } => expr_consumes(var, target, false) || expr_consumes(var, value, true),
+        StmtKind::Return { value } => value.as_ref().is_some_and(|e| expr_consumes(var, e, true)),
+        StmtKind::If { cond, then, elifs, els } => {
+            expr_consumes(var, cond, false)
+                || then.iter().any(|s| stmt_consumes(var, s))
+                || elifs.iter().any(|(c, b)| expr_consumes(var, c, false) || b.iter().any(|s| stmt_consumes(var, s)))
+                || els.iter().any(|s| stmt_consumes(var, s))
+        }
+        StmtKind::While { cond, body, els } => {
+            expr_consumes(var, cond, false) || body.iter().chain(els).any(|s| stmt_consumes(var, s))
+        }
+        StmtKind::For { iter, body, els, .. } => {
+            expr_consumes(var, iter, false) || body.iter().chain(els).any(|s| stmt_consumes(var, s))
+        }
+        StmtKind::Match { scrutinee, arms } => {
+            expr_consumes(var, scrutinee, true)
+                || arms.iter().any(|a| {
+                    a.guard.as_ref().is_some_and(|g| expr_consumes(var, g, false))
+                        || a.body.iter().any(|s| stmt_consumes(var, s))
+                })
+        }
+        StmtKind::Assert { cond, msg } => {
+            expr_consumes(var, cond, false) || msg.as_ref().is_some_and(|m| expr_consumes(var, m, false))
+        }
+        StmtKind::TryExcept { body, handler, .. } => body.iter().chain(handler).any(|s| stmt_consumes(var, s)),
+        StmtKind::Seq(ss) => ss.iter().any(|s| stmt_consumes(var, s)),
+        StmtKind::Break | StmtKind::Continue | StmtKind::Pass | StmtKind::RustBlock(_) => false,
+    }
+}
+
+/// `var` est-il **consommé** (déplacé) dans `e` ? `value_pos` = position valeur (un `Var` y est consommé) ;
+/// base de champ/index, récepteur de méthode, opérande de comparaison, arg de `print`/`len` = lecture.
+fn expr_consumes(var: &str, e: &Expr, value_pos: bool) -> bool {
+    match &e.kind {
+        ExprKind::Var(n) => value_pos && n == var,
+        ExprKind::Field { base, .. } => expr_consumes(var, base, false),
+        ExprKind::Index { base, idx } => expr_consumes(var, base, false) || expr_consumes(var, idx, true),
+        ExprKind::Unary { expr, .. } => expr_consumes(var, expr, true),
+        ExprKind::Binary { op, lhs, rhs } => {
+            let vp = !matches!(op, BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge);
+            expr_consumes(var, lhs, vp) || expr_consumes(var, rhs, vp)
+        }
+        ExprKind::Call { callee, args } => {
+            let recv = if let ExprKind::Field { base, .. } = &callee.kind {
+                expr_consumes(var, base, false)
+            } else {
+                false
+            };
+            let borrow_args = matches!(&callee.kind, ExprKind::Var(g) if g == "print" || g == "len");
+            recv || args.iter().any(|a| expr_consumes(var, a, !borrow_args))
+        }
+        ExprKind::StructLit { fields, .. } => fields.iter().any(|(_, v)| expr_consumes(var, v, true)),
+        ExprKind::ListLit { items } => items.iter().any(|x| expr_consumes(var, x, true)),
+        ExprKind::DictLit { pairs } => pairs.iter().any(|(k, v)| expr_consumes(var, k, true) || expr_consumes(var, v, true)),
+        ExprKind::Try { inner } | ExprKind::Await(inner) => expr_consumes(var, inner, true),
+        ExprKind::Lambda { body, .. } => expr_consumes(var, body, true), // capture conservatrice
+        ExprKind::Closure { body, .. } => body.iter().any(|s| stmt_consumes(var, s)),
+        ExprKind::Tuple(items) => items.iter().any(|e| expr_consumes(var, e, true)),
+        ExprKind::FString(parts) => parts.iter().any(|p| matches!(p, FStringPart::Expr(e) if expr_consumes(var, e, false))),
+        ExprKind::Comp { body, iter, cond, .. } => {
+            expr_consumes(var, iter, true)
+                || expr_consumes(var, body, true)
+                || cond.as_ref().is_some_and(|c| expr_consumes(var, c, false))
+        }
+        ExprKind::Ternary { cond, then, els } => {
+            expr_consumes(var, cond, false) || expr_consumes(var, then, true) || expr_consumes(var, els, true)
+        }
+        ExprKind::Slice { base, lo, hi } => {
+            expr_consumes(var, base, false)
+                || lo.as_ref().is_some_and(|l| expr_consumes(var, l, false))
+                || hi.as_ref().is_some_and(|h| expr_consumes(var, h, false))
+        }
+        ExprKind::Lit(_) => false,
     }
 }
 
