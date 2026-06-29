@@ -839,7 +839,9 @@ fn bound_to_iron(bounds: &Json) -> Option<String> {
             .and_then(|t| t["resolved_path"]["path"].as_str().or_else(|| t["primitive"].as_str()))
             .map(|p| p.rsplit("::").next().unwrap_or(p));
         match (tname, arg_name) {
-            ("AsRef" | "Into" | "AsMut", Some("Path" | "PathBuf" | "OsStr" | "OsString" | "str" | "String")) => {
+            // `Str` (V12 [24100b]) : newtype-chaîne de crate (`clap::Str`, etc.) — un type **nommé `Str`** est
+            // un emballage de chaîne ; `Into<Str>` accepte donc une chaîne Iron (`Command.new("app")`).
+            ("AsRef" | "Into" | "AsMut", Some("Path" | "PathBuf" | "OsStr" | "OsString" | "str" | "String" | "Str")) => {
                 return Some("str".to_string())
             }
             ("ToString", _) => return Some("str".to_string()),

@@ -1905,8 +1905,12 @@ impl Cx<'_> {
         let ty = self.type_of(x);
         let v = self.value(x);
         match ty {
-            // `str`/collections/struct/extern → `&` (les API Rust prennent surtout des emprunts ; coerce par Deref).
-            Type::Str | Type::List(_) | Type::Dict(_, _) | Type::Set(_) | Type::Struct(_) | Type::Extern(_) => {
+            // `str` → `&*v` (= `&str`, déréf de `String`) : V12 [24100b] — `&str` satisfait `&str`,
+            // `AsRef<Path/str/[u8]>` ET `Into<String/Str>` (via `From<&str>`), là où `&String` échoue sur
+            // `Into<clap::Str>`. Strictement plus compatible que `&String`.
+            Type::Str => quote! { &*#v },
+            // collections/struct/extern → `&` (les API Rust prennent surtout des emprunts ; coerce par Deref).
+            Type::List(_) | Type::Dict(_, _) | Type::Set(_) | Type::Struct(_) | Type::Extern(_) => {
                 quote! { &#v }
             }
             _ => v,
