@@ -9,6 +9,7 @@ fn main() {
     let audit = args.iter().any(|a| a == "--audit");
     let debug = args.iter().any(|a| a == "--debug");
     let no_std = args.iter().any(|a| a == "--no-std"); // V12 [43000] : émission `#![no_std]` + alloc (embarqué)
+    let strict = args.iter().any(|a| a == "--strict"); // V15 [50500] : `add` échoue si couverture < seuil
     let positional: Vec<&String> = args.iter().filter(|a| !a.starts_with("--")).collect();
     // `ironc lsp` : serveur de langage (stdio, sans fichier).
     if positional.first().map(|s| s.as_str()) == Some("lsp") {
@@ -47,14 +48,14 @@ fn main() {
         "run" => driver::run(input, audit),
         "test" => driver::test(input),
         "new" => driver::new_project(positional[1].as_str()),
-        "add" => driver::add(positional[1].as_str()),
+        "add" => driver::add(positional[1].as_str(), strict),
         "remove" => driver::remove(positional[1].as_str()),
         "check" => driver::check(input),
         "fmt" => driver::fmt(input),
         "doc" => driver::doc(input),
         "lib" => driver::lib(input),
         "lint" => driver::lint(input),
-        "bind" => bind::bind(input, positional.get(2).map(|s| s.as_str())).map(|iri| print!("{iri}")),
+        "bind" => bind::bind(input, positional.get(2).map(|s| s.as_str())).map(|out| print!("{}", out.iri)),
         other => {
             eprintln!("ironc: commande inconnue : {other}");
             exit(2);

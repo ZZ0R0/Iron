@@ -74,21 +74,25 @@ pub fn compile_with(src: &str, file: FileId, base_dir: &Path, clean: bool) -> CR
             load_module(&m, base_dir, &mut ast.items, &mut ast.imports, &mut ext, &mut next_id, &mut next_file, &mut loaded, &mut loading)?;
             continue;
         }
-        // binding `.iri` : cherché à côté du source, puis à la **racine du projet** (parent) et dans le
-        // **cwd** — c'est là qu'`ironc add` l'écrit. On pousse le chemin **absolu** (load_bindings le résout
-        // tel quel : `base_dir.join(absolu) == absolu`).
-        let cands = [
-            base_dir.join(format!("{m}.iri")),
-            base_dir.join("..").join(format!("{m}.iri")),
-            PathBuf::from(format!("{m}.iri")),
-        ];
-        if let Some(found) = cands.iter().find(|p| p.exists()) {
-            let abs = std::fs::canonicalize(found).unwrap_or_else(|_| found.clone());
-            ast.imports.push(abs.to_string_lossy().into_owned());
+        // binding **deux couches** (50400) : `{m}.gen.iri` (auto, régénérable) chargé d'ABORD, puis
+        // `{m}.iri` (curé, écrit à la main) qui **écrase par entrée** (last-wins de `load_bindings`). Cherchés
+        // à côté du source, à la **racine du projet** (parent) et dans le **cwd** (où `ironc add` écrit). On
+        // pousse le chemin **absolu** (load_bindings le résout tel quel).
+        let dirs = [base_dir.to_path_buf(), base_dir.join(".."), PathBuf::from(".")];
+        let mut pushed = false;
+        for suffix in ["gen.iri", "iri"] {
+            let fname = format!("{m}.{suffix}");
+            if let Some(found) = dirs.iter().map(|d| d.join(&fname)).find(|p| p.exists()) {
+                let abs = std::fs::canonicalize(&found).unwrap_or(found);
+                ast.imports.push(abs.to_string_lossy().into_owned());
+                pushed = true;
+            }
+        }
+        if pushed {
             continue;
         }
         return Err(CompileError::msg(format!(
-            "`import {m}` : ni module `{m}.irn`, ni binding `{m}.iri`. Lance `ironc add {m}` (ou fournis `{m}.iri`)."
+            "`import {m}` : ni module `{m}.irn`, ni binding (`{m}.gen.iri` / `{m}.iri`). Lance `ironc add {m}` (ou fournis `{m}.iri`)."
         )));
     }
     ast.extern_types = ext;
@@ -291,7 +295,9 @@ pub fn doc(input: &Path) -> CResult<()> {
 /// `ironc remove <crate>` (V9.1, 72100) : retire le crate d'`ironc.toml` + supprime `<crate>.iri`.
 pub fn remove(crate_name: &str) -> CResult<()> {
     let crate_name = &crate_name.replace('-', "_"); // même normalisation que `add` (tirets → underscores)
-    let _ = std::fs::remove_file(format!("{crate_name}.iri"));
+    let _ = std::fs::remove_file(format!("{crate_name}.iri")); // couche curée éventuelle
+    let _ = std::fs::remove_file(format!("{crate_name}.gen.iri")); // couche auto (50400)
+    let _ = std::fs::remove_file(format!("{crate_name}.iri.report.md")); // rapport (50500)
     if let Ok(toml) = std::fs::read_to_string("ironc.toml") {
         let filtered: Vec<&str> = toml
             .lines()
@@ -308,12 +314,12 @@ pub fn update() -> CResult<()> {
     let mut n = 0;
     if let Ok(entries) = std::fs::read_dir(".") {
         for e in entries.flatten() {
-            let p = e.path();
-            if p.extension().and_then(|s| s.to_str()) == Some("iri") {
-                if let Some(stem) = p.file_stem().and_then(|s| s.to_str()) {
-                    if add(stem).is_ok() {
-                        n += 1;
-                    }
+            let name = e.file_name();
+            let name = name.to_string_lossy();
+            // Re-binde les couches **auto** `<crate>.gen.iri` (50400) ; la curation `<crate>.iri` est préservée.
+            if let Some(stem) = name.strip_suffix(".gen.iri") {
+                if add(stem, false).is_ok() {
+                    n += 1;
                 }
             }
         }
@@ -351,7 +357,7 @@ pub fn check(input: &Path) -> CResult<()> {
 
 /// `ironc add <crate>` (V9.1, 52300) : binde un crate Rust et écrit `<crate>.iri` dans le dossier courant
 /// (que `import <crate>` trouvera) + l'ajoute à `ironc.toml`. Crée un projet temporaire pour rustdoc.
-pub fn add(crate_name: &str) -> CResult<()> {
+pub fn add(crate_name: &str, strict: bool) -> CResult<()> {
     // Le **nom de fichier** `.iri` (= identifiant d'import) normalise les tirets en underscores :
     // `import num_integer`, pas `num-integer` (illégal comme identifiant). Le **nom de crate** garde son
     // tiret pour `cargo`/le binder (rustdoc), et les chemins Rust sont déjà en underscore.
@@ -372,10 +378,19 @@ pub fn add(crate_name: &str) -> CResult<()> {
     std::fs::write(tmp.join("src/main.rs"), "fn main() {}\n")
         .map_err(|e| CompileError::msg(format!("écriture main.rs : {e}")))?;
     let _ = Command::new("cargo").args(["fetch"]).current_dir(&tmp).output();
-    // bind → `.iri`.
-    let iri = crate::bind::bind(&tmp, Some(crate_name))?;
-    std::fs::write(format!("{stem}.iri"), &iri)
-        .map_err(|e| CompileError::msg(format!("écriture {stem}.iri : {e}")))?;
+    // bind → couche **auto** `.gen.iri` (50400, machine-owned, régénérable) + **rapport** de portée (50500).
+    let out = crate::bind::bind(&tmp, Some(crate_name))?;
+    let header = format!(
+        "# AUTO-GÉNÉRÉ par `ironc add {crate_name}` — NE PAS ÉDITER.\n\
+         # Curation à la main → `{stem}.iri` (écrase l'auto par entrée). Rapport : `{stem}.iri.report.md`.\n"
+    );
+    std::fs::write(format!("{stem}.gen.iri"), format!("{header}{}", out.iri))
+        .map_err(|e| CompileError::msg(format!("écriture {stem}.gen.iri : {e}")))?;
+    std::fs::write(
+        format!("{stem}.iri.report.md"),
+        crate::bind::render_report(crate_name, &out.diagnostics, out.coverage),
+    )
+    .map_err(|e| CompileError::msg(format!("écriture {stem}.iri.report.md : {e}")))?;
     // ajout à `ironc.toml` (si présent).
     if let Ok(mut toml) = std::fs::read_to_string("ironc.toml") {
         if !toml.contains(&format!("{crate_name} =")) {
@@ -387,8 +402,25 @@ pub fn add(crate_name: &str) -> CResult<()> {
             let _ = std::fs::write("ironc.toml", toml);
         }
     }
-    println!("`{crate_name}` ajouté : {stem}.iri écrit ({} fns/types bindés). `import {stem}` est prêt.",
-        iri.matches("extern ").count());
+    // Rapport de portée (50500) sur stderr — AVANT toute compilation d'un programme utilisateur.
+    eprint!("{}", crate::bind::summary(crate_name, &out.diagnostics, out.coverage));
+    println!(
+        "`{crate_name}` ajouté : {stem}.gen.iri ({} liés, {} sautés, {:.1} % de couverture). \
+         Rapport : {stem}.iri.report.md. `import {stem}` est prêt.",
+        out.coverage.bound,
+        out.coverage.skipped,
+        out.coverage.pct()
+    );
+    // V15 [50500] : `--strict` → échec si la couverture passe sous le seuil (utile en CI quand on **vise**
+    // zéro binding manuel). Le `.gen.iri` + le rapport sont déjà écrits : on sait quoi curer.
+    const STRICT_THRESHOLD: f64 = 90.0;
+    if strict && out.coverage.pct() < STRICT_THRESHOLD {
+        return Err(CompileError::msg(format!(
+            "--strict : couverture {:.1} % < {STRICT_THRESHOLD:.0} % ({} item(s) sauté(s)). Voir {stem}.iri.report.md.",
+            out.coverage.pct(),
+            out.coverage.skipped
+        )));
+    }
     Ok(())
 }
 

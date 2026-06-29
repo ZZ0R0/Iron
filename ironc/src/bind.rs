@@ -82,7 +82,7 @@ fn reexport_source_crates(v: &Json) -> Vec<String> {
 }
 
 /// Lance rustdoc-json sur la crate (dossier avec `Cargo.toml`) et renvoie le `.iri` généré.
-pub fn bind(crate_dir: &Path, pkg: Option<&str>) -> CResult<String> {
+pub fn bind(crate_dir: &Path, pkg: Option<&str>) -> CResult<BindOutput> {
     let manifest = std::fs::read_to_string(crate_dir.join("Cargo.toml"))
         .map_err(|e| CompileError::msg(format!("lecture Cargo.toml : {e}")))?;
     let target = match pkg {
@@ -92,7 +92,7 @@ pub fn bind(crate_dir: &Path, pkg: Option<&str>) -> CResult<String> {
     let v = run_rustdoc(crate_dir, pkg, &target.replace('-', "_"))?;
     let versions = read_lock_versions(crate_dir);
 
-    let mut iri = emit(&v, &target.replace('-', "_"), &target, &versions)?;
+    let (mut iri, mut diagnostics, mut coverage) = emit(&v, &target.replace('-', "_"), &target, &versions)?;
 
     // Mur « crate façade » (52700) : `geo` ré-exporte `geo_types::Point` dont les ctors/méthodes vivent dans
     // `geo_types` (invisibles au bind mono-crate). On documente aussi ces crates-sources et on **fusionne**
@@ -104,14 +104,23 @@ pub fn bind(crate_dir: &Path, pkg: Option<&str>) -> CResult<String> {
         match run_rustdoc(crate_dir, Some(&published), &src_mod)
             .and_then(|sub| emit(&sub, &src_mod, &published, &versions))
         {
-            Ok(sub_iri) => {
+            Ok((sub_iri, sub_diags, sub_cov)) => {
                 iri.push_str(&format!("\n# --- re-export façade depuis `{published}` (52700) ---\n"));
                 iri.push_str(&sub_iri);
+                diagnostics.extend(sub_diags);
+                coverage.seen += sub_cov.seen;
+                coverage.bound += sub_cov.bound;
+                coverage.skipped += sub_cov.skipped;
             }
-            Err(_) => continue, // crate-source non documentable → on garde le binding mono-crate
+            // crate-source non documentable → on garde le binding mono-crate, mais on le **signale** (50500).
+            Err(_) => diagnostics.push(SkipDiagnostic {
+                rust_path: src_mod.clone(),
+                item_kind: ItemKind::Type,
+                reason: SkipReason::ReexportSourceUndocumented(src_mod.clone()),
+            }),
         }
     }
-    Ok(iri)
+    Ok(BindOutput { iri, diagnostics, coverage })
 }
 
 type Json = serde_json::Value;
@@ -128,6 +137,217 @@ struct Sig {
     /// `impl Read` → `std::io::Cursor::new(arg)` ; `(index, "array")` = `&[u8; N]` → `(&arg[..]).try_into()`.
     /// La fn libre/ctor à chemin complet est alors émise comme `(|args| ORIG(wrap(args)…))`.
     wraps: Vec<(usize, &'static str)>,
+}
+
+/// [50500] Raison **nommée** d'un abandon de binding — taxonomie **FERMÉE**. Toute nouvelle cause d'abandon
+/// DOIT s'ajouter ici (contrat de complétude : **aucun item public sauté en silence**). Rendue dans le
+/// rapport de génération avec un *hint* d'action (quoi écrire à la main dans `<crate>.iri`, [50400]).
+#[derive(Debug, Clone)]
+pub enum SkipReason {
+    /// Type de param/retour/champ sans projection Iron (le plus fréquent). String = type Rust rendu.
+    UnmappedType(String),
+    /// Fonction `unsafe` — Iron n'émet jamais d'`unsafe` (I2).
+    UnsafeFn,
+    /// Nom = mot-clé Iron, non référençable comme identifiant.
+    KeywordName,
+    /// Sentinelle io/octets (`@read`/`@arr`/`@write`) en position imbriquée/retour — non représentable.
+    NestedSentinel,
+    /// Méthode/ctor associée à un primitif étendu (pas de sens hors méthode de trait).
+    PrimNonTraitMethod,
+    /// Retour emprunté hors idiome connu (ni Display ni clone) — durée de vie essentielle.
+    BorrowedReturnNonIdiom(String),
+    /// Signature dépend d'une borne de trait générique non projetée (cible C2).
+    GenericTraitMethod(String),
+    /// Item dépend d'une valeur-au-niveau-type (`Const<N>`, typenum) (cible C1/C3).
+    ConstGenericShape,
+    /// API builder/flux non réductible à une fn one-shot (cible C4).
+    StreamBuilderApi,
+    /// Alias de type dont la cible n'a pu être résolue.
+    UnexpandableAlias(String),
+    /// Item absent du rustdoc (macro, `#[doc(hidden)]`).
+    MacroOrHidden,
+    /// Façade re-export dont le crate-source n'a pu être documenté.
+    ReexportSourceUndocumented(String),
+    /// Entrée curée sans homologue auto (drift de version, [50400]).
+    OrphanCuration,
+}
+
+impl SkipReason {
+    /// Étiquette courte pour le rapport (entre crochets).
+    fn tag(&self) -> String {
+        match self {
+            SkipReason::UnmappedType(t) => format!("UnmappedType: {t}"),
+            SkipReason::UnsafeFn => "UnsafeFn".into(),
+            SkipReason::KeywordName => "KeywordName".into(),
+            SkipReason::NestedSentinel => "NestedSentinel".into(),
+            SkipReason::PrimNonTraitMethod => "PrimNonTraitMethod".into(),
+            SkipReason::BorrowedReturnNonIdiom(t) => format!("BorrowedReturnNonIdiom: {t}"),
+            SkipReason::GenericTraitMethod(t) => format!("GenericTraitMethod: {t}"),
+            SkipReason::ConstGenericShape => "ConstGenericShape".into(),
+            SkipReason::StreamBuilderApi => "StreamBuilderApi".into(),
+            SkipReason::UnexpandableAlias(a) => format!("UnexpandableAlias: {a}"),
+            SkipReason::MacroOrHidden => "MacroOrHidden".into(),
+            SkipReason::ReexportSourceUndocumented(c) => format!("ReexportSourceUndocumented: {c}"),
+            SkipReason::OrphanCuration => "OrphanCuration".into(),
+        }
+    }
+    /// Action d'orientation (I8) : quoi faire à la main pour ce skip.
+    fn hint(&self) -> &'static str {
+        match self {
+            SkipReason::UnmappedType(_) | SkipReason::BorrowedReturnNonIdiom(_) => {
+                "binde le type manquant à la main dans <crate>.iri (extern type/fn) ou via rust { }"
+            }
+            SkipReason::GenericTraitMethod(_) => "écris la méthode concrète dans <crate>.iri (extern type … { fn … })",
+            SkipReason::ConstGenericShape => "fournis un ctor/alias dimensionné dans <crate>.iri",
+            SkipReason::StreamBuilderApi => "expose le builder en méthodes chaînées dans <crate>.iri",
+            SkipReason::UnexpandableAlias(_) => "alias non résolu — binde le type cible à la main dans <crate>.iri",
+            SkipReason::NestedSentinel => "réécris la signature à la main (sentinelle io/octets non représentable)",
+            SkipReason::UnsafeFn | SkipReason::PrimNonTraitMethod | SkipReason::KeywordName => "non bindable automatiquement (sûr d'ignorer le plus souvent)",
+            SkipReason::MacroOrHidden => "item généré par macro / caché — rust { } si nécessaire",
+            SkipReason::ReexportSourceUndocumented(_) => "documente/binde le crate-source séparément",
+            SkipReason::OrphanCuration => "mets à jour <crate>.iri : cette entrée ne correspond plus à aucun item",
+        }
+    }
+}
+
+/// Nature de l'item sauté (pour le rapport).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ItemKind {
+    Fn,
+    Method,
+    Ctor,
+    Type,
+    Field,
+    Variant,
+}
+
+impl ItemKind {
+    fn label(&self) -> &'static str {
+        match self {
+            ItemKind::Fn => "fn",
+            ItemKind::Method => "method",
+            ItemKind::Ctor => "ctor",
+            ItemKind::Type => "type",
+            ItemKind::Field => "field",
+            ItemKind::Variant => "variant",
+        }
+    }
+}
+
+/// Un diagnostic d'abandon : l'item Rust, sa nature, la raison nommée. **Jamais** de drop sans diagnostic.
+#[derive(Debug, Clone)]
+pub struct SkipDiagnostic {
+    pub rust_path: String,
+    pub item_kind: ItemKind,
+    pub reason: SkipReason,
+}
+
+/// Couverture **calculée** du moteur sur la population de candidats (fns/méthodes/ctors). Invariant :
+/// `seen == bound + skipped` et `skipped == diagnostics.len()` (zéro drop silencieux).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Coverage {
+    pub seen: usize,
+    pub bound: usize,
+    pub skipped: usize,
+}
+
+impl Coverage {
+    pub fn pct(&self) -> f64 {
+        if self.seen == 0 {
+            100.0
+        } else {
+            100.0 * self.bound as f64 / self.seen as f64
+        }
+    }
+}
+
+/// Résultat complet de `bind` : le `.iri` auto-généré + les diagnostics de portée + la couverture (50400/50500).
+pub struct BindOutput {
+    pub iri: String,
+    pub diagnostics: Vec<SkipDiagnostic>,
+    pub coverage: Coverage,
+}
+
+/// Rend le **rapport de génération** Markdown (`<crate>.iri.report.md`, [50500]) : ce qui est lié, ce qui est
+/// sauté et **pourquoi**, avec couverture calculée. C'est la forme « source-map » du binding (I8).
+pub fn render_report(crate_name: &str, diags: &[SkipDiagnostic], cov: Coverage) -> String {
+    let mut s = format!(
+        "# Rapport de binding — `{crate_name}`\n\n\
+         - Items candidats vus : **{}**\n- Liés : **{}**\n- Sautés : **{}**\n- Couverture : **{:.1} %**\n",
+        cov.seen, cov.bound, cov.skipped, cov.pct()
+    );
+    if diags.is_empty() {
+        s.push_str("\n_Aucun item sauté — couverture complète sur les candidats._\n");
+        return s;
+    }
+    s.push_str("\n## Items sautés (à curer à la main dans le `.iri` si nécessaires)\n\n");
+    s.push_str("| Item Rust | Nature | Raison | Action |\n|---|---|---|---|\n");
+    for d in diags {
+        s.push_str(&format!(
+            "| `{}` | {} | {} | {} |\n",
+            d.rust_path,
+            d.item_kind.label(),
+            d.reason.tag(),
+            d.reason.hint()
+        ));
+    }
+    s
+}
+
+/// Résumé **stderr** (une ligne + la tête des sautés) — affiché par `ironc add` à la génération.
+pub fn summary(crate_name: &str, diags: &[SkipDiagnostic], cov: Coverage) -> String {
+    let mut s = format!(
+        "binding `{crate_name}` : {} candidats — {} liés, {} sautés (couverture {:.1} %)\n",
+        cov.seen, cov.bound, cov.skipped, cov.pct()
+    );
+    for d in diags.iter().take(12) {
+        s.push_str(&format!("  · {} [{}]\n", d.rust_path, d.reason.tag()));
+    }
+    if diags.len() > 12 {
+        s.push_str(&format!("  … et {} autre(s) — voir <crate>.iri.report.md\n", diags.len() - 12));
+    }
+    s
+}
+
+/// Rend (best-effort) un type rustdoc-json en chaîne lisible pour le *hint* d'un `UnmappedType`.
+fn render_ty(t: &Json) -> String {
+    if let Some(p) = t["primitive"].as_str() {
+        return p.to_string();
+    }
+    if let Some(g) = t["generic"].as_str() {
+        return g.to_string();
+    }
+    if let Some(b) = t.get("borrowed_ref") {
+        return format!("&{}", render_ty(&b["type"]));
+    }
+    if let Some(s) = t.get("slice") {
+        return format!("[{}]", render_ty(s));
+    }
+    if let Some(a) = t.get("array") {
+        return format!("[{}; N]", render_ty(&a["type"]));
+    }
+    if let Some(items) = t["tuple"].as_array() {
+        return format!("({})", items.iter().map(render_ty).collect::<Vec<_>>().join(", "));
+    }
+    if let Some(rp) = t.get("resolved_path") {
+        if let Some(p) = rp["path"].as_str() {
+            return p.rsplit("::").next().unwrap_or(p).to_string();
+        }
+    }
+    if t.get("dyn_trait").is_some() {
+        return "dyn Trait".to_string();
+    }
+    if let Some(bounds) = t.get("impl_trait") {
+        let names: Vec<&str> = bounds
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|b| b["trait_bound"]["trait"]["path"].as_str())
+            .map(|p| p.rsplit("::").next().unwrap_or(p))
+            .collect();
+        return format!("impl {}", if names.is_empty() { "Trait".to_string() } else { names.join(" + ") });
+    }
+    "?".to_string()
 }
 
 /// `id → chemin **public**` en parcourant l'arbre des modules **publics** + les re-exports `pub use`
@@ -195,7 +415,12 @@ fn build_public_paths(index: &serde_json::Map<String, Json>, root: u64, crate_na
     out.into_iter().map(|(k, v)| (k, v.join("::"))).collect()
 }
 
-fn emit(v: &Json, crate_name: &str, crate_real: &str, versions: &HashMap<String, (String, String)>) -> CResult<String> {
+fn emit(
+    v: &Json,
+    crate_name: &str,
+    crate_real: &str,
+    versions: &HashMap<String, (String, String)>,
+) -> CResult<(String, Vec<SkipDiagnostic>, Coverage)> {
     let index = v["index"]
         .as_object()
         .ok_or_else(|| CompileError::msg("rustdoc-json : `.index` absent (format inattendu)"))?;
@@ -210,7 +435,8 @@ fn emit(v: &Json, crate_name: &str, crate_real: &str, versions: &HashMap<String,
     // Chemins **publics** (re-exports inclus) des items locaux — corrige les chemins canoniques qui
     // traversent des modules privés glob-réexportés (B9).
     let public_paths = v["root"].as_u64().map(|r| build_public_paths(index, r, crate_name)).unwrap_or_default();
-    let (mut bound, mut skipped) = (0usize, 0usize);
+    let mut bound = 0usize;
+    let mut diagnostics: Vec<SkipDiagnostic> = Vec::new();
 
     // --- POO : méthodes/ctors par type (51100) ---
     let mut method_ids: HashSet<u64> = HashSet::new();
@@ -383,7 +609,11 @@ fn emit(v: &Json, crate_name: &str, crate_real: &str, versions: &HashMap<String,
                 // identifiant → sautée (ex. `Not::not`, `BitAnd` exposent `not`/`and`). Rare et remplaçable
                 // par les opérateurs.
                 if is_iron_keyword(name) {
-                    skipped += 1;
+                    diagnostics.push(SkipDiagnostic {
+                        rust_path: format!("{tyname}::{name}"),
+                        item_kind: ItemKind::Method,
+                        reason: SkipReason::KeywordName,
+                    });
                     continue;
                 }
                 // dedup par nom **après projection réussie** : un même nom exposé par plusieurs impls (ex.
@@ -394,11 +624,15 @@ fn emit(v: &Json, crate_name: &str, crate_real: &str, versions: &HashMap<String,
                     continue;
                 }
                 match project(&m["inner"]["function"], &tyname, &blanket_self) {
-                    Some(sig) => {
+                    Ok(sig) => {
                         // extension d'un primitif : on ne garde que les **méthodes de trait** (un ctor/fn
                         // associée sur un pseudo-type `__str` n'a pas de sens).
                         if is_prim && sig.recv.is_none() {
-                            skipped += 1;
+                            diagnostics.push(SkipDiagnostic {
+                                rust_path: format!("{tyname}::{name}"),
+                                item_kind: ItemKind::Ctor,
+                                reason: SkipReason::PrimNonTraitMethod,
+                            });
                             continue;
                         }
                         seen.entry(tyname.clone()).or_default().insert(name.to_string());
@@ -421,7 +655,11 @@ fn emit(v: &Json, crate_name: &str, crate_real: &str, versions: &HashMap<String,
                         }
                         bound += 1;
                     }
-                    None => skipped += 1,
+                    Err(reason) => diagnostics.push(SkipDiagnostic {
+                        rust_path: format!("{tyname}::{name}"),
+                        item_kind: ItemKind::Method,
+                        reason,
+                    }),
                 }
             }
         }
@@ -443,7 +681,7 @@ fn emit(v: &Json, crate_name: &str, crate_real: &str, versions: &HashMap<String,
             _ => continue,
         };
         match project(&item["inner"]["function"], "", &Generics::new()) {
-            Some(sig) if sig.recv.is_none() => {
+            Ok(sig) if sig.recv.is_none() => {
                 if !seen_free.insert(name.to_string()) {
                     continue; // dedup par nom (une fn libre homonyme dans deux modules → garder la 1ʳᵉ)
                 }
@@ -464,7 +702,17 @@ fn emit(v: &Json, crate_name: &str, crate_real: &str, versions: &HashMap<String,
                 free.push(render(name, &sig, Some(&fpath)));
                 bound += 1;
             }
-            _ => skipped += 1,
+            // fn libre projetée **avec** receveur (forme inattendue : self hors impl) → non exposable.
+            Ok(_) => diagnostics.push(SkipDiagnostic {
+                rust_path: name.to_string(),
+                item_kind: ItemKind::Fn,
+                reason: SkipReason::MacroOrHidden,
+            }),
+            Err(reason) => diagnostics.push(SkipDiagnostic {
+                rust_path: name.to_string(),
+                item_kind: ItemKind::Fn,
+                reason,
+            }),
         }
     }
 
@@ -658,8 +906,12 @@ fn emit(v: &Json, crate_name: &str, crate_real: &str, versions: &HashMap<String,
             iri.push_str(&format!("extern trait {name} = \"{path}\"\n"));
         }
     }
-    iri.push_str(&format!("\n# {bound} item(s) bindé(s), {skipped} non mappable(s) sauté(s)\n"));
-    Ok(iri)
+    let coverage = Coverage { seen: bound + diagnostics.len(), bound, skipped: diagnostics.len() };
+    iri.push_str(&format!(
+        "\n# {} item(s) bindé(s), {} sauté(s) — couverture {:.1} % (voir <crate>.iri.report.md)\n",
+        coverage.bound, coverage.skipped, coverage.pct()
+    ));
+    Ok((iri, diagnostics, coverage))
 }
 
 /// Collapse les modules **privés** internes de `core`/`std`/`alloc` (stables, non documentés en JSON donc
@@ -752,9 +1004,9 @@ fn is_local(paths: &Json, id: u64) -> bool {
 
 /// Projette la signature d'une `function` rustdoc-json vers Iron. `owner` = type si méthode (résolution
 /// du receveur). `None` si non mappable (générique de fonction, `unsafe`, type non projetable).
-fn project(f: &Json, owner: &str, extra_gen: &Generics) -> Option<Sig> {
+fn project(f: &Json, owner: &str, extra_gen: &Generics) -> Result<Sig, SkipReason> {
     if f["header"]["is_unsafe"].as_bool() == Some(true) {
-        return None;
+        return Err(SkipReason::UnsafeFn);
     }
     // Génériques de fonction résolus par leurs **bornes d'entrée** (`P: AsRef<Path>` → `str`) ; un générique
     // sans borne mappable reste `None` → la fn est sautée si ce générique est réellement utilisé (via
@@ -790,7 +1042,7 @@ fn project(f: &Json, owner: &str, extra_gen: &Generics) -> Option<Sig> {
             }
         }
     }
-    let inputs = f["sig"]["inputs"].as_array()?;
+    let inputs = f["sig"]["inputs"].as_array().ok_or(SkipReason::MacroOrHidden)?;
     let mut recv = None;
     let mut params = Vec::new();
     let mut idioms = Vec::new();
@@ -832,7 +1084,9 @@ fn project(f: &Json, owner: &str, extra_gen: &Generics) -> Option<Sig> {
                 params.push(format!("{pn}: str"));
             }
             // sentinelle **imbriquée** (`list[@read]`…) : non représentable → on saute la fn (honnête).
-            Some(t) if t.contains("@read") || t.contains("@arr") || t.contains("@write") => return None,
+            Some(t) if t.contains("@read") || t.contains("@arr") || t.contains("@write") => {
+                return Err(SkipReason::NestedSentinel)
+            }
             Some(t) => {
                 // param **par valeur** (pas d'emprunt Rust) d'un *handle* (type externe/struct, PascalCase) →
                 // marqué `own` pour que le lowering **ne mette pas** de `&` (ex. `create(spec: WavSpec)`).
@@ -840,7 +1094,7 @@ fn project(f: &Json, owner: &str, extra_gen: &Generics) -> Option<Sig> {
                     && t.chars().next().is_some_and(|c| c.is_ascii_uppercase());
                 params.push(if owned { format!("{pn}: own {t}") } else { format!("{pn}: {t}") });
             }
-            None => return None,
+            None => return Err(SkipReason::UnmappedType(render_ty(ty))),
         }
     }
     // retour + idiomes builder/getter (51300).
@@ -858,24 +1112,24 @@ fn project(f: &Json, owner: &str, extra_gen: &Generics) -> Option<Sig> {
                 idioms.push("clone");
                 t
             }
-            None => return None,
+            None => return Err(SkipReason::BorrowedReturnNonIdiom(render_ty(inner))),
         }
     } else {
-        map_type(out, &gen)?
+        map_type(out, &gen).ok_or_else(|| SkipReason::UnmappedType(render_ty(out)))?
     };
     // `@read`/`@arr` sont des sentinelles de **param** ; en position de retour elles n'ont pas de sens →
     // saute la fn plutôt que d'émettre un `.iri` illisible.
     if ret.contains("@read") || ret.contains("@arr") || ret.contains("@write") {
-        return None;
+        return Err(SkipReason::NestedSentinel);
     }
     // V13 [30200] niveau 1 : retour **formateur** emprunté (`DelayedFormat<…>` de chrono `.format()`) — type
     // `Display`-borné, non-clonable, lié à l'entrée. Idiome `display` → `.to_string()` au lowering, type `str`.
     // Heuristique bornée par le nom (`…Format…`, cadrage §2) à défaut d'introspecter les impls `Display`.
     if ret.contains("Format") && ret.chars().next().is_some_and(|c| c.is_ascii_uppercase()) {
         idioms.push("display");
-        return Some(Sig { recv, params, ret: "str".to_string(), idioms, wraps });
+        return Ok(Sig { recv, params, ret: "str".to_string(), idioms, wraps });
     }
-    Some(Sig { recv, params, ret, idioms, wraps })
+    Ok(Sig { recv, params, ret, idioms, wraps })
 }
 
 fn recv_kind(ty: &Json) -> &'static str {
