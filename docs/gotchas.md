@@ -5,22 +5,20 @@ et **surtout** si tu es un agent qui reprend le projet : ceci t'évite de re-dé
 
 ---
 
-## 1. `?` exige une fonction qui rend `Result`/`Option` — et `main` ne se promeut PAS
+## 1. `?` — `main` (et toute fn non annotée) est **auto-promu** `Result` *(V18 — levé)*
 
 ```python
 def main():
-    v = parse("42")?          # ❌ ERREUR : `?` dans une fn qui ne rend pas Result
+    v = parse("42")?          # ✅ V18 : `main` devient `-> Result<(), IronError>`, chute = `Ok(())`
+    print(v)
 ```
-`main` n'est **pas** auto-promu en `Result`. **Pattern correct** : isoler la logique faillible dans un helper,
-l'appeler depuis `main` via `try/except` :
+Une fn **sans annotation** qui utilise `?` (hors `try/except`) est promue `Result` par le flux (I11) — `main`
+compris. Le `?` propage proprement (plus de E0277 rustc brut). Le pattern helper+`try/except` reste valide
+si tu veux **gérer** l'erreur localement plutôt que la propager :
 ```python
-def run() -> Result[i64]:
-    v = parse("42")?           # ✅ OK ici
-    return v
-
 def main():
     try:
-        print(run()?)
+        print(parse("42")?)
     except:
         print("erreur")
 ```
@@ -114,3 +112,39 @@ pour savoir ce qui manque avant de t'arracher les cheveux. Voir [interop.md](int
 
 Si l'auto ne suffit pas, écris un `<crate>.iri` (sans `.gen`) à la main : il **écrase** l'auto par entrée, et
 `ironc add` (qui ne réécrit que `<crate>.gen.iri`) **ne le touche jamais**. Voir [curation.md](curation.md).
+
+## 12. Numérique : Python-fidèle *(V18)*
+
+- `2 + 3.5` → **promotion** `i64→f64` automatique (résultat `f64`) sur `+ - * /`. (`**`/`//`/`%` mixtes
+  restent un conflit explicite → annote `2.0`.)
+- `int(x)` / `float(x)` : depuis un **numérique** → cast (`as i64` troncature / `as f64`) ; depuis une
+  **chaîne** → parse. `int(3.9)` → `3`.
+- `//` et `%` suivent la convention **plancher** Python (signe du diviseur) et l'identité `(a//b)*b+(a%b)==a`
+  tient sur les négatifs : `-7 // 2 == -4`, `-7 % 2 == 1`.
+- Index de liste **négatif** : `xs[-1]` = dernier élément (comme les slices et `str`).
+
+## 13. Affichage : Display **Rust**, pas `repr` Python *(divergences assumées)*
+
+Iron imprime via le `Display`/`Debug` Rust, pas le `repr` Python — quelques écarts visibles :
+- `print(True)` → `true` (pas `True`) ; un **bool** s'affiche en minuscules.
+- `print(1.0)` → `1` (Rust `Display` masque le `.0` d'un flottant entier ; `print(1.5)` → `1.5`).
+- collections/tuples via `{:?}` → les chaînes y sont **entre guillemets** : `["a", "b"]`.
+- `int("abc")` → `0` (pas d'exception ; `unwrap_or(0)`).
+
+Ce sont des choix « projection Rust » (I6), **pas** des bugs. Pour un rendu exact, formate toi-même (f-string).
+
+## 14. Closures : 1re classe, avec une limite de capture *(V18)*
+
+Marchent : lambda locale, **ordre supérieur** (`apply(f, x)`), closure **retournée** (`adder(10)(5)`),
+**IIFE** `(lambda x: x*2)(21)`, **champ-closure** (`obj.f(6)` où `f: fn(i64)->i64` → stocké en `Box<dyn Fn>`),
+lambdas non-capturantes dans une liste. **Limite (0.1%)** : une **liste de closures capturantes** hétérogènes
+(`[lambda x: x+base, …]`) exige `Vec<Box<dyn Fn>>` non émis → **contourne** par un champ de struct, ou des
+lambdas non-capturantes.
+
+## 15. `thread.scope` : lecture partagée sans clone *(V18)*
+
+`thread.scope(lambda s: …)` ouvre un scope ; `s.spawn(…)` à l'intérieur crée des workers qui **rejoignent**
+en fin de scope. Les données partagées en **lecture** (`data`, `scene`…) sont **empruntées** (`&data`) — **pas
+clonées par worker**. État **mutable** partagé → `ref_sync`/`lock_add`/`lock_get` (Arc&lt;Mutex&gt;). Le corps du
+scope est une **mono-expression** (typiquement une compréhension de spawns) ; une orchestration plus riche →
+`rust { … }`.

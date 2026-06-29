@@ -67,16 +67,15 @@ Statuts : ✅ corrigé · 🔧 à corriger · ❓ décision de fond · 🔶 prop
 
 ---
 
-## Synthèse pour l'exécution
-| Bucket | Défauts | Vague cible | Nature |
+## Synthèse — ÉTAT FINAL
+| Bucket | Défauts | Vague | État |
 |:--|:--:|:--:|:--|
-| A closures | A1·A2·A3 | **2** [21000] | capacité (IIFE, field-call, `Box<dyn Fn>`) |
-| B numérique | B1·B2·B3·B4 | **3** [21800] | cast/promotion/mod — **petits, localisés** |
-| C codegen | C1·C2·C3 | **3** [21800] | index nég · clone dunder · impl générique |
-| D parseur | D1 | **3** [21800] | destructuring en compréhension |
-| E ergonomie | E1 | **3** [21800] | `?`-main |
-| F fidélité Python | F1·F2·F3 | **3** (❓) | décision de fond |
+| A closures | A1·A2·A3 | 2 [21000] | ✅ (A3 écart liste-capturante 0.1% noté) |
+| B numérique | B1·B2·B3·B4 | 3 [21800] | ✅ cast/promotion/mod/index |
+| C codegen | C1·C2·C3 | 3 [21800] | ✅ index nég · **clone dunder (last-use)** · impl générique |
+| D parseur | D1 | 3 [21800] | ✅ destructuring en compréhension |
+| E ergonomie | E1 | 3 [21800] | ✅ `?`-main auto-promu Result |
+| F fidélité Python | F1·F2·F3 | — | ❓ **décision de fond** (documenté gotchas #13, défaut « projection Rust ») |
 
-**Lecture** : la vague 2 reste les closures (3 trous nets). La vague 3 absorbe un **backlog de correction réel**
-(B/C/D/E = 9 défauts, la plupart de petits fixes project-global localisés) que l'audit a **mesuré** — c'est
-exactement ce que la suite [70400] devait révéler. F = à trancher avec l'utilisateur (fidélité Python).
+**12/12 défauts durs corrigés**, project-global, sans régresser V17 (raytracer 7 clones, ~0,09 s). Seul **F**
+reste ouvert = un choix de fond (projection Rust vs fidélité Python sur l'affichage/parse). Détail : [`ETAT-IMPLEMENTATION.md`](ETAT-IMPLEMENTATION.md).

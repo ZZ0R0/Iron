@@ -10,6 +10,20 @@ Le **langage** (V1–V11) est complet et stable pour son sous-ensemble : front-e
 (quasi zéro annotation), sémantique par valeur + ownership, lowering `TokenStream`, source-maps, CLI. Aucune
 capacité de langage non prévue n'a émergé sur le corpus.
 
+**Moteur d'ownership (V16–V17)** : escape analysis **interprocédurale** (modes de params au point fixe) +
+clone-fallback **last-use** (move ssi dernière utilisation, valeur OU emprunt — sain, sans sur-clonage). Sur le
+raytracer : **~5×** vs la base naïve (méthodes prenant `&Vec3`), 7 clones résiduels (légitimes), ~0,09 s.
+
+**Capacités & ergonomie (V18)**, gardées par un **runner corpus intégré à `cargo test`** (70 cas, 4 tiers
+`.out`/`.compile`/`.err`/`.sha` — toute régression échoue) :
+- **Closures de 1re classe** : ordre supérieur, closure retournée/chaînée, IIFE, **champ-closure** (`Box<dyn Fn>`).
+- **Concurrence** : `async`/`await` (tokio injecté si async présent) ; **`thread.scope`** — workers en
+  **lecture partagée `&data` sans clone** (+ `shared_sync` pour la mutation).
+- **Numérique Python-fidèle** : promotion `i64→f64`, `int/float` casts, `//`/`%` plancher, index négatif.
+- **Génériques** : `struct[T]` + méthodes (`impl<T> Name<T>`). **`?`-dans-`main`** auto-promu `Result`.
+- **Métrique de vérité** : **N/N** programmes du corpus compilent **et** produisent la sortie attendue
+  (correction sémantique `Iron → Rust`, mesurée par la garde — plus un spot-check manuel).
+
 ## Le binder : couverture mesurée 16–92 %
 
 Batterie `ironc add` sur les **73 crates uniques** du corpus → **72 bindent** (1 échec outillage : `bincode`,

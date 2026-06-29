@@ -98,11 +98,46 @@ uniq   = {x for x in xs}                       # set-comprehension
 msg    = f"{name} a {len(xs)} éléments"        # f-string
 ```
 
-## Lambdas
+## Lambdas & closures de 1re classe
 ```python
-add = lambda a, b: a + b       # corps mono-expression ; types inférés par rustc
+add = lambda a, b: a + b           # corps mono-expression ; types inférés par rustc
 xs.sort_by_key(lambda e: e.score)
+
+def apply(f, x):                   # ordre supérieur : `f` générique borné `Fn` (coût nul, monomorphisé)
+    return f(x)
+print(apply(lambda n: n * 2, 21))  # → 42
+
+def adder(n):                      # closure RETOURNÉE (capture `n` par valeur)
+    return lambda x: x + n
+print(adder(10)(5))                # → 15  (appel chaîné)
+
+print((lambda x: x * x)(7))        # IIFE → 49
+
+struct Op:                         # closure STOCKÉE en champ → `Box<dyn Fn>`
+    f: fn(i64) -> i64
+op = Op(f=lambda x: x * x)
+print(op.f(6))                     # → 36  (appel du champ-closure, pas un dispatch de méthode)
 ```
+Une closure passée à une fn utilisateur est **monomorphisée** (`impl Fn`, zéro coût) ; stockée en champ/liste
+elle devient `Box<dyn Fn>`. Limite : une **liste** de closures **capturantes** hétérogènes n'est pas émise
+(→ champ de struct, ou lambdas non-capturantes). Voir [gotchas #14](gotchas.md).
+
+## Concurrence : async/await & thread.scope
+```python
+async def fetch(x: i64) -> i64:
+    return x * 2
+async def main():
+    print(await fetch(21))         # → 42  (runtime tokio injecté SEULEMENT si `async` présent, I5)
+```
+```python
+def main():
+    data = [10, 20, 30, 40]        # partagé en LECTURE : emprunté `&data`, PAS cloné par worker
+    total = ref_sync(0)            # état mutable partagé thread-safe (Arc<Mutex>)
+    thread.scope(lambda s: [s.spawn(lambda: lock_add(total, data[i])) for i in range(4)])
+    print(lock_get(total))         # → 100  (les workers rejoignent en fin de scope)
+```
+`thread.scope` ouvre un scope dont les workers `s.spawn(…)` **empruntent** les données partagées (bénéfice
+ownership : lecture `&scene` sans clone). Corps = mono-expression ; orchestration riche → `rust { … }`.
 
 ## match (V11)
 ```python
