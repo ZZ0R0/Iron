@@ -18,12 +18,15 @@ pub(crate) fn effective_ret(declared: &Type, body: &[Stmt]) -> Type {
     if matches!(declared, Type::Option(_) | Type::Result(_) | Type::ResultE(..)) {
         return declared.clone();
     }
-    // Sans type concret annoté, pas d'inférence (T inconnu) — `rustc` filet.
-    if matches!(declared, Type::Unit) {
-        return declared.clone();
-    }
+    // Une fn utilisant `?` propage une erreur → `Result<declared>`, **même si `declared = Unit`** (cas
+    // `main` avec `?` → `Result<()>`). Doit primer sur le court-circuit `Unit` ci-dessous, sinon le `?`
+    // fuit un E0277 rustc brut au lieu d'une promotion propre.
     if uses_question(body) {
         return Type::Result(Box::new(declared.clone()));
+    }
+    // Sans type concret annoté, pas d'inférence Option (T inconnu) — `rustc` filet.
+    if matches!(declared, Type::Unit) {
+        return declared.clone();
     }
     if !definitely_returns(body) && has_value_return(body) {
         return Type::Option(Box::new(declared.clone()));

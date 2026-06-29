@@ -1252,7 +1252,13 @@ impl Parser {
     /// Queue de compréhension (10600) : `for <pat> in <iter> [if <cond>]` après le corps `body`.
     fn parse_comp(&mut self, start: usize, body: Expr, kind: CompKind) -> CResult<Expr> {
         self.expect(&TokenKind::For, "`for`")?;
-        let var = self.parse_pattern()?;
+        // Cibles séparées par virgule (destructuring `for k, v in items`, surface Python) → motif **tuple**,
+        // symétrique de `for_stmt`. Sans cette collecte, `{k: v for k, v in items}` échouait sur la virgule.
+        let mut pats = vec![self.parse_pattern()?];
+        while self.eat(&TokenKind::Comma) {
+            pats.push(self.parse_pattern()?);
+        }
+        let var = if pats.len() == 1 { pats.pop().unwrap() } else { Pattern::Tuple(pats) };
         self.expect(&TokenKind::In, "`in`")?;
         let iter = self.or_expr()?; // or_expr : le `if` filtre n'est pas un ternaire
         let cond = if self.eat(&TokenKind::If) { Some(Box::new(self.or_expr()?)) } else { None };

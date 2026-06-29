@@ -36,15 +36,28 @@ pub fn lower(
         })
         .collect();
     // (struct, champ) dont le type est `fn(...)` : pour distinguer au lowering `obj.f(x)` (appel d'un
-    // **champ-closure**) d'un dispatch de méthode.
+    // **champ-closure**) d'un dispatch de méthode. + génériques par type nominal (struct/enum) : pour
+    // reconstruire `impl<T> Name<T>` (l'`ItemKind::Impl` ne porte PAS les génériques du type).
     let mut closure_fields: HashSet<(String, String)> = HashSet::new();
+    let mut struct_generics: HashMap<String, Generics> = HashMap::new();
     for it in &ast.items {
-        if let ItemKind::Struct { name, fields, .. } = &it.kind {
-            for (fname, fty) in fields {
-                if matches!(fty, Type::Fn(..)) {
-                    closure_fields.insert((name.clone(), fname.clone()));
+        match &it.kind {
+            ItemKind::Struct { name, fields, generics } => {
+                for (fname, fty) in fields {
+                    if matches!(fty, Type::Fn(..)) {
+                        closure_fields.insert((name.clone(), fname.clone()));
+                    }
+                }
+                if !generics.is_empty() {
+                    struct_generics.insert(name.clone(), generics.clone());
                 }
             }
+            ItemKind::Enum { name, generics, .. } => {
+                if !generics.is_empty() {
+                    struct_generics.insert(name.clone(), generics.clone());
+                }
+            }
+            _ => {}
         }
     }
     let user_fns: HashSet<String> = ast
@@ -87,6 +100,7 @@ pub fn lower(
         enums,
         structs,
         closure_fields,
+        struct_generics,
         user_fns,
         fn_params,
         fn_defaults,
@@ -162,6 +176,8 @@ struct Cx<'a> {
     structs: HashSet<String>,
     /// (struct, champ) de type `fn(...)` : `obj.f(x)` = appel du champ-closure, pas un dispatch de méthode.
     closure_fields: HashSet<(String, String)>,
+    /// Génériques par type nominal : reconstruit `impl<T> Name<T>` (l'`ItemKind::Impl` ne les porte pas).
+    struct_generics: HashMap<String, Generics>,
     /// Fns définies par l'utilisateur — priment sur les built-ins homonymes (ex. un `fn add` perso).
     user_fns: HashSet<String>,
     /// Noms des params par fn (surface Python) : pour réordonner les arguments nommés `f(x=1, y=2)`.
@@ -430,7 +446,16 @@ impl Cx<'_> {
                 // I11 par flux : type effectif (`tm[fn.id]`) vs déclaré (AST). S'ils divergent vers
                 // Option/Result, on emballe les retours et (Option) on ajoute la chute `None`.
                 let declared = ret;
-                let effective = self.types.get(&it.id).cloned().unwrap_or_else(|| declared.clone());
+                let mut effective = self.types.get(&it.id).cloned().unwrap_or_else(|| declared.clone());
+                // E1 : robustesse de la promotion flux (I11). Si l'effectif lu est resté `Unit` (la passe
+                // d'inférence locale a pu le clobber), on re-dérive : une fn non annotée utilisant `?` →
+                // `Result` (cas `main` avec `?` — sinon `?` fuit un E0277 brut). `effective_ret` = source de vérité.
+                if matches!(effective, Type::Unit) {
+                    let re = crate::infer::engine::flux::effective_ret(declared, body);
+                    if matches!(re, Type::Result(_) | Type::ResultE(..) | Type::Option(_)) {
+                        effective = re;
+                    }
+                }
                 // I11 complet (V9, 40400) : on emballe dès que la fn est flux-Option/Result (annotée OU
                 // inférée) ; le wrap au `return` est **conscient du type** (n'emballe pas un expr déjà
                 // Option/Result), ce qui supprime le `ok(...)`/`some(...)` manuel.
@@ -471,6 +496,11 @@ impl Cx<'_> {
                     && !crate::infer::engine::flux::definitely_returns(body)
                 {
                     quote! { None }
+                } else if matches!(&effective, Type::Result(inner) if matches!(**inner, Type::Unit))
+                    && !crate::infer::engine::flux::definitely_returns(body)
+                {
+                    // fn flux-Result à valeur `unit` qui chute (typiquement `main` avec `?`) → `Ok(())` final.
+                    quote! { Ok(()) }
                 } else {
                     quote! {}
                 };
@@ -545,7 +575,13 @@ impl Cx<'_> {
                 quote! { pub trait #tid { #(#ms)* } }
             }
             ItemKind::Impl { trait_name, type_name, methods } => {
-                let ty = format_ident!("{}", type_name);
+                // Reconstruit `impl<T> Name<T>` pour un type générique (l'`ItemKind::Impl` ne porte pas les
+                // génériques) : `impl_params` = `<T: Clone>` (clause impl) ; `#ty` = `Name<T>` (args nus).
+                let nid = format_ident!("{}", type_name);
+                let gens = self.struct_generics.get(type_name).cloned().unwrap_or_default();
+                let impl_params = lower_generics(&gens);
+                let type_args = generics_args(&gens);
+                let ty = quote! { #nid #type_args };
                 if trait_name.is_empty() {
                     // impl inhérent : les dunders bénis (V11, DC-4) sont extraits en `impl std::ops::*`
                     // (+ un éventuel helper inhérent) ; le reste forme l'impl inhérent normal.
@@ -563,7 +599,7 @@ impl Cx<'_> {
                         }
                     }
                     let inherent =
-                        if normal.is_empty() { quote! {} } else { quote! { impl #ty { #(#normal)* } } };
+                        if normal.is_empty() { quote! {} } else { quote! { impl #impl_params #ty { #(#normal)* } } };
                     quote! { #inherent #(#dunders)* }
                 } else {
                     let ms: Vec<TokenStream> = methods.iter().map(|m| self.lower_method(type_name, m, false)).collect();
@@ -575,7 +611,7 @@ impl Cx<'_> {
                             quote! { #id }
                         }
                     };
-                    quote! { impl #tid for #ty { #(#ms)* } }
+                    quote! { impl #impl_params #tid for #ty { #(#ms)* } }
                 }
             }
             // Constante globale immuable (V11, DD-bonus) → `const NAME: T = <littéral>;`. Les chaînes →
@@ -2564,6 +2600,22 @@ fn str_lit_char(e: &Expr) -> Option<char> {
 
 fn is_blessed_dunder(name: &str) -> bool {
     matches!(name, "__add__" | "__sub__" | "__mul__" | "__div__" | "__eq__" | "__lt__" | "__str__")
+}
+
+/// Arguments de type **sans bornes** (`<T, U>`) — pour référencer le type `Name<T>` (ex. `impl<…> Name<T>`,
+/// distinct de `lower_generics` qui émet la clause `<T: Clone>` avec bornes). Vide si pas de générique.
+fn generics_args(gens: &Generics) -> TokenStream {
+    if gens.is_empty() {
+        return quote! {};
+    }
+    let names: Vec<TokenStream> = gens
+        .iter()
+        .map(|(n, _)| {
+            let id = format_ident!("{}", n);
+            quote! { #id }
+        })
+        .collect();
+    quote! { < #(#names),* > }
 }
 
 fn lower_generics(gens: &Generics) -> TokenStream {
