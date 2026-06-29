@@ -436,7 +436,7 @@ impl Cx<'_> {
                     .map(|(n, t, ascribed)| {
                         let id = format_ident!("{}", n);
                         if *ascribed || is_annotatable(t) {
-                            let ty = lower_type(t);
+                            let ty = lower_type(&self.resolve_ascription_ty(t));
                             quote! { let mut #id: #ty; }
                         } else {
                             quote! { let mut #id; }
@@ -646,7 +646,7 @@ impl Cx<'_> {
             .map(|(n, t, ascribed)| {
                 let id = format_ident!("{}", n);
                 if *ascribed || is_annotatable(t) {
-                    let ty = lower_type(t);
+                    let ty = lower_type(&self.resolve_ascription_ty(t));
                     quote! { let mut #id: #ty; }
                 } else {
                     quote! { let mut #id; }
@@ -2045,6 +2045,22 @@ impl Cx<'_> {
             .collect();
         // `&*recv` : `String`/littéral → `str` → `&str` (le trait est impl'é pour `&str`, pas `&String`).
         Some(quote! { #path(&*#recv #(, #a)*) })
+    }
+
+    /// [50600 C3] Résout un type d'**ascription** `App(nom)` vers le type externe correspondant
+    /// (`ArrayVec` → `arrayvec::ArrayVec`) via les bindings, pour émettre le **chemin de crate** (sinon
+    /// `ArrayVec<i64, 8>` nu est hors portée). Récursif sur les arguments ; non-`App` inchangé.
+    fn resolve_ascription_ty(&self, t: &Type) -> Type {
+        match t {
+            Type::App(name, args) => {
+                let args2: Vec<Type> = args.iter().map(|a| self.resolve_ascription_ty(a)).collect();
+                match self.bindings.etypes.get(name) {
+                    Some(et) => Type::ExternApp(et.rust_path.clone(), args2),
+                    None => Type::App(name.clone(), args2),
+                }
+            }
+            _ => t.clone(),
+        }
     }
 
     /// Méthode externe (V8, 40200) : `obj.m(args)` → `RustPath::m(<recv> obj, args)` + glue d'idiomes.
